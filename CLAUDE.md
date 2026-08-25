@@ -165,7 +165,7 @@ A monitoring screen showing a live feed of `AUDITED_DEVIATION`, `REDUCED_ACCESS`
 - Ledger: Python's built-in `hashlib`
 - Behavioral matching reference: adapt `abhijeet3922/User-Verification-based-on-Keystroke-Dynamics` (GitHub) rather than building matching math from scratch
 - Fingerprint matching: SourceAFIS
-- Hosting: local-only demo (runs on the user's machine for the live hackathon demo) — no cloud deployment needed
+- Hosting: originally scoped as local-only demo; superseded 2026-08-24 — user opted for free cloud hosting so teammates can reach it remotely, not just on local Wi-Fi. Backend on Render (Postgres, not SQLite — Render's free disk is ephemeral), frontend on Vercel. `backend/.env.example` documents the env vars Render needs (`SECRET_KEY`, `DEBUG=False`, `DATABASE_URL` auto-set by Render's Postgres link). Frontend reads the backend URL from `VITE_API_BASE_URL` (Vercel env var) — see `frontend/src/api/client.js`.
 - Dev environment: Windows. Use the `py` launcher for Python, not `python` (Windows Store alias intercepts the bare command). Node.js LTS + npm installed via winget on 2026-08-24.
 
 ## Timeline & scope commitment

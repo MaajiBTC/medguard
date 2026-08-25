@@ -3,7 +3,11 @@
 // Token lives in sessionStorage (not localStorage) to limit the XSS persistence
 // window, per the plan's frontend capture wiring notes.
 
-const API_BASE_URL = 'http://localhost:8000/api';
+// On Vercel, VITE_API_BASE_URL points at the Render backend (frontend/backend
+// live on different domains there, so hostname-derivation doesn't apply).
+// Locally it's unset, so we derive from the page's own hostname — works both
+// from localhost and from a phone hitting this machine's LAN IP on Wi-Fi.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `http://${window.location.hostname}:8000/api`;
 const TOKEN_STORAGE_KEY = 'medguard_token';
 
 function getToken() {

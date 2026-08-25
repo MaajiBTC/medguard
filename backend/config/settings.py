@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 
+import dj_database_url
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -30,9 +31,14 @@ load_dotenv(BASE_DIR / '.env')
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-local-dev-only-set-env-file')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Defaults to False (safe for the public Render deploy); set DEBUG=True in
+# backend/.env for local dev.
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = []
+# Wide open on purpose: this never carries real patient data (see CLAUDE.md
+# "Enrollment data"), and the deploy target (Render subdomain) isn't known
+# ahead of time.
+ALLOWED_HOSTS = ['*']
 
 # Static per-workstation network segment (see .env / CLAUDE.md Contextual module).
 WORKSTATION_NETWORK_SEGMENT = os.environ.get('WORKSTATION_NETWORK_SEGMENT', 'unknown')
@@ -59,6 +65,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -68,9 +75,14 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# CORS: only the Vite dev server may call this API in local dev.
+# CORS: the Vite dev server, any LAN address (teammate phones on the same
+# Wi-Fi), and the Vercel-hosted frontend (prod + preview deploys).
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
+]
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r'^http://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:5173$',
+    r'^https://.*\.vercel\.app$',
 ]
 
 REST_FRAMEWORK = {
@@ -105,11 +117,13 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+# Uses Postgres when DATABASE_URL is set (Render), falls back to local SQLite
+# (dev machine) otherwise.
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+        conn_max_age=600,
+    )
 }
 
 
@@ -148,3 +162,15 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+# Manifest storage needs `collectstatic` to have run (Render build step does
+# this); locally in dev, Django's own default serves static files fine.
+STORAGES = {
+    'staticfiles': {
+        'BACKEND': (
+            'django.contrib.staticfiles.storage.StaticFilesStorage'
+            if DEBUG
+            else 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+        ),
+    },
+}
