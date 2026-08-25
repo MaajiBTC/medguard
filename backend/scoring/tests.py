@@ -252,6 +252,10 @@ class NurseRuleTests(ScoringTestBase):
 
 
 class BaselineReinforcementAndAPITests(ScoringTestBase):
+    # /api/scoring/decide/ now also writes to the Security Ledger (see ledger app),
+    # which lives on its own database.
+    databases = {"default", "ledger"}
+
     def _login(self, username, password, staff_id, role, ward="", on_duty=True):
         user = User.objects.create_user(username=username, password=password)
         staff = Staff.objects.create(

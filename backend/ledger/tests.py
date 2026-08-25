@@ -1,0 +1,150 @@
+"""Security Ledger tests. Uses Django's isolated multi-db test setup (both `default`
+and `ledger` get their own temporary test databases) -- no real enrollment data, per
+CLAUDE.md.
+"""
+
+from django.contrib.auth.models import User
+from django.test import TestCase
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+from access.models import AccessSession
+from captures.models import BehavioralCapture, ContextualCapture
+from patients.models import Patient
+from staff.models import Staff
+
+from .models import LedgerEntry, LedgerImmutableError
+from .services import GENESIS_HASH, record_event
+from .verification import verify_chain
+
+
+class RecordEventChainTests(TestCase):
+    databases = {"default", "ledger"}
+
+    def _make_staff(self):
+        user = User.objects.create_user(username="ledgerStaff", password="pw-ledger-1")
+        return Staff.objects.create(
+            user=user, staff_id="STF-L1", full_name="Ledger Tester", role=Staff.Role.DOCTOR,
+            ward="Ward A", on_duty=True,
+        )
+
+    def test_first_entry_chains_from_genesis(self):
+        staff = self._make_staff()
+        entry = record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=staff)
+        self.assertEqual(entry.prev_hash, GENESIS_HASH)
+        self.assertEqual(entry.sequence, 1)
+
+    def test_successive_entries_link_by_hash(self):
+        staff = self._make_staff()
+        first = record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=staff)
+        second = record_event(event_type=LedgerEntry.EventType.AUDITED_DEVIATION, staff=staff)
+        third = record_event(event_type=LedgerEntry.EventType.ACCESS_DENIED, staff=staff)
+
+        self.assertEqual(second.prev_hash, first.entry_hash)
+        self.assertEqual(third.prev_hash, second.entry_hash)
+        ok, bad_sequence = verify_chain()
+        self.assertTrue(ok)
+        self.assertIsNone(bad_sequence)
+
+    def test_tampering_via_raw_update_is_detected(self):
+        staff = self._make_staff()
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=staff)
+        entry = record_event(event_type=LedgerEntry.EventType.AUDITED_DEVIATION, staff=staff)
+        record_event(event_type=LedgerEntry.EventType.ACCESS_DENIED, staff=staff)
+
+        # .update() bypasses LedgerEntry.save(), simulating direct DB tampering.
+        LedgerEntry.objects.using("ledger").filter(pk=entry.pk).update(
+            details={"tampered": True}
+        )
+
+        ok, bad_sequence = verify_chain()
+        self.assertFalse(ok)
+        self.assertEqual(bad_sequence, entry.sequence)
+
+
+class ImmutabilityTests(TestCase):
+    databases = {"default", "ledger"}
+
+    def test_saving_an_existing_entry_raises(self):
+        user = User.objects.create_user(username="ledgerStaff2", password="pw-ledger-2")
+        staff = Staff.objects.create(
+            user=user, staff_id="STF-L2", full_name="Ledger Tester 2", role=Staff.Role.DOCTOR,
+            ward="Ward A", on_duty=True,
+        )
+        entry = record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=staff)
+
+        entry.details = {"changed": True}
+        with self.assertRaises(LedgerImmutableError):
+            entry.save()
+
+    def test_deleting_an_entry_raises(self):
+        user = User.objects.create_user(username="ledgerStaff3", password="pw-ledger-3")
+        staff = Staff.objects.create(
+            user=user, staff_id="STF-L3", full_name="Ledger Tester 3", role=Staff.Role.DOCTOR,
+            ward="Ward A", on_duty=True,
+        )
+        entry = record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=staff)
+
+        with self.assertRaises(LedgerImmutableError):
+            entry.delete()
+
+
+class DecideViewLedgerIntegrationTests(APITestCase):
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role, ward="", on_duty=True):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(
+            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward, on_duty=on_duty
+        )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_decide_writes_a_matching_ledger_entry(self):
+        staff, token = self._login("ledgerApi1", "pw-ledger-api-1", "STF-L900", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-L900", full_name="LP1", ward="Ward A")
+
+        target_resp = self.client.post(
+            "/api/captures/contextual/target-patient/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        self.assertEqual(target_resp.status_code, status.HTTP_200_OK)
+
+        decide_resp = self.client.post("/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token))
+        self.assertEqual(decide_resp.status_code, status.HTTP_201_CREATED)
+
+        entries = LedgerEntry.objects.using("ledger").filter(staff_id="STF-L900")
+        self.assertEqual(entries.count(), 1)
+        entry = entries.first()
+        self.assertEqual(entry.event_type, decide_resp.data["decision_type"])
+        self.assertEqual(entry.patient_hospital_number, "HN-L900")
+        self.assertEqual(entry.details["score"], decide_resp.data["score"])
+
+        ok, bad_sequence = verify_chain()
+        self.assertTrue(ok)
+        self.assertIsNone(bad_sequence)
+
+    def test_denied_decision_is_also_logged(self):
+        """Nurse rule case 3 (neither assigned nor same ward) -- a hard denial must
+        still write to the ledger (CLAUDE.md: every decision, not just grants)."""
+        staff, token = self._login("ledgerApi2", "pw-ledger-api-2", "STF-L901", Staff.Role.NURSE, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-L901", full_name="LP2", ward="Ward B")
+
+        self.client.post(
+            "/api/captures/contextual/target-patient/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        decide_resp = self.client.post("/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token))
+        self.assertEqual(decide_resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(decide_resp.data["decision_type"], "ACCESS_DENIED")
+
+        entry = LedgerEntry.objects.using("ledger").get(staff_id="STF-L901")
+        self.assertEqual(entry.event_type, "ACCESS_DENIED")
+        self.assertEqual(entry.details["granted_categories"], [])

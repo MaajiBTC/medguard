@@ -56,12 +56,13 @@ INSTALLED_APPS = [
     # Third-party
     'rest_framework',
     'corsheaders',
-    # Local apps (dependency order: staff -> patients -> access -> captures -> scoring)
+    # Local apps (dependency order: staff -> patients -> access -> captures -> scoring -> ledger)
     'staff',
     'patients',
     'access',
     'captures',
     'scoring',
+    'ledger',
 ]
 
 MIDDLEWARE = [
@@ -120,12 +121,26 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Uses Postgres when DATABASE_URL is set (Render), falls back to local SQLite
 # (dev machine) otherwise.
+#
+# `ledger` is a second, separate database (see CLAUDE.md Security Ledger: "store
+# separately from the main application's database... so a compromised main system
+# can't edit its own trail"). It defaults to a second local SQLite file; set
+# LEDGER_DATABASE_URL to point it at a real separate database (its own Postgres
+# instance, ideally a different provider than `default`'s) once one exists — no code
+# changes needed, see ledger/db_router.py.
 DATABASES = {
     'default': dj_database_url.config(
         default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
         conn_max_age=600,
-    )
+    ),
+    'ledger': dj_database_url.config(
+        env='LEDGER_DATABASE_URL',
+        default=f"sqlite:///{BASE_DIR / 'ledger.sqlite3'}",
+        conn_max_age=600,
+    ),
 }
+
+DATABASE_ROUTERS = ['ledger.db_router.LedgerRouter']
 
 
 # Password validation

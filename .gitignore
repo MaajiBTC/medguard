@@ -8,6 +8,8 @@ env/
 *.egg-info/
 db.sqlite3
 db.sqlite3-journal
+ledger.sqlite3
+ledger.sqlite3-journal
 media/
 staticfiles/
 .env
