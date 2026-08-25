@@ -1,15 +1,24 @@
-// Small in-memory accumulator for raw behavioral events between flushes.
-// Kept deliberately dumb: no dedupe, no derived features -- this module only
-// buffers what useBehavioralCapture hands it and hands it back on drain().
+// Small in-memory accumulator for behavioral events/keystrokes between flushes.
+// Mouse/touch stay dumb raw arrays; keystrokes go through the keystroke
+// accumulator so only derived, anonymized features ever leave the browser (see
+// keystrokeFeatures.js).
+
+import { computeKeystrokeFeatures, createKeystrokeAccumulator } from './keystrokeFeatures';
 
 function createEventBuffer() {
-  let keystrokeEvents = [];
+  const keystrokeAccumulator = createKeystrokeAccumulator();
   let mouseEvents = [];
   let touchEvents = [];
 
   return {
-    pushKeystroke(event) {
-      keystrokeEvents.push(event);
+    recordKeyDown(key, t) {
+      keystrokeAccumulator.recordDown(key, t);
+    },
+    recordKeyUp(key, t) {
+      keystrokeAccumulator.recordUp(key, t);
+    },
+    recordPaste() {
+      keystrokeAccumulator.recordPaste();
     },
     pushMouse(event) {
       mouseEvents.push(event);
@@ -18,19 +27,18 @@ function createEventBuffer() {
       touchEvents.push(event);
     },
     size() {
-      return keystrokeEvents.length + mouseEvents.length + touchEvents.length;
+      return keystrokeAccumulator.count() + mouseEvents.length + touchEvents.length;
     },
     isEmpty() {
-      return keystrokeEvents.length === 0 && mouseEvents.length === 0 && touchEvents.length === 0;
+      return keystrokeAccumulator.isEmpty() && mouseEvents.length === 0 && touchEvents.length === 0;
     },
     /** Returns the buffered batch and clears the buffer. */
     drain() {
       const batch = {
-        keystroke_events: keystrokeEvents,
+        keystroke_features: computeKeystrokeFeatures(keystrokeAccumulator.drain()),
         mouse_events: mouseEvents,
         touch_events: touchEvents,
       };
-      keystrokeEvents = [];
       mouseEvents = [];
       touchEvents = [];
       return batch;

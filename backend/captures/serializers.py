@@ -3,14 +3,19 @@ from rest_framework import serializers
 from .models import BehavioralCapture, ContextualCapture
 
 
-class KeystrokeEventSerializer(serializers.Serializer):
-    """Shape: {event, code, t}. Raw dwell/flight timing is derived client- or
-    scoring-engine-side from repeated keydown/keyup pairs — this module only stores
-    the raw timestamped events, per CLAUDE.md."""
+class KeystrokeFeaturesSerializer(serializers.Serializer):
+    """Derived, anonymized keystroke-dynamics features — never raw key identity.
+    Computed client-side (see frontend/src/capture/behavioral/keystrokeFeatures.js)
+    from flight/digraph/trigraph timing indexed by keystroke position, never by
+    which character was pressed. See CLAUDE.md's Behavioral Signal Capture Module
+    section (revised 2026-08-25)."""
 
-    event = serializers.ChoiceField(choices=["keydown", "keyup"])
-    code = serializers.CharField(max_length=64)
-    t = serializers.FloatField()
+    flight_times = serializers.ListField(child=serializers.FloatField(), default=list)
+    digraph_latencies = serializers.ListField(child=serializers.FloatField(), default=list)
+    trigraph_latencies = serializers.ListField(child=serializers.FloatField(), default=list)
+    error_correction_rate = serializers.FloatField(default=0)
+    rhythm_consistency = serializers.FloatField(default=0)
+    automation_flags = serializers.ListField(child=serializers.CharField(max_length=64), default=list)
 
 
 class MouseEventSerializer(serializers.Serializer):
@@ -40,13 +45,13 @@ class BehavioralEventBatchSerializer(serializers.Serializer):
     families may be omitted (defaults to empty) — a touch device won't send mouse
     events and vice versa."""
 
-    keystroke_events = KeystrokeEventSerializer(many=True, required=False, default=list)
+    keystroke_features = KeystrokeFeaturesSerializer(required=False)
     mouse_events = MouseEventSerializer(many=True, required=False, default=list)
     touch_events = TouchEventSerializer(many=True, required=False, default=list)
 
     def validate(self, attrs):
-        if not attrs.get("keystroke_events") and not attrs.get("mouse_events") and not attrs.get("touch_events"):
-            raise serializers.ValidationError("At least one of keystroke_events, mouse_events, touch_events is required.")
+        if not attrs.get("keystroke_features") and not attrs.get("mouse_events") and not attrs.get("touch_events"):
+            raise serializers.ValidationError("At least one of keystroke_features, mouse_events, touch_events is required.")
         return attrs
 
 
@@ -56,10 +61,9 @@ class BehavioralCaptureSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "session",
-            "keystroke_events",
+            "keystroke_features",
             "mouse_events",
             "touch_events",
-            "keystroke_event_count",
             "mouse_event_count",
             "touch_event_count",
             "updated_at",

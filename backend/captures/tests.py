@@ -26,10 +26,9 @@ class CaptureModelTests(APITestCase):
     def test_behavioral_capture_defaults_to_empty_arrays(self):
         _, session = self._make_session("u_bc", "STF-600")
         capture = BehavioralCapture.objects.create(session=session)
-        self.assertEqual(capture.keystroke_events, [])
+        self.assertEqual(capture.keystroke_features, {})
         self.assertEqual(capture.mouse_events, [])
         self.assertEqual(capture.touch_events, [])
-        self.assertEqual(capture.keystroke_event_count, 0)
         self.assertEqual(capture.mouse_event_count, 0)
         self.assertEqual(capture.touch_event_count, 0)
 
@@ -88,12 +87,12 @@ class BehavioralEventsViewTests(CaptureAPITestBase):
 
     def test_events_append_across_repeated_posts_not_overwrite(self):
         batch1 = {
-            "keystroke_events": [{"event": "keydown", "code": "KeyA", "t": 1.0}],
+            "keystroke_features": {"flight_times": [100.0], "rhythm_consistency": 0.8},
             "mouse_events": [],
             "touch_events": [],
         }
         batch2 = {
-            "keystroke_events": [{"event": "keyup", "code": "KeyA", "t": 1.2}],
+            "keystroke_features": {"flight_times": [120.0], "rhythm_consistency": 0.7},
             "mouse_events": [{"event": "mousemove", "x": 10, "y": 20, "t": 2.0}],
             "touch_events": [],
         }
@@ -104,19 +103,19 @@ class BehavioralEventsViewTests(CaptureAPITestBase):
         self.assertEqual(r2.status_code, status.HTTP_200_OK)
 
         detail = self.client.get("/api/captures/behavioral/", **self._auth(self.token))
-        self.assertEqual(detail.data["keystroke_event_count"], 2)
         self.assertEqual(detail.data["mouse_event_count"], 1)
-        self.assertEqual(len(detail.data["keystroke_events"]), 2)
-        self.assertEqual(detail.data["keystroke_events"][0]["code"], "KeyA")
-        self.assertEqual(detail.data["keystroke_events"][1]["event"], "keyup")
+        session_windows = detail.data["keystroke_features"]["session_windows"]
+        self.assertEqual(len(session_windows), 2)
+        self.assertEqual(session_windows[0]["flight_times"], [100.0])
+        self.assertEqual(session_windows[1]["rhythm_consistency"], 0.7)
 
     def test_malformed_event_unknown_type_rejected(self):
-        bad_batch = {"keystroke_events": [{"event": "not-a-real-event", "code": "KeyA", "t": 1.0}]}
+        bad_batch = {"keystroke_features": {"error_correction_rate": "not-a-number"}}
         resp = self.client.post("/api/captures/behavioral/events/", bad_batch, format="json", **self._auth(self.token))
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
         detail = self.client.get("/api/captures/behavioral/", **self._auth(self.token))
-        self.assertEqual(detail.data["keystroke_event_count"], 0)
+        self.assertEqual(detail.data["keystroke_features"].get("session_windows", []), [])
 
     def test_malformed_event_missing_field_rejected(self):
         bad_batch = {"mouse_events": [{"event": "mousemove", "x": 10}]}  # missing y and t
@@ -141,11 +140,11 @@ class BehavioralEventsViewTests(CaptureAPITestBase):
         client-supplied id."""
         _, other_token = self._login("clerkB", "pw-clerk-2", "STF-401", Staff.Role.CLERK)
 
-        batch = {"keystroke_events": [{"event": "keydown", "code": "KeyZ", "t": 5.0}]}
+        batch = {"keystroke_features": {"flight_times": [90.0]}}
         self.client.post("/api/captures/behavioral/events/", batch, format="json", **self._auth(self.token))
 
         other_detail = self.client.get("/api/captures/behavioral/", **self._auth(other_token))
-        self.assertEqual(other_detail.data["keystroke_event_count"], 0)
+        self.assertEqual(other_detail.data["keystroke_features"].get("session_windows", []), [])
 
 
 class TargetPatientViewTests(CaptureAPITestBase):

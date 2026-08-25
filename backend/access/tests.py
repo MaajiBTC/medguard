@@ -64,10 +64,53 @@ class LoginViewTests(APITestCase):
         self.assertTrue(hasattr(session, "behavioral_capture"))
         self.assertTrue(hasattr(session, "contextual_capture"))
 
-        self.assertEqual(session.behavioral_capture.keystroke_events, [])
+        self.assertEqual(session.behavioral_capture.keystroke_features, {"login": None, "session_windows": []})
         self.assertEqual(session.contextual_capture.on_duty_at_login, True)
         self.assertEqual(session.contextual_capture.ward_assignment_at_login, "Ward A")
         self.assertEqual(session.contextual_capture.patient_assignment_status, "no_patient_selected")
+
+    def test_login_with_keystroke_features_stores_login_baseline(self):
+        resp = self.client.post(
+            "/api/access/login/",
+            {
+                "username": "drA",
+                "password": "correct-horse-1",
+                "device_id": "device-abc",
+                "device_type": "desktop",
+                "keystroke_features": {
+                    "flight_times": [110.0, 95.0],
+                    "digraph_latencies": [140.0, 130.0],
+                    "trigraph_latencies": [260.0],
+                    "error_correction_rate": 0.0,
+                    "rhythm_consistency": 0.85,
+                    "automation_flags": [],
+                },
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        session = AccessSession.objects.get(token=resp.data["token"])
+        login_features = session.behavioral_capture.keystroke_features["login"]
+        self.assertEqual(login_features["flight_times"], [110.0, 95.0])
+        self.assertEqual(login_features["rhythm_consistency"], 0.85)
+
+    def test_login_with_malformed_keystroke_features_still_succeeds(self):
+        """Keystroke features are best-effort telemetry -- a malformed shape must
+        never block a real login."""
+        resp = self.client.post(
+            "/api/access/login/",
+            {
+                "username": "drA",
+                "password": "correct-horse-1",
+                "device_id": "device-abc",
+                "device_type": "desktop",
+                "keystroke_features": {"error_correction_rate": "not-a-number"},
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        session = AccessSession.objects.get(token=resp.data["token"])
+        self.assertIsNone(session.behavioral_capture.keystroke_features["login"])
 
     def test_login_bad_password_rejected(self):
         resp = self.client.post(

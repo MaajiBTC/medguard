@@ -1,29 +1,38 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { login } from '../api/auth';
+import { computeKeystrokeFeatures, createKeystrokeAccumulator } from '../capture/behavioral/keystrokeFeatures';
 
 /**
  * Staff login screen.
  *
- * SECURITY NOTE (per CLAUDE.md / plan): no behavioral capture listeners are wired
- * anywhere on this page, including the password field below. Capturing keystroke
- * timing on a password field would store timing data that could effectively
- * reconstruct the typed password -- a serious self-inflicted hole in a security
- * product. useBehavioralCapture is only ever mounted inside the authenticated app
- * shell, after a session token exists. See App.jsx.
+ * SECURITY NOTE (per CLAUDE.md): keystroke capture here computes only derived,
+ * anonymized timing features (flight/digraph/trigraph latency, error/correction
+ * rate, rhythm consistency, automation flags) -- never raw key identity. That's
+ * what makes it safe to run directly on the username/password fields: no key
+ * code is ever stored, so typing the password never risks recording the
+ * password itself. See keystrokeFeatures.js. Handlers are scoped to just these
+ * two inputs (not global window listeners) -- the rest of the session's capture
+ * is handled separately by useBehavioralCapture in the authenticated app shell.
  */
 function LoginPage({ onLoginSuccess }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const keystrokeAccumulatorRef = useRef(createKeystrokeAccumulator());
+
+  const handleKeyDown = (e) => keystrokeAccumulatorRef.current.recordDown(e.key, performance.now());
+  const handleKeyUp = (e) => keystrokeAccumulatorRef.current.recordUp(e.key, performance.now());
+  const handlePaste = () => keystrokeAccumulatorRef.current.recordPaste();
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      const data = await login(username, password);
+      const keystrokeFeatures = computeKeystrokeFeatures(keystrokeAccumulatorRef.current.drain());
+      const data = await login(username, password, keystrokeFeatures);
       onLoginSuccess(data);
     } catch (err) {
       setError(err.message || 'Login failed.');
@@ -57,6 +66,9 @@ function LoginPage({ onLoginSuccess }) {
           autoComplete="username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onKeyUp={handleKeyUp}
+          onPaste={handlePaste}
           required
         />
 
@@ -68,6 +80,9 @@ function LoginPage({ onLoginSuccess }) {
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onKeyUp={handleKeyUp}
+          onPaste={handlePaste}
           required
         />
 

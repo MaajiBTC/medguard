@@ -1,15 +1,24 @@
 import { detectDeviceType, getOrCreateDeviceId } from '../capture/contextual/deviceInfo';
 import { request, setToken } from './client';
 
-/** POST /api/access/login/ — authenticates and stores the returned session token. */
-async function login(username, password) {
+/** POST /api/access/login/ — authenticates and stores the returned session token.
+ * @param {object} [keystrokeFeatures] - derived, anonymized keystroke-dynamics
+ *   features computed client-side from the login form (see keystrokeFeatures.js) —
+ *   never raw key identity. */
+async function login(username, password, keystrokeFeatures) {
   const deviceId = getOrCreateDeviceId();
   const deviceType = detectDeviceType();
 
   const data = await request('/access/login/', {
     method: 'POST',
     auth: false,
-    body: { username, password, device_id: deviceId, device_type: deviceType },
+    body: {
+      username,
+      password,
+      device_id: deviceId,
+      device_type: deviceType,
+      keystroke_features: keystrokeFeatures,
+    },
   });
 
   setToken(data.token);

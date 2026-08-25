@@ -49,31 +49,35 @@ class ContextualCapture(models.Model):
 
 
 class BehavioralCapture(models.Model):
-    """One row per session — raw captured event arrays only, no derived features and
-    no matching/scoring (CLAUDE.md explicitly excludes that from this module).
+    """One row per session — no matching/scoring (CLAUDE.md explicitly excludes that
+    from this module).
 
-    Each *_events field holds a raw, timestamped, append-only array. An empty list is
-    the correct value for a signal family that doesn't apply to this device (e.g.
-    touch_events stays [] on a desktop with a mouse).
+    `keystroke_features` holds `{"login": {...} | None, "session_windows": [...]}` —
+    derived, anonymized timing features only (flight/digraph/trigraph latency,
+    error/correction rate, rhythm consistency, automation flags), never raw key
+    identity (see CLAUDE.md's Behavioral Signal Capture Module section, revised
+    2026-08-25). `mouse_events`/`touch_events` stay raw, timestamped, append-only
+    arrays — an empty list is the correct value for a signal family that doesn't
+    apply to this device (e.g. touch_events stays [] on a desktop with a mouse).
     """
 
     session = models.OneToOneField(
         AccessSession, on_delete=models.CASCADE, related_name="behavioral_capture"
     )
 
-    keystroke_events = models.JSONField(default=list, blank=True)
+    keystroke_features = models.JSONField(default=dict, blank=True)
     mouse_events = models.JSONField(default=list, blank=True)
     touch_events = models.JSONField(default=list, blank=True)
 
-    keystroke_event_count = models.PositiveIntegerField(default=0)
     mouse_event_count = models.PositiveIntegerField(default=0)
     touch_event_count = models.PositiveIntegerField(default=0)
 
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
+        session_windows = len(self.keystroke_features.get("session_windows", []))
         return (
             f"BehavioralCapture(session={self.session_id}, "
-            f"keystroke={self.keystroke_event_count}, mouse={self.mouse_event_count}, "
+            f"keystroke_windows={session_windows}, mouse={self.mouse_event_count}, "
             f"touch={self.touch_event_count})"
         )

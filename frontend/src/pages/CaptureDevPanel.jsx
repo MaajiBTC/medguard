@@ -97,7 +97,25 @@ function CaptureDevPanel({ staff, onLogout, flushNow }) {
         {behavioral && (
           <>
             <ul className="counts">
-              <li>Keystroke events: {behavioral.keystroke_event_count}</li>
+              <li>
+                Login rhythm consistency:{' '}
+                {behavioral.keystroke_features?.login
+                  ? behavioral.keystroke_features.login.rhythm_consistency.toFixed(2)
+                  : '(no login keystrokes captured)'}
+              </li>
+              <li>
+                Login error/correction rate:{' '}
+                {behavioral.keystroke_features?.login
+                  ? behavioral.keystroke_features.login.error_correction_rate.toFixed(2)
+                  : '—'}
+              </li>
+              <li>
+                Login automation flags:{' '}
+                {behavioral.keystroke_features?.login?.automation_flags.length
+                  ? behavioral.keystroke_features.login.automation_flags.join(', ')
+                  : '(none)'}
+              </li>
+              <li>Session keystroke feature windows: {behavioral.keystroke_features?.session_windows?.length ?? 0}</li>
               <li>Mouse events: {behavioral.mouse_event_count}</li>
               <li>Touch events: {behavioral.touch_event_count}</li>
             </ul>

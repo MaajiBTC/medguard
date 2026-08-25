@@ -7,16 +7,14 @@ from .models import BehavioralCapture, ContextualCapture
 class BehavioralCaptureAdmin(admin.ModelAdmin):
     list_display = (
         "session",
-        "keystroke_event_count",
         "mouse_event_count",
         "touch_event_count",
         "updated_at",
     )
     readonly_fields = (
-        "keystroke_events",
+        "keystroke_features",
         "mouse_events",
         "touch_events",
-        "keystroke_event_count",
         "mouse_event_count",
         "touch_event_count",
         "updated_at",

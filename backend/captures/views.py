@@ -34,24 +34,24 @@ class BehavioralEventsView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        keystroke_events = [dict(e) for e in data.get("keystroke_events", [])]
+        keystroke_features = data.get("keystroke_features")
         mouse_events = [dict(e) for e in data.get("mouse_events", [])]
         touch_events = [dict(e) for e in data.get("touch_events", [])]
 
         # Append, never overwrite — a session's capture accumulates across many
         # flush calls from the frontend's buffered capture hook.
-        capture.keystroke_events = capture.keystroke_events + keystroke_events
+        if keystroke_features:
+            capture.keystroke_features.setdefault("session_windows", [])
+            capture.keystroke_features["session_windows"].append(dict(keystroke_features))
         capture.mouse_events = capture.mouse_events + mouse_events
         capture.touch_events = capture.touch_events + touch_events
-        capture.keystroke_event_count = len(capture.keystroke_events)
         capture.mouse_event_count = len(capture.mouse_events)
         capture.touch_event_count = len(capture.touch_events)
         capture.save(
             update_fields=[
-                "keystroke_events",
+                "keystroke_features",
                 "mouse_events",
                 "touch_events",
-                "keystroke_event_count",
                 "mouse_event_count",
                 "touch_event_count",
                 "updated_at",
@@ -60,7 +60,7 @@ class BehavioralEventsView(APIView):
 
         return Response(
             {
-                "keystroke_event_count": capture.keystroke_event_count,
+                "keystroke_session_windows": len(capture.keystroke_features.get("session_windows", [])),
                 "mouse_event_count": capture.mouse_event_count,
                 "touch_event_count": capture.touch_event_count,
             },

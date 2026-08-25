@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from captures.models import BehavioralCapture, ContextualCapture
+from captures.serializers import KeystrokeFeaturesSerializer
 
 from .models import AccessSession
 
@@ -33,6 +34,17 @@ class LoginView(APIView):
         password = request.data.get("password")
         device_id = request.data.get("device_id")
         device_type = request.data.get("device_type", "")
+
+        # Derived, anonymized keystroke-dynamics features from the login form itself
+        # (never raw key identity — see CLAUDE.md's Behavioral module). Optional and
+        # best-effort: malformed/missing data just means no login-time keystroke
+        # baseline for this session, not a failed login.
+        login_keystroke_features = None
+        keystroke_features_data = request.data.get("keystroke_features")
+        if keystroke_features_data:
+            kf_serializer = KeystrokeFeaturesSerializer(data=keystroke_features_data)
+            if kf_serializer.is_valid():
+                login_keystroke_features = dict(kf_serializer.validated_data)
 
         if not username or not password:
             return Response(
@@ -67,7 +79,10 @@ class LoginView(APIView):
                 user_agent=request.META.get("HTTP_USER_AGENT", "")[:512],
                 network_segment=getattr(settings, "WORKSTATION_NETWORK_SEGMENT", "unknown"),
             )
-            BehavioralCapture.objects.create(session=session)
+            BehavioralCapture.objects.create(
+                session=session,
+                keystroke_features={"login": login_keystroke_features, "session_windows": []},
+            )
             ContextualCapture.objects.create(
                 session=session,
                 on_duty_at_login=staff.on_duty,

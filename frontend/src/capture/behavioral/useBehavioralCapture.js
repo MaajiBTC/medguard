@@ -13,24 +13,30 @@ function now() {
 }
 
 /**
- * Attaches keystroke/mouse/touch listeners and buffers raw, timestamped events,
- * flushing them to POST /api/captures/behavioral/events/ periodically.
+ * Attaches keystroke/mouse/touch listeners, flushing to POST
+ * /api/captures/behavioral/events/ periodically.
  *
- * SECURITY: call this ONLY from inside the authenticated app shell, after login --
- * never from LoginPage or anywhere near the password field. Capturing keystroke
- * timing on a password field would store timing data that could effectively
- * reconstruct the typed password. See CLAUDE.md's Behavioral module security note.
+ * Keystroke capture only ever computes derived, anonymized timing features
+ * (flight/digraph/trigraph latency, error/correction rate, rhythm consistency,
+ * automation flags) -- never raw key identity. See keystrokeFeatures.js and
+ * CLAUDE.md's Behavioral Signal Capture Module section. That's what makes it safe
+ * to run this on LoginPage too, alongside the login-specific one-shot capture in
+ * LoginPage.jsx itself (this hook covers the rest of the authenticated session).
  *
- * Per CLAUDE.md's capture spec: keydown/keyup/mousedown/mouseup are captured in
- * full (every event); mousemove/touchmove are throttled to ~15ms sampling since
- * raw mousemove fires far faster than that. This module only stores raw events --
- * no derived features, no matching/scoring (that's the Scoring Engine, step 2).
+ * Per CLAUDE.md's capture spec: mousedown/mouseup are captured in full (every
+ * event); mousemove/touchmove are throttled to ~15ms sampling since raw mousemove
+ * fires far faster than that. No matching/scoring happens here (that's the
+ * Scoring Engine, step 2) -- computing anonymized keystroke features is data
+ * reduction for privacy, not a baseline comparison or access decision.
  *
  * @param {object} [options]
  * @param {boolean} [options.enabled] - set false to detach without unmounting.
+ * @param {boolean} [options.captureKeystrokes] - set false to skip keydown/keyup
+ *   listeners entirely (LoginPage handles keystrokes itself, scoped to just the
+ *   username/password inputs, so it doesn't double up with this hook's global ones).
  * @returns {{ flushNow: () => void }}
  */
-function useBehavioralCapture({ enabled = true } = {}) {
+function useBehavioralCapture({ enabled = true, captureKeystrokes = true } = {}) {
   const bufferRef = useRef(createEventBuffer());
   const lastMouseMoveRef = useRef(0);
   const lastTouchMoveRef = useRef(0);
@@ -56,10 +62,13 @@ function useBehavioralCapture({ enabled = true } = {}) {
     };
 
     const handleKeydown = (e) => {
-      recordAndMaybeFlush(() => buffer.pushKeystroke({ event: 'keydown', code: e.code, t: now() }));
+      recordAndMaybeFlush(() => buffer.recordKeyDown(e.key, now()));
     };
     const handleKeyup = (e) => {
-      recordAndMaybeFlush(() => buffer.pushKeystroke({ event: 'keyup', code: e.code, t: now() }));
+      recordAndMaybeFlush(() => buffer.recordKeyUp(e.key, now()));
+    };
+    const handlePaste = () => {
+      recordAndMaybeFlush(() => buffer.recordPaste());
     };
     const handleMousedown = (e) => {
       recordAndMaybeFlush(() =>
@@ -104,8 +113,11 @@ function useBehavioralCapture({ enabled = true } = {}) {
       recordAndMaybeFlush(() => pushTouches(e.changedTouches, 'touchend', now()));
     };
 
-    window.addEventListener('keydown', handleKeydown);
-    window.addEventListener('keyup', handleKeyup);
+    if (captureKeystrokes) {
+      window.addEventListener('keydown', handleKeydown);
+      window.addEventListener('keyup', handleKeyup);
+      window.addEventListener('paste', handlePaste);
+    }
     window.addEventListener('mousedown', handleMousedown);
     window.addEventListener('mouseup', handleMouseup);
     window.addEventListener('mousemove', handleMousemove);
@@ -118,8 +130,11 @@ function useBehavioralCapture({ enabled = true } = {}) {
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
-      window.removeEventListener('keydown', handleKeydown);
-      window.removeEventListener('keyup', handleKeyup);
+      if (captureKeystrokes) {
+        window.removeEventListener('keydown', handleKeydown);
+        window.removeEventListener('keyup', handleKeyup);
+        window.removeEventListener('paste', handlePaste);
+      }
       window.removeEventListener('mousedown', handleMousedown);
       window.removeEventListener('mouseup', handleMouseup);
       window.removeEventListener('mousemove', handleMousemove);
@@ -130,7 +145,7 @@ function useBehavioralCapture({ enabled = true } = {}) {
       clearInterval(intervalId);
       flush(); // best-effort flush on logout/unmount
     };
-  }, [enabled, flush]);
+  }, [enabled, captureKeystrokes, flush]);
 
   return { flushNow: flush };
 }
