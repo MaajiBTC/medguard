@@ -56,11 +56,12 @@ INSTALLED_APPS = [
     # Third-party
     'rest_framework',
     'corsheaders',
-    # Local apps (dependency order: staff -> patients -> access -> captures)
+    # Local apps (dependency order: staff -> patients -> access -> captures -> scoring)
     'staff',
     'patients',
     'access',
     'captures',
+    'scoring',
 ]
 
 MIDDLEWARE = [
