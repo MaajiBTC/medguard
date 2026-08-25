@@ -18,6 +18,13 @@ class Staff(models.Model):
         PHARMACIST = "pharmacist", "Pharmacist"
         LAB_TECHNICIAN = "lab_technician", "Lab technician"
         CLERK = "clerk", "Clerk"
+        ADMIN = "admin", "Admin"
+        SECURITY_OFFICER = "security_officer", "Security officer"
+
+    # Roles with patient-record category access via the Scoring Engine (CLAUDE.md's
+    # role -> category table). Admin/security officer are system roles, not clinical
+    # ones -- they never call /api/scoring/decide/.
+    CLINICAL_ROLES = {Role.DOCTOR, Role.NURSE, Role.PHARMACIST, Role.LAB_TECHNICIAN, Role.CLERK}
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,

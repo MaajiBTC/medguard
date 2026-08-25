@@ -114,7 +114,12 @@ class LogoutView(APIView):
 
 
 class CurrentSessionView(APIView):
-    """GET /api/access/session/current/ — debug view of the caller's own session."""
+    """GET /api/access/session/current/ — the caller's own session, plus live (not
+    login-time-snapshotted) duty status/ward, so dashboards can show current status
+    without a separate endpoint. Contrast with ContextualCapture's
+    on_duty_at_login/ward_assignment_at_login, which are deliberately frozen
+    snapshots for historical accuracy (see captures/models.py) -- this view is for
+    live display, not scoring or audit history."""
 
     def get(self, request):
         session = request.auth
@@ -125,6 +130,8 @@ class CurrentSessionView(APIView):
                 "staff_id": staff.staff_id,
                 "staff_full_name": staff.full_name,
                 "role": staff.role,
+                "on_duty": staff.on_duty,
+                "ward": staff.ward,
                 "started_at": session.started_at,
                 "ended_at": session.ended_at,
                 "is_active": session.is_active,

@@ -22,4 +22,7 @@ urlpatterns = [
     path('api/access/', include('access.urls')),
     path('api/captures/', include('captures.urls')),
     path('api/scoring/', include('scoring.urls')),
+    path('api/staff/', include('staff.urls')),
+    path('api/patients/', include('patients.urls')),
+    path('api/ledger/', include('ledger.urls')),
 ]

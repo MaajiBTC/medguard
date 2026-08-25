@@ -68,3 +68,46 @@ class PatientAssignment(models.Model):
     def __str__(self):
         status = "active" if self.active else "inactive"
         return f"{self.staff} -> {self.patient} ({self.role_in_assignment}, {status})"
+
+
+class PatientCategoryRecord(models.Model):
+    """One row per (patient, category) -- the actual content behind CLAUDE.md's 13
+    patient record categories. Deliberately generic (`content` is free-form JSON, edited
+    in the admin UI as a single notes field) rather than 13 bespoke structured schemas --
+    this is a security/access-control layer, not a hospital management system (CLAUDE.md
+    explicit exclusions), so category *content* stays minimal while category *access
+    control* (which is what this project is actually about) is the real thing.
+
+    All 13 rows are created empty alongside a new Patient (see patients.views
+    PatientCreateView) -- empty structure, not fabricated content, same as this
+    codebase's other "starts empty, filled by real data later" patterns.
+    """
+
+    class Category(models.IntegerChoices):
+        IDENTITY = 1, "Identity"
+        ADMINISTRATIVE_BILLING = 2, "Administrative/Billing"
+        VITAL_SIGNS = 3, "Vital Signs & Routine Observations"
+        DIAGNOSIS_HISTORY = 4, "Diagnosis & Medical History"
+        MEDICATION_PRESCRIPTIONS = 5, "Medication & Prescriptions"
+        ALLERGIES = 6, "Allergies"
+        GENERAL_LAB_RESULTS = 7, "General Lab Results"
+        HIGHLY_SENSITIVE_TESTS = 8, "Highly Sensitive Test Results"
+        MENTAL_HEALTH = 9, "Mental Health Records"
+        REPRODUCTIVE_HEALTH = 10, "Reproductive Health Records"
+        SURGICAL_PROCEDURE_HISTORY = 11, "Surgical/Procedure History"
+        NURSING_CARE_NOTES = 12, "Nursing & Care Notes"
+        IMAGING_RADIOLOGY = 13, "Imaging/Radiology"
+
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="category_records")
+    category = models.PositiveSmallIntegerField(choices=Category.choices)
+    content = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["patient", "category"], name="unique_patient_category")
+        ]
+        ordering = ["category"]
+
+    def __str__(self):
+        return f"{self.patient} / category {self.category} ({self.get_category_display()})"

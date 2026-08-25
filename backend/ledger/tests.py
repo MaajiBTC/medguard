@@ -4,6 +4,7 @@ CLAUDE.md.
 """
 
 from django.contrib.auth.models import User
+from django.db import connections
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework import status
@@ -53,10 +54,15 @@ class RecordEventChainTests(TestCase):
         entry = record_event(event_type=LedgerEntry.EventType.AUDITED_DEVIATION, staff=staff)
         record_event(event_type=LedgerEntry.EventType.ACCESS_DENIED, staff=staff)
 
-        # .update() bypasses LedgerEntry.save(), simulating direct DB tampering.
-        LedgerEntry.objects.using("ledger").filter(pk=entry.pk).update(
-            details={"tampered": True}
-        )
+        # Raw SQL bypasses the ORM entirely (LedgerQuerySet.update() and .save() both
+        # raise LedgerImmutableError -- see models.py) -- this simulates the actual
+        # threat model verify_chain() defends against: someone with direct database
+        # access, not application code.
+        with connections["ledger"].cursor() as cursor:
+            cursor.execute(
+                "UPDATE ledger_ledgerentry SET details = %s WHERE sequence = %s",
+                ['{"tampered": true}', entry.sequence],
+            )
 
         ok, bad_sequence = verify_chain()
         self.assertFalse(ok)
@@ -88,6 +94,34 @@ class ImmutabilityTests(TestCase):
 
         with self.assertRaises(LedgerImmutableError):
             entry.delete()
+
+    def test_bulk_queryset_update_raises(self):
+        """Regression test: QuerySet.update() bypasses instance save() entirely (it's
+        a direct SQL UPDATE), so without LedgerQuerySet this would silently succeed."""
+        user = User.objects.create_user(username="ledgerStaff4", password="pw-ledger-4")
+        staff = Staff.objects.create(
+            user=user, staff_id="STF-L4", full_name="Ledger Tester 4", role=Staff.Role.DOCTOR,
+            ward="Ward A", on_duty=True,
+        )
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=staff)
+
+        with self.assertRaises(LedgerImmutableError):
+            LedgerEntry.objects.using("ledger").filter(staff_id="STF-L4").update(details={"x": 1})
+
+    def test_bulk_queryset_delete_raises(self):
+        """Regression test: QuerySet.delete() bypasses instance delete() entirely --
+        this is the exact gap discovered during manual testing of this feature."""
+        user = User.objects.create_user(username="ledgerStaff5", password="pw-ledger-5")
+        staff = Staff.objects.create(
+            user=user, staff_id="STF-L5", full_name="Ledger Tester 5", role=Staff.Role.DOCTOR,
+            ward="Ward A", on_duty=True,
+        )
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=staff)
+
+        with self.assertRaises(LedgerImmutableError):
+            LedgerEntry.objects.using("ledger").filter(staff_id="STF-L5").delete()
+
+        self.assertEqual(LedgerEntry.objects.using("ledger").filter(staff_id="STF-L5").count(), 1)
 
 
 class DecideViewLedgerIntegrationTests(APITestCase):
@@ -148,3 +182,47 @@ class DecideViewLedgerIntegrationTests(APITestCase):
         entry = LedgerEntry.objects.using("ledger").get(staff_id="STF-L901")
         self.assertEqual(entry.event_type, "ACCESS_DENIED")
         self.assertEqual(entry.details["granted_categories"], [])
+
+
+class LedgerFeedViewTests(APITestCase):
+    """/api/ledger/entries/ -- security-officer-only (staff/permissions.py)."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(user=user, staff_id=staff_id, full_name=username, role=role)
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_non_security_officer_forbidden(self):
+        _staff, token = self._login("adminLedgerApi", "pw-ledger-feed-1", "STF-LF900", Staff.Role.ADMIN)
+        resp = self.client.get("/api/ledger/entries/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_security_officer_sees_entries_newest_first_and_can_filter(self):
+        officer, token = self._login("secOfficerApi", "pw-ledger-feed-2", "STF-LF901", Staff.Role.SECURITY_OFFICER)
+        doctor = self._login("docLedgerFeedApi", "pw-ledger-feed-3", "STF-LF902", Staff.Role.DOCTOR)[0]
+
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=doctor)
+        record_event(event_type=LedgerEntry.EventType.ACCESS_DENIED, staff=doctor)
+
+        resp = self.client.get("/api/ledger/entries/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp.data), 2)
+        self.assertEqual(resp.data[0]["event_type"], "ACCESS_DENIED")  # newest first
+        self.assertNotIn("session_token", resp.data[0])
+
+        filtered_resp = self.client.get(
+            "/api/ledger/entries/?event_type=ACCESS_DENIED", **self._auth(token)
+        )
+        self.assertEqual(len(filtered_resp.data), 1)
+        self.assertEqual(filtered_resp.data[0]["event_type"], "ACCESS_DENIED")

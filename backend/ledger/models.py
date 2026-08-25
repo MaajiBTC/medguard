@@ -10,6 +10,21 @@ class LedgerImmutableError(Exception):
     """
 
 
+class LedgerQuerySet(models.QuerySet):
+    """Blocks bulk mutation. QuerySet.update()/.delete() go straight to SQL and never
+    call a model instance's save()/delete() -- so without this, `LedgerEntry.objects
+    .filter(...).delete()` would silently bypass every append-only guard below. This
+    is the gap that let a `.filter(...).delete()` during manual testing remove a row
+    outright; the fix is here, not a one-off workaround at the call site.
+    """
+
+    def update(self, *args, **kwargs):
+        raise LedgerImmutableError("Ledger entries are append-only and cannot be bulk-updated.")
+
+    def delete(self, *args, **kwargs):
+        raise LedgerImmutableError("Ledger entries are append-only and cannot be bulk-deleted.")
+
+
 class LedgerEntry(models.Model):
     """One row per logged security decision -- independent, hash-chained, append-only
     (CLAUDE.md Security Ledger). Lives on the separate `ledger` database (see
@@ -17,7 +32,16 @@ class LedgerEntry(models.Model):
     (cross-database relations aren't supported by Django) -- every reference below is a
     plain denormalized value, snapshotted at write time. Only ever created via
     services.record_event(), never instantiated/saved directly.
+
+    Append-only is enforced at three levels: instance save()/delete() below, bulk
+    QuerySet update()/delete() via LedgerQuerySet above, and ultimately the separate
+    `ledger` database itself (db_router.py) -- that last one is the real boundary; the
+    first two just mean the application's own code can't do it either, accidentally or
+    otherwise. None of this stops someone with direct database access (e.g. a raw SQL
+    UPDATE) -- that's what verify_chain() is for.
     """
+
+    objects = LedgerQuerySet.as_manager()
 
     class EventType(models.TextChoices):
         STANDARD_ACCESS = "STANDARD_ACCESS", "Standard access"

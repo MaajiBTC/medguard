@@ -1,7 +1,6 @@
-/* Minimal styling for the step-1 scaffold: LoginPage + CaptureDevPanel.
-   Plain CSS on purpose -- three.js is scoped to the login placeholder + Security
-   Dashboard only, and everything else here is deliberately low-effort (this is a
-   temporary dev panel, not the real UI from step 4). */
+/* LoginPage + the three step-4 dashboards (Clinical/Admin/Security). Plain CSS
+   throughout -- three.js is scoped to exactly the login placeholder and the
+   Security Dashboard's LedgerVisualization panel, per CLAUDE.md. */
 
 .login-page {
   display: flex;
@@ -81,24 +80,22 @@
   font-size: 14px;
 }
 
-.capture-dev-panel {
-  max-width: 900px;
+button {
+  font: inherit;
+}
+
+/* Shared dashboard shell (Clinical/Admin/Security) */
+
+.dashboard {
+  max-width: 1100px;
   margin: 0 auto;
   padding: 24px;
   text-align: left;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.dev-banner {
-  background: var(--accent-bg);
-  color: var(--accent);
-  border: 1px solid var(--accent-border);
-  border-radius: 6px;
-  padding: 10px 14px;
-  font-size: 13px;
-  margin-bottom: 20px;
-}
-
-.dev-panel-header {
+.dashboard-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -108,49 +105,24 @@
   margin-bottom: 16px;
 }
 
-.dev-panel-header h1 {
+.dashboard-header h1 {
   font-size: 28px;
   margin: 0 0 4px;
 }
 
-.capture-dev-panel section {
-  margin-bottom: 28px;
-}
-
-.capture-dev-panel h2 {
-  font-size: 18px;
-}
-
-.capture-dev-panel .hint {
-  font-size: 13px;
+.duty-status {
   color: var(--text);
-}
-
-.capture-dev-panel .counts {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
   font-size: 14px;
 }
 
-.capture-dev-panel .counts li {
-  background: var(--code-bg);
-  border-radius: 6px;
-  padding: 6px 10px;
+.dashboard section {
+  margin-bottom: 28px;
 }
 
-.capture-dev-panel pre {
-  background: var(--code-bg);
-  padding: 12px;
-  border-radius: 6px;
-  overflow-x: auto;
-  font-size: 12px;
-  max-height: 320px;
-}
-
-.target-patient-form {
+.search-form,
+.create-form,
+.assign-form,
+.ledger-filters {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -158,14 +130,185 @@
   margin-bottom: 12px;
 }
 
-.target-patient-form input {
+.create-form {
+  flex-direction: column;
+  align-items: stretch;
+  max-width: 360px;
+}
+
+.create-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.search-form input,
+.create-form input,
+.create-form select,
+.assign-form input,
+.assign-form select,
+.ledger-filters input,
+.ledger-filters select {
   font: inherit;
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  width: 120px;
+  background: var(--bg);
+  color: var(--text-h);
 }
 
-button {
+.patient-list,
+.result-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.patient-list button,
+.result-list button {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.patient-view,
+.edit-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 12px;
+}
+
+.edit-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+}
+
+.access-denied {
+  color: #d1293d;
+}
+
+.access-reduced {
+  color: #b45309;
+}
+
+.access-audited {
+  color: var(--accent);
+}
+
+.notice {
+  color: #16a34a;
+  font-size: 14px;
+}
+
+.category-list details,
+.edit-panel details {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.category-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.category-editor textarea {
   font: inherit;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  resize: vertical;
+}
+
+/* Admin dashboard */
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+@media (max-width: 800px) {
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Security dashboard */
+
+.ledger-visualization {
+  width: 100%;
+  height: 260px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.ledger-table th,
+.ledger-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ledger-row {
+  cursor: pointer;
+}
+
+.ledger-row:hover {
+  background: var(--code-bg);
+}
+
+.ledger-row.severity-EMERGENCY_OVERRIDE {
+  color: #e879f9;
+}
+
+.ledger-row.severity-ACCESS_DENIED {
+  color: #f87171;
+}
+
+.ledger-row.severity-REDUCED_ACCESS {
+  color: #fb923c;
+}
+
+.ledger-row.severity-AUDITED_DEVIATION {
+  color: #d97706;
+}
+
+.ledger-drilldown pre {
+  background: var(--code-bg);
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+  max-height: 320px;
 }

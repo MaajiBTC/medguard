@@ -4,8 +4,12 @@ import './App.css';
 import { getCurrentSession, logout as apiLogout } from './api/auth';
 import { getToken, setToken } from './api/client';
 import { useBehavioralCapture } from './capture/behavioral/useBehavioralCapture';
-import CaptureDevPanel from './pages/CaptureDevPanel';
+import AdminDashboard from './pages/AdminDashboard';
+import ClinicalDashboard from './pages/ClinicalDashboard';
 import LoginPage from './pages/LoginPage';
+import SecurityDashboard from './pages/SecurityDashboard';
+
+const CLINICAL_ROLES = new Set(['doctor', 'nurse', 'pharmacist', 'lab_technician', 'clerk']);
 
 /**
  * The authenticated app shell. useBehavioralCapture is mounted HERE, and only
@@ -13,6 +17,9 @@ import LoginPage from './pages/LoginPage';
  * useBehavioralCapture.js and LoginPage.jsx for the full explanation). Unmounting
  * this component (e.g. on logout) runs the hook's cleanup, which detaches every
  * listener.
+ *
+ * One shared login (LoginPage) for every role; which dashboard renders here is
+ * decided purely by staff.role -- no separate login flows per role.
  */
 function AuthenticatedShell({ initialStaff, onLoggedOut }) {
   const [staff, setStaff] = useState(initialStaff);
@@ -41,7 +48,23 @@ function AuthenticatedShell({ initialStaff, onLoggedOut }) {
     }
   }, [flushNow, onLoggedOut]);
 
-  return <CaptureDevPanel staff={staff} onLogout={handleLogout} flushNow={flushNow} />;
+  if (!staff) return null;
+
+  if (staff.role === 'admin') {
+    return <AdminDashboard staff={staff} onLogout={handleLogout} />;
+  }
+  if (staff.role === 'security_officer') {
+    return <SecurityDashboard staff={staff} onLogout={handleLogout} />;
+  }
+  if (CLINICAL_ROLES.has(staff.role)) {
+    return <ClinicalDashboard staff={staff} onLogout={handleLogout} />;
+  }
+  return (
+    <div className="dashboard">
+      <p role="alert">Unrecognized role "{staff.role}" — no dashboard available.</p>
+      <button type="button" onClick={handleLogout}>Log out</button>
+    </div>
+  );
 }
 
 function App() {

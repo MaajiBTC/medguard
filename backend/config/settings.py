@@ -79,11 +79,16 @@ MIDDLEWARE = [
 
 # CORS: the Vite dev server, any LAN address (teammate phones on the same
 # Wi-Fi), and the Vercel-hosted frontend (prod + preview deploys).
+#
+# Port is a range, not a fixed 5173: Vite auto-increments to 5174/5175/... when an
+# earlier port is already taken (e.g. another dev server left running), so a
+# fixed-port allowlist breaks CORS the moment that happens locally.
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',
 ]
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r'^http://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:5173$',
+    r'^http://localhost:\d{2,5}$',
+    r'^http://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}$',
     r'^https://.*\.vercel\.app$',
 ]
 

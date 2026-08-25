@@ -8,7 +8,7 @@ from rest_framework.test import APITestCase
 
 from access.models import AccessSession
 from captures.models import BehavioralCapture, ContextualCapture
-from patients.models import Patient, PatientAssignment
+from patients.models import Patient, PatientAssignment, PatientCategoryRecord
 from staff.models import Staff
 
 from .baseline import extract_keystroke_features, extract_mouse_features
@@ -332,3 +332,87 @@ class BaselineReinforcementAndAPITests(ScoringTestBase):
 
         baseline = BehavioralBaseline.objects.get(staff=staff)
         self.assertEqual(baseline.sample_count, 0)
+
+    def test_admin_and_security_officer_rejected_from_decide(self):
+        """/api/scoring/decide/ is patient-record access -- not applicable to system
+        roles (CLAUDE.md's role table doesn't cover them at all)."""
+        for role, suffix in [(Staff.Role.ADMIN, "adm"), (Staff.Role.SECURITY_OFFICER, "sec")]:
+            _staff, token = self._login(f"nonClinical{suffix}", f"pw-nonclinical-{suffix}", f"STF-NC-{suffix}", role)
+            patient = Patient.objects.create(hospital_number=f"HN-NC-{suffix}", full_name="P", ward="Ward A")
+            resp = self.client.post(
+                "/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token)
+            )
+            self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class PatientRecordViewTests(APITestCase):
+    """Exercises /api/scoring/patients/<id>/records/, which is only reachable after a
+    decision already exists (same precedent DecideView sets for target-patient)."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role, ward="", on_duty=True):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(
+            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward, on_duty=on_duty
+        )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_records_endpoint_requires_a_decision_first(self):
+        _staff, token = self._login("docRecordsApi1", "pw-records-1", "STF-R900", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-R900", full_name="P", ward="Ward A")
+
+        resp = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_records_endpoint_returns_only_granted_categories(self):
+        _staff, token = self._login("docRecordsApi2", "pw-records-2", "STF-R901", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-R901", full_name="P", ward="Ward A")
+        PatientCategoryRecord.objects.bulk_create(
+            PatientCategoryRecord(patient=patient, category=c, content={"notes": f"cat {c}"})
+            for c, _ in PatientCategoryRecord.Category.choices
+        )
+
+        self.client.post(
+            "/api/captures/contextual/target-patient/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        decide_resp = self.client.post(
+            "/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        self.assertEqual(decide_resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(decide_resp.data["decision_type"], AccessDecision.DecisionType.STANDARD_ACCESS)
+
+        records_resp = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
+        self.assertEqual(records_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(records_resp.data["granted_categories"], list(range(1, 14)))
+        self.assertEqual(len(records_resp.data["records"]), 13)
+
+    def test_records_endpoint_403_on_denied_decision(self):
+        """Nurse rule case 3: neither assigned nor same ward -- hard denied."""
+        _staff, token = self._login(
+            "nurseRecordsApi", "pw-records-3", "STF-R902", Staff.Role.NURSE, ward="Ward A"
+        )
+        patient = Patient.objects.create(hospital_number="HN-R902", full_name="P", ward="Ward B")
+        PatientCategoryRecord.objects.bulk_create(
+            PatientCategoryRecord(patient=patient, category=c) for c, _ in PatientCategoryRecord.Category.choices
+        )
+
+        self.client.post(
+            "/api/captures/contextual/target-patient/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        decide_resp = self.client.post(
+            "/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        self.assertEqual(decide_resp.data["decision_type"], AccessDecision.DecisionType.ACCESS_DENIED)
+
+        records_resp = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
+        self.assertEqual(records_resp.status_code, status.HTTP_403_FORBIDDEN)
