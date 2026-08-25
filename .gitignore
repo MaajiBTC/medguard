@@ -1,0 +1,34 @@
+# Python / Django
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+.env
+
+# Node / React
+node_modules/
+npm-debug.log*
+dist/
+build/
+
+# Encrypted local caches / offline mode (per CLAUDE.md — never commit real data)
+*.enc
+local_cache/
+
+# Enrollment data — never commit real patient/staff/fingerprint data
+enrollment_data/
+*.fingerprint
+*.template
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

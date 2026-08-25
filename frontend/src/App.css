@@ -1,0 +1,171 @@
+/* Minimal styling for the step-1 scaffold: LoginPage + CaptureDevPanel.
+   Plain CSS on purpose -- three.js is scoped to the login placeholder + Security
+   Dashboard only, and everything else here is deliberately low-effort (this is a
+   temporary dev panel, not the real UI from step 4). */
+
+.login-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  min-height: 100svh;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.three-scene-placeholder {
+  width: 100%;
+  max-width: 420px;
+  height: 200px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.login-form {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.login-form h1 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.login-subtitle {
+  margin: 0 0 16px;
+  color: var(--text);
+}
+
+.login-form label {
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.login-form input {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.login-form button {
+  margin-top: 20px;
+  padding: 10px;
+  font: inherit;
+  border-radius: 6px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.login-form button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.login-error,
+.dev-error {
+  color: #d1293d;
+  font-size: 14px;
+}
+
+.capture-dev-panel {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+  text-align: left;
+}
+
+.dev-banner {
+  background: var(--accent-bg);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+.dev-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+}
+
+.dev-panel-header h1 {
+  font-size: 28px;
+  margin: 0 0 4px;
+}
+
+.capture-dev-panel section {
+  margin-bottom: 28px;
+}
+
+.capture-dev-panel h2 {
+  font-size: 18px;
+}
+
+.capture-dev-panel .hint {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.capture-dev-panel .counts {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+
+.capture-dev-panel .counts li {
+  background: var(--code-bg);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.capture-dev-panel pre {
+  background: var(--code-bg);
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+  max-height: 320px;
+}
+
+.target-patient-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.target-patient-form input {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 120px;
+}
+
+button {
+  font: inherit;
+}

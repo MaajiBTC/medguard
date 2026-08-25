@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip --version)",
+      "Bash(npm --version)",
+      "Bash(git --version)",
+      "Bash(py -m pip --version)",
+      "PowerShell(winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements)",
+      "Bash(git init *)"
+    ]
+  }
+}
