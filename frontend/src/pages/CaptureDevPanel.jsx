@@ -150,6 +150,11 @@ function CaptureDevPanel({ staff, onLogout, flushNow }) {
         {contextual && (
           <>
             <ul className="counts">
+              <li>Role: {contextual.role}</li>
+              <li>
+                Device: {contextual.device_type || '(unknown type)'} ({contextual.device_id})
+              </li>
+              <li>Location (network segment): {contextual.network_segment}</li>
               <li>On duty at login: {String(contextual.on_duty_at_login)}</li>
               <li>Ward at login: {contextual.ward_assignment_at_login || '(none)'}</li>
               <li>Patient assignment status: {contextual.patient_assignment_status}</li>

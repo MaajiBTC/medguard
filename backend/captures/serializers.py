@@ -82,6 +82,7 @@ class ContextualCaptureSerializer(serializers.ModelSerializer):
     AccessSession rather than duplicating that data on this model."""
 
     started_at = serializers.DateTimeField(source="session.started_at", read_only=True)
+    role = serializers.CharField(source="session.staff.role", read_only=True)
     device_id = serializers.CharField(source="session.device_id", read_only=True)
     device_type = serializers.CharField(source="session.device_type", read_only=True)
     network_segment = serializers.CharField(source="session.network_segment", read_only=True)
@@ -102,6 +103,7 @@ class ContextualCaptureSerializer(serializers.ModelSerializer):
             "id",
             "session",
             "started_at",
+            "role",
             "device_id",
             "device_type",
             "network_segment",
