@@ -212,6 +212,43 @@ button {
   color: var(--accent);
 }
 
+.access-override {
+  color: #e879f9;
+}
+
+.override-control {
+  margin: 12px 0;
+}
+
+.override-button {
+  border: 1px solid #e879f9;
+  color: #e879f9;
+  background: transparent;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.override-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 480px;
+  border: 1px solid #e879f9;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.override-form textarea {
+  font: inherit;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-h);
+  resize: vertical;
+}
+
 .notice {
   color: #16a34a;
   font-size: 14px;

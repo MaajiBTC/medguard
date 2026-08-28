@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { getCurrentSession } from '../api/auth';
 import { getMyAssignedPatients, searchPatients } from '../api/patients';
-import { decide, getPatientRecords } from '../api/scoring';
+import { decide, emergencyOverride, getPatientRecords } from '../api/scoring';
 import { useContextualCapture } from '../capture/contextual/useContextualCapture';
 
 const ASSIGNMENT_ROLES = new Set(['doctor', 'nurse']);
@@ -25,6 +25,11 @@ function ClinicalDashboard({ staff, onLogout }) {
   const [records, setRecords] = useState(null);
   const [viewError, setViewError] = useState(null);
   const [viewLoading, setViewLoading] = useState(false);
+
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
+  const [overrideSubmitting, setOverrideSubmitting] = useState(false);
+  const [overrideError, setOverrideError] = useState(null);
 
   const { setTargetPatient } = useContextualCapture();
 
@@ -54,6 +59,9 @@ function ClinicalDashboard({ staff, onLogout }) {
     setRecords(null);
     setViewError(null);
     setViewLoading(true);
+    setOverrideOpen(false);
+    setOverrideReason('');
+    setOverrideError(null);
     try {
       await setTargetPatient(patient.id);
       const decisionData = await decide(patient.id);
@@ -66,6 +74,26 @@ function ClinicalDashboard({ staff, onLogout }) {
       setViewError(err.data || { detail: err.message });
     } finally {
       setViewLoading(false);
+    }
+  };
+
+  const handleEmergencyOverride = async (event) => {
+    event.preventDefault();
+    if (!selectedPatient) return;
+    setOverrideSubmitting(true);
+    setOverrideError(null);
+    try {
+      const decisionData = await emergencyOverride(selectedPatient.id, overrideReason);
+      setDecision(decisionData);
+      setViewError(null);
+      const recordsData = await getPatientRecords(selectedPatient.id);
+      setRecords(recordsData);
+      setOverrideOpen(false);
+      setOverrideReason('');
+    } catch (err) {
+      setOverrideError(err.data || { detail: err.message });
+    } finally {
+      setOverrideSubmitting(false);
     }
   };
 
@@ -166,6 +194,55 @@ function ClinicalDashboard({ staff, onLogout }) {
               {decision.score.toFixed(0)}%).
             </p>
           )}
+
+          {decision && decision.decision_type === 'EMERGENCY_OVERRIDE' && (
+            <p className="access-override">
+              Break the Glass: emergency access granted and permanently logged to the
+              Security Ledger.
+            </p>
+          )}
+
+          <div className="override-control">
+            {!overrideOpen ? (
+              <button type="button" className="override-button" onClick={() => setOverrideOpen(true)}>
+                Break the Glass (Emergency Override)
+              </button>
+            ) : (
+              <form className="override-form" onSubmit={handleEmergencyOverride}>
+                <label htmlFor="override-reason">
+                  Reason for emergency access (required, min 10 characters):
+                </label>
+                <textarea
+                  id="override-reason"
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  rows={3}
+                  required
+                  minLength={10}
+                />
+                {overrideError && (
+                  <p role="alert" className="dev-error">
+                    {overrideError.detail || 'Could not grant emergency access.'}
+                  </p>
+                )}
+                <div className="button-row">
+                  <button type="submit" disabled={overrideSubmitting || overrideReason.trim().length < 10}>
+                    {overrideSubmitting ? 'Granting…' : 'Confirm Break the Glass'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOverrideOpen(false);
+                      setOverrideReason('');
+                      setOverrideError(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
 
           {records && (
             <div className="category-list">

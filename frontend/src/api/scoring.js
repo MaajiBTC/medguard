@@ -14,4 +14,17 @@ function getPatientRecords(patientId) {
   return request(`/scoring/patients/${patientId}/records/`);
 }
 
-export { decide, getPatientRecords };
+/** POST /api/scoring/emergency-override/ — {patient_id, reason} -> the granted
+ * AccessDecision (decision_type EMERGENCY_OVERRIDE, "Break the Glass"). Always
+ * available to any logged-in clinical staff member regardless of score or role
+ * match, but still capped at the caller's role ceiling; reason is required
+ * (min 10 characters) since every call is permanently logged to the Security
+ * Ledger. */
+function emergencyOverride(patientId, reason) {
+  return request('/scoring/emergency-override/', {
+    method: 'POST',
+    body: { patient_id: patientId, reason },
+  });
+}
+
+export { decide, getPatientRecords, emergencyOverride };

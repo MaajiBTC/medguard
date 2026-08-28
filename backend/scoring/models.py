@@ -46,6 +46,7 @@ class AccessDecision(models.Model):
         AUDITED_DEVIATION = "AUDITED_DEVIATION", "Audited deviation"
         REDUCED_ACCESS = "REDUCED_ACCESS", "Reduced access"
         ACCESS_DENIED = "ACCESS_DENIED", "Access denied"
+        EMERGENCY_OVERRIDE = "EMERGENCY_OVERRIDE", "Emergency override"
 
     session = models.ForeignKey(
         "access.AccessSession", on_delete=models.CASCADE, related_name="access_decisions"
@@ -55,9 +56,11 @@ class AccessDecision(models.Model):
     )
     computed_at = models.DateTimeField(auto_now_add=True)
 
-    gate_passed = models.BooleanField()
-    score = models.FloatField()
-    score_band = models.CharField(max_length=32, choices=ScoreBand.choices)
+    # Null for an EMERGENCY_OVERRIDE row -- it never ran the scoring pipeline, so
+    # "not applicable" is honest here rather than a misleading sentinel like score=100.
+    gate_passed = models.BooleanField(null=True, blank=True)
+    score = models.FloatField(null=True, blank=True)
+    score_band = models.CharField(max_length=32, choices=ScoreBand.choices, null=True, blank=True)
     decision_type = models.CharField(max_length=32, choices=DecisionType.choices)
     granted_categories = models.JSONField(default=list, blank=True)
     nurse_path = models.CharField(max_length=16, blank=True, default="")

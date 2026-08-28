@@ -8,6 +8,7 @@ from rest_framework.test import APITestCase
 
 from access.models import AccessSession
 from captures.models import BehavioralCapture, ContextualCapture
+from ledger.models import LedgerEntry
 from patients.models import Patient, PatientAssignment, PatientCategoryRecord
 from staff.models import Staff
 
@@ -416,3 +417,176 @@ class PatientRecordViewTests(APITestCase):
 
         records_resp = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
         self.assertEqual(records_resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class EmergencyOverrideTests(ScoringTestBase):
+    """/api/scoring/emergency-override/ -- "Break the Glass" (CLAUDE.md Emergency
+    Override). Always requires a logged-in session (IsClinicalStaff), still respects
+    the role ceiling table, but bypasses the hard gate/score band/Nurse rule."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role, ward="", on_duty=True):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(
+            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward, on_duty=on_duty
+        )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_override_is_the_only_path_for_nurse_case_3(self):
+        """Nurse neither assigned nor on the patient's ward -- normal decide() hard-
+        denies (engine.py's own comment says BTG is the only remaining path)."""
+        staff, token = self._login("nurseBtg1", "pw-btg-1", "STF-BTG1", Staff.Role.NURSE, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-BTG1", full_name="P", ward="Ward B")
+
+        self.client.post(
+            "/api/captures/contextual/target-patient/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        decide_resp = self.client.post(
+            "/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        self.assertEqual(decide_resp.data["decision_type"], AccessDecision.DecisionType.ACCESS_DENIED)
+
+        override_resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "Patient unresponsive, need immediate chart access"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(override_resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(override_resp.data["decision_type"], AccessDecision.DecisionType.EMERGENCY_OVERRIDE)
+        self.assertEqual(override_resp.data["granted_categories"], list(range(1, 14)))
+        self.assertIsNone(override_resp.data["score"])
+        self.assertIsNone(override_resp.data["score_band"])
+
+    def test_override_still_respects_role_ceiling(self):
+        """A clerk invoking BTG still only gets categories 1-2 -- the role ceiling is
+        the one boundary override doesn't cross."""
+        staff, token = self._login("clerkBtg1", "pw-btg-2", "STF-BTG2", Staff.Role.CLERK)
+        patient = Patient.objects.create(hospital_number="HN-BTG2", full_name="P", ward="Ward A")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "Need billing folder number urgently"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["granted_categories"], [1, 2])
+
+    def test_override_bypasses_hard_behavioral_gate(self):
+        """Same wildly-mismatched-typing setup as EngineFactorTests' hard-gate test
+        (normal decide() would ACCESS_DENIED) -- BTG never even looks at behavioral
+        similarity, so it must still succeed."""
+        staff = self._make_staff("docBtgGate", "STF-BTG3", Staff.Role.DOCTOR, ward="Ward A", on_duty=True)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-BTG3", full_name="P", ward="Ward A")
+        behavioral, contextual = self._make_captures(
+            session, keystroke_features=dict(MISMATCHED_KEYSTROKE_FEATURES), patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.ASSIGNED,
+        )
+        baseline_source = BehavioralCapture(keystroke_features={"login": dict(SAMPLE_KEYSTROKE_FEATURES), "session_windows": []})
+        self._matching_baseline(staff, session, baseline_source)
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": "docBtgGate", "password": "pw-scoring-test-1", "device_id": "dev-1", "device_type": "desktop"},
+            format="json",
+        )
+        token = resp.data["token"]
+        override_resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "Hard gate false positive, verified identity in person"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(override_resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(override_resp.data["granted_categories"], list(range(1, 14)))
+
+    def test_reason_required_and_must_meet_minimum_length(self):
+        _staff, token = self._login("docBtg4", "pw-btg-4", "STF-BTG4", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-BTG4", full_name="P", ward="Ward A")
+
+        for body in [{"patient_id": patient.id}, {"patient_id": patient.id, "reason": "too short"}]:
+            resp = self.client.post("/api/scoring/emergency-override/", body, format="json", **self._auth(token))
+            self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_admin_and_security_officer_rejected(self):
+        for role, suffix in [(Staff.Role.ADMIN, "adm"), (Staff.Role.SECURITY_OFFICER, "sec")]:
+            _staff, token = self._login(f"nonClinicalBtg{suffix}", f"pw-btg-nc-{suffix}", f"STF-BTG-NC-{suffix}", role)
+            patient = Patient.objects.create(hospital_number=f"HN-BTG-NC-{suffix}", full_name="P", ward="Ward A")
+            resp = self.client.post(
+                "/api/scoring/emergency-override/",
+                {"patient_id": patient.id, "reason": "Should never reach here"},
+                format="json",
+                **self._auth(token),
+            )
+            self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_writes_exactly_one_ledger_entry_with_reason(self):
+        staff, token = self._login("docBtg5", "pw-btg-5", "STF-BTG5", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-BTG5", full_name="P", ward="Ward A")
+        reason = "Trauma case, patient unconscious on arrival"
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": reason},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        entries = LedgerEntry.objects.using("ledger").filter(staff_id="STF-BTG5")
+        self.assertEqual(entries.count(), 1)
+        entry = entries.first()
+        self.assertEqual(entry.event_type, LedgerEntry.EventType.EMERGENCY_OVERRIDE)
+        self.assertEqual(entry.patient_hospital_number, "HN-BTG5")
+        self.assertEqual(entry.details["reason"], reason)
+        self.assertEqual(entry.details["granted_categories"], list(range(1, 14)))
+
+    def test_baseline_not_reinforced_by_override(self):
+        staff, token = self._login("docBtg6", "pw-btg-6", "STF-BTG6", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-BTG6", full_name="P", ward="Ward A")
+        BehavioralBaseline.objects.create(staff=staff, sample_count=3)
+
+        self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "Confirming baseline stays untouched"},
+            format="json",
+            **self._auth(token),
+        )
+
+        baseline = BehavioralBaseline.objects.get(staff=staff)
+        self.assertEqual(baseline.sample_count, 3)
+
+    def test_records_endpoint_works_after_an_override(self):
+        _staff, token = self._login("docBtg7", "pw-btg-7", "STF-BTG7", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-BTG7", full_name="P", ward="Ward A")
+        PatientCategoryRecord.objects.bulk_create(
+            PatientCategoryRecord(patient=patient, category=c, content={"notes": f"cat {c}"})
+            for c, _ in PatientCategoryRecord.Category.choices
+        )
+
+        override_resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "Need full chart, code blue in progress"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(override_resp.status_code, status.HTTP_201_CREATED)
+
+        records_resp = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
+        self.assertEqual(records_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(records_resp.data["decision_type"], AccessDecision.DecisionType.EMERGENCY_OVERRIDE)
+        self.assertEqual(len(records_resp.data["records"]), 13)
