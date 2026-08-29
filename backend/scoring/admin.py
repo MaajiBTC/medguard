@@ -22,8 +22,8 @@ class BehavioralBaselineAdmin(admin.ModelAdmin):
 
 @admin.register(AccessDecision)
 class AccessDecisionAdmin(admin.ModelAdmin):
-    list_display = ("session", "patient", "decision_type", "score", "nurse_path", "computed_at")
-    list_filter = ("decision_type", "score_band", "nurse_path")
+    list_display = ("session", "patient", "decision_type", "score", "role_rule_path", "computed_at")
+    list_filter = ("decision_type", "score_band", "role_rule_path")
     readonly_fields = (
         "session",
         "patient",
@@ -33,7 +33,7 @@ class AccessDecisionAdmin(admin.ModelAdmin):
         "score_band",
         "decision_type",
         "granted_categories",
-        "nurse_path",
+        "role_rule_path",
         "factor_breakdown",
     )
     search_fields = ("session__staff__staff_id", "patient__hospital_number")

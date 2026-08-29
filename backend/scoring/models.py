@@ -63,7 +63,9 @@ class AccessDecision(models.Model):
     score_band = models.CharField(max_length=32, choices=ScoreBand.choices, null=True, blank=True)
     decision_type = models.CharField(max_length=32, choices=DecisionType.choices)
     granted_categories = models.JSONField(default=list, blank=True)
-    nurse_path = models.CharField(max_length=16, blank=True, default="")
+    # Role-specific rule path (e.g. nurse's "assigned"/"same_ward"/"neither", doctor's
+    # "off_duty_denied") -- empty string when no role-specific rule applied.
+    role_rule_path = models.CharField(max_length=32, blank=True, default="")
     factor_breakdown = models.JSONField(default=dict, blank=True)
 
     def __str__(self):

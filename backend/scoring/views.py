@@ -3,6 +3,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from captures.models import ContextualCapture
+from captures.services import compute_patient_assignment_status
 from ledger.models import LedgerEntry
 from ledger.services import record_event
 from patients.models import Patient, PatientCategoryRecord
@@ -77,7 +79,7 @@ class DecideView(APIView):
                 "score": decision.score,
                 "score_band": decision.score_band,
                 "granted_categories": decision.granted_categories,
-                "nurse_path": decision.nurse_path,
+                "role_rule_path": decision.role_rule_path,
                 "factor_breakdown": decision.factor_breakdown,
             },
         )
@@ -88,7 +90,7 @@ class DecideView(APIView):
 class EmergencyOverrideView(APIView):
     """POST /api/scoring/emergency-override/ -- {patient_id, reason}
 
-    "Break the Glass": always available regardless of score or role-match (CLAUDE.md
+    "Break the Glass": available regardless of score or role-match (CLAUDE.md
     Emergency Override), for the exact situation scoring/engine.py's Nurse rule
     comment already calls out -- e.g. a nurse who is neither assigned to the patient
     nor on their ward has no other path to access at all.
@@ -100,10 +102,22 @@ class EmergencyOverrideView(APIView):
     band, and the Nurse rule's assignment/ward matching, but a clerk invoking this
     still only gets categories 1-2, never the full 13.
 
+    Not unconditional, though (user request, 2026-08-29): it is blocked for a doctor
+    or nurse who is BOTH off duty AND has no connection to the patient at all (not
+    assigned, not even on their ward) -- the one combination where the system has
+    already concluded there is no legitimate reason to be looking at this patient.
+    Every other combination (on duty regardless of assignment; off duty but same
+    ward; off duty but assigned) still has BTG available, including a nurse's
+    existing "neither assigned nor same-ward but on duty" rescue path.
+
     Deliberately does NOT check contextual.target_patient_id the way DecideView does
     -- the whole point of an emergency path is that it must still work even if the
     normal capture/contextual state is missing, stale, or itself the reason normal
-    access failed.
+    access failed. For the same reason, the new availability gate below looks up
+    on-duty status and assignment/ward relationship FRESH (live staff.on_duty,
+    captures.services.compute_patient_assignment_status) rather than depending on
+    ContextualCapture -- unlike scoring/engine.py's Doctor rule, which reads the
+    session-time snapshot (contextual.on_duty_at_login) like every other factor there.
 
     Baseline is deliberately NOT reinforced here (unlike DecideView) -- an override is
     by definition an abnormal session, so folding it into the rolling baseline could
@@ -120,6 +134,22 @@ class EmergencyOverrideView(APIView):
 
         session = request.auth
         patient = get_object_or_404(Patient, pk=patient_id)
+
+        assignment_status = compute_patient_assignment_status(session.staff, patient)
+        if (
+            not session.staff.on_duty
+            and assignment_status == ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Break the Glass is not available: you are off duty and have "
+                        "no connection (assignment or ward) to this patient."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         granted_categories = sorted(ROLE_CEILINGS[session.staff.role])
 
         decision = AccessDecision.objects.create(
@@ -130,7 +160,7 @@ class EmergencyOverrideView(APIView):
             score_band=None,
             decision_type=AccessDecision.DecisionType.EMERGENCY_OVERRIDE,
             granted_categories=granted_categories,
-            nurse_path="",
+            role_rule_path="",
             factor_breakdown={"reason": reason},
         )
 

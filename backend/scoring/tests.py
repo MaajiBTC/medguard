@@ -148,15 +148,33 @@ class EngineFactorTests(ScoringTestBase):
         self.assertEqual(decision.granted_categories, [])
 
     def test_reduced_band_excludes_high_sensitivity_categories(self):
-        staff = self._make_staff("docReduced", "STF-703", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        """on_duty stays True here deliberately: off-duty + not-assigned + not-same-
+        ward is now the new Doctor hard-deny combination (see DoctorRuleTests) -- this
+        test is about the reduced-band category-exclusion mechanism itself, not that
+        rule, so it reaches 40-69% via ward + device + location + login-time instead."""
+        staff = self._make_staff("docReduced", "STF-703", Staff.Role.DOCTOR, ward="Ward A", on_duty=True)
         session = self._make_session(staff)
         patient = Patient.objects.create(hospital_number="HN-703", full_name="P4", ward="Ward B")
         behavioral, contextual = self._make_captures(
             session, patient=patient,
             assignment_status=ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD,
         )
-        self._matching_baseline(staff, session, behavioral)
-        # on_duty fails (-20), ward fails (-15) -> 65% -> reduced band.
+        # Keystroke/mouse match the baseline (gate passes, those two factors stay
+        # ~100%); device/network/login-hour deliberately don't.
+        keystroke_feats = extract_keystroke_features(behavioral)
+        mouse_feats = extract_mouse_features(behavioral.mouse_events)
+        login_hour = session.started_at.hour + session.started_at.minute / 60
+        BehavioralBaseline.objects.create(
+            staff=staff,
+            sample_count=5,
+            keystroke_stats={k: {"mean": v, "stdev": 0.0} for k, v in keystroke_feats.items()},
+            mouse_stats={k: {"mean": v, "stdev": 0.0} for k, v in mouse_feats.items()},
+            known_device_ids=["some-other-device"],
+            login_hour_stats={"mean": (login_hour + 12) % 24, "stdev": 0.1},
+            known_network_segments=["some-other-segment"],
+        )
+        # on_duty passes (+20), keystroke/mouse pass (+30+15); ward, device, login
+        # time, location all fail (-15-10-7-3) -> 65% -> reduced band.
         decision = compute_access_decision(session, patient)
         self.assertAlmostEqual(decision.score, 65.0, places=5)
         self.assertEqual(decision.decision_type, AccessDecision.DecisionType.REDUCED_ACCESS)
@@ -191,7 +209,7 @@ class NurseRuleTests(ScoringTestBase):
         self._matching_baseline(staff, session, behavioral)
 
         decision = compute_access_decision(session, patient)
-        self.assertEqual(decision.nurse_path, "assigned")
+        self.assertEqual(decision.role_rule_path, "assigned")
         self.assertEqual(decision.decision_type, AccessDecision.DecisionType.STANDARD_ACCESS)
         self.assertEqual(decision.granted_categories, list(range(1, 14)))
 
@@ -207,7 +225,7 @@ class NurseRuleTests(ScoringTestBase):
 
         decision = compute_access_decision(session, patient)
         self.assertEqual(decision.score, 100.0)  # everything matches, including ward (same-ward counts)
-        self.assertEqual(decision.nurse_path, "same_ward")
+        self.assertEqual(decision.role_rule_path, "same_ward")
         # Forced regardless of the underlying (silent-band) score.
         self.assertEqual(decision.decision_type, AccessDecision.DecisionType.AUDITED_DEVIATION)
         self.assertEqual(decision.granted_categories, list(range(1, 14)))
@@ -228,7 +246,7 @@ class NurseRuleTests(ScoringTestBase):
         # Everything except ward matches -> the raw weighted score would be 85%
         # (AUDITED_DEVIATION territory), but the nurse rule must override that.
         self.assertAlmostEqual(decision.score, 85.0, places=5)
-        self.assertEqual(decision.nurse_path, "neither")
+        self.assertEqual(decision.role_rule_path, "neither")
         self.assertEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
         self.assertEqual(decision.granted_categories, [])
 
@@ -250,6 +268,97 @@ class NurseRuleTests(ScoringTestBase):
         self.assertFalse(decision.gate_passed)
         self.assertEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
         self.assertEqual(decision.granted_categories, [])
+
+
+class DoctorRuleTests(ScoringTestBase):
+    """The 2026-08-29 doctor carve-out: off duty AND no connection to the patient at
+    all (not assigned, not same ward) -> hard-denied, same standard as the Nurse
+    rule's own worst case. Every other combination is untouched."""
+
+    def test_off_duty_and_neither_assigned_nor_same_ward_is_denied(self):
+        staff = self._make_staff("docOffDutyNeither", "STF-900", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-900", full_name="P14", ward="Ward B")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD,
+        )
+        self._matching_baseline(staff, session, behavioral)
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "off_duty_denied")
+        self.assertEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+        self.assertEqual(decision.granted_categories, [])
+
+    def test_off_duty_but_assigned_uses_standard_scoring(self):
+        staff = self._make_staff("docOffDutyAssigned", "STF-901", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-901", full_name="P15", ward="Ward B")
+        PatientAssignment.objects.create(patient=patient, staff=staff, role_in_assignment="doctor")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient, assignment_status=ContextualCapture.PatientAssignmentStatus.ASSIGNED
+        )
+        self._matching_baseline(staff, session, behavioral)
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "")
+        self.assertNotEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+
+    def test_off_duty_but_same_ward_uses_standard_scoring(self):
+        staff = self._make_staff("docOffDutySameWard", "STF-902", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-902", full_name="P16", ward="Ward A")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED,
+        )
+        self._matching_baseline(staff, session, behavioral)
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "")
+        self.assertNotEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+
+    def test_on_duty_neither_assigned_nor_same_ward_uses_standard_scoring(self):
+        """This is the exact scenario demoed live before this rule existed: on-duty
+        doesn't trigger the new carve-out, so it still just lands in REDUCED_ACCESS
+        via the normal weighted score (on_duty passes, ward fails -> 85%, actually;
+        the live demo also had on_duty failing, landing at 65% -- here on_duty is
+        True so only the -15% ward penalty applies)."""
+        staff = self._make_staff("docOnDutyNeither", "STF-903", Staff.Role.DOCTOR, ward="Ward A", on_duty=True)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-903", full_name="P17", ward="Ward B")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD,
+        )
+        self._matching_baseline(staff, session, behavioral)
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "")
+        self.assertNotEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+
+    def test_gate_overrides_doctor_off_duty_denial(self):
+        """The hard gate is checked before the new doctor rule, same as it already
+        takes precedence over the Nurse rule -- confirms the new rule doesn't
+        accidentally skip the gate."""
+        staff = self._make_staff("docGateOffDuty", "STF-904", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-904", full_name="P18", ward="Ward B")
+        mismatched_features = dict(MISMATCHED_KEYSTROKE_FEATURES)
+        behavioral, contextual = self._make_captures(
+            session, keystroke_features=mismatched_features, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD,
+        )
+        baseline_source = BehavioralCapture(keystroke_features={"login": dict(SAMPLE_KEYSTROKE_FEATURES), "session_windows": []})
+        self._matching_baseline(staff, session, baseline_source)
+
+        decision = compute_access_decision(session, patient)
+        self.assertFalse(decision.gate_passed)
+        self.assertEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+        self.assertEqual(decision.granted_categories, [])
+        # role_rule_path stays "" -- the gate's early return never reaches the
+        # doctor-rule block, so it must not be misreported as the cause.
+        self.assertEqual(decision.role_rule_path, "")
 
 
 class BaselineReinforcementAndAPITests(ScoringTestBase):
@@ -590,3 +699,111 @@ class EmergencyOverrideTests(ScoringTestBase):
         self.assertEqual(records_resp.status_code, status.HTTP_200_OK)
         self.assertEqual(records_resp.data["decision_type"], AccessDecision.DecisionType.EMERGENCY_OVERRIDE)
         self.assertEqual(len(records_resp.data["records"]), 13)
+
+    # -- BTG availability gate (2026-08-29): blocked only when off duty AND neither
+    # assigned nor on the patient's ward -- the same combination that now hard-denies
+    # normal access. Every other combination keeps BTG available. --
+
+    def test_btg_blocked_for_off_duty_unconnected_doctor(self):
+        _staff, token = self._login(
+            "docBtgBlocked", "pw-btg-8", "STF-BTG8", Staff.Role.DOCTOR, ward="Ward A", on_duty=False
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG8", full_name="P", ward="Ward B")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "Should be blocked before this is evaluated"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("off duty", resp.data["detail"])
+
+    def test_btg_blocked_for_off_duty_unconnected_nurse(self):
+        """New: unlike the normal Nurse rule (unaffected by duty status), BTG itself
+        now additionally requires the nurse be on duty in her worst case."""
+        _staff, token = self._login(
+            "nurseBtgBlocked", "pw-btg-9", "STF-BTG9", Staff.Role.NURSE, ward="Ward A", on_duty=False
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG9", full_name="P", ward="Ward B")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "Should be blocked before this is evaluated"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_btg_available_for_on_duty_unconnected_doctor(self):
+        _staff, token = self._login(
+            "docBtgOnDuty", "pw-btg-10", "STF-BTG10", Staff.Role.DOCTOR, ward="Ward A", on_duty=True
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG10", full_name="P", ward="Ward B")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "On duty, so BTG stays available"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_btg_available_for_off_duty_assigned_doctor(self):
+        staff, token = self._login(
+            "docBtgAssigned", "pw-btg-11", "STF-BTG11", Staff.Role.DOCTOR, ward="Ward A", on_duty=False
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG11", full_name="P", ward="Ward B")
+        PatientAssignment.objects.create(patient=patient, staff=staff, role_in_assignment="doctor")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "Off duty but assigned, BTG stays available"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_btg_available_for_off_duty_same_ward_doctor(self):
+        _staff, token = self._login(
+            "docBtgSameWard", "pw-btg-12", "STF-BTG12", Staff.Role.DOCTOR, ward="Ward A", on_duty=False
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG12", full_name="P", ward="Ward A")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "Off duty but same ward, BTG stays available"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_btg_available_for_on_duty_unconnected_nurse(self):
+        _staff, token = self._login(
+            "nurseBtgOnDuty", "pw-btg-13", "STF-BTG13", Staff.Role.NURSE, ward="Ward A", on_duty=True
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG13", full_name="P", ward="Ward B")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "On duty, her rescue path stays open"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_btg_available_for_off_duty_pharmacist(self):
+        """Pharmacist/lab-tech/clerk have no assignment/ward concept -- the gate
+        never applies to them, regardless of duty status."""
+        _staff, token = self._login(
+            "pharmBtgOffDuty", "pw-btg-14", "STF-BTG14", Staff.Role.PHARMACIST, on_duty=False
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG14", full_name="P", ward="Ward A")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason": "No assignment concept for this role"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)

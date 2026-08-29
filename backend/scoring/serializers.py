@@ -31,7 +31,7 @@ class AccessDecisionSerializer(serializers.ModelSerializer):
             "score_band",
             "decision_type",
             "granted_categories",
-            "nurse_path",
+            "role_rule_path",
             "factor_breakdown",
         ]
         read_only_fields = fields

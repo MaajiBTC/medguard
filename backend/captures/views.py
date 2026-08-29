@@ -4,8 +4,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from patients.models import Patient, PatientAssignment
-from staff.models import Staff
+from patients.models import Patient
 
 from .models import ContextualCapture
 from .serializers import (
@@ -14,6 +13,7 @@ from .serializers import (
     ContextualCaptureSerializer,
     TargetPatientSerializer,
 )
+from .services import compute_patient_assignment_status
 
 
 class BehavioralEventsView(APIView):
@@ -95,7 +95,7 @@ class TargetPatientView(APIView):
         patient = get_object_or_404(Patient, pk=serializer.validated_data["patient_id"])
 
         capture.target_patient = patient
-        capture.patient_assignment_status = self._compute_assignment_status(staff, patient)
+        capture.patient_assignment_status = compute_patient_assignment_status(staff, patient)
         capture.patient_assignment_checked_at = timezone.now()
         capture.save(
             update_fields=[
@@ -106,27 +106,6 @@ class TargetPatientView(APIView):
         )
 
         return Response(ContextualCaptureSerializer(capture).data)
-
-    @staticmethod
-    def _compute_assignment_status(staff, patient):
-        if staff.role not in (Staff.Role.DOCTOR, Staff.Role.NURSE):
-            return ContextualCapture.PatientAssignmentStatus.NOT_APPLICABLE
-
-        is_assigned = PatientAssignment.objects.filter(
-            patient=patient, staff=staff, active=True
-        ).exists()
-        if is_assigned:
-            return ContextualCapture.PatientAssignmentStatus.ASSIGNED
-
-        same_ward = (
-            bool(staff.ward)
-            and bool(patient.ward)
-            and staff.ward.strip().lower() == patient.ward.strip().lower()
-        )
-        if same_ward:
-            return ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED
-
-        return ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
 
 
 class ContextualCaptureDetailView(APIView):

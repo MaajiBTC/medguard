@@ -119,7 +119,7 @@ def compute_access_decision(session, patient):
             score_band=AccessDecision.ScoreBand.DENIED,
             decision_type=AccessDecision.DecisionType.ACCESS_DENIED,
             granted_categories=[],
-            nurse_path="",
+            role_rule_path="",
             factor_breakdown={"gate": {"keystroke_touch_similarity": keystroke_touch_score}},
         )
         return decision
@@ -179,20 +179,36 @@ def compute_access_decision(session, patient):
     if score_band == AccessDecision.ScoreBand.DENIED:
         granted_categories = []
 
-    nurse_path = ""
+    role_rule_path = ""
     if staff.role == Staff.Role.NURSE:
         if assignment_status == ContextualCapture.PatientAssignmentStatus.ASSIGNED:
-            nurse_path = "assigned"
+            role_rule_path = "assigned"
             # standard scoring result stands as computed above
         elif assignment_status == ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED:
-            nurse_path = "same_ward"
+            role_rule_path = "same_ward"
             decision_type = AccessDecision.DecisionType.AUDITED_DEVIATION
             granted_categories = sorted(ROLE_CEILINGS[Staff.Role.NURSE])
         else:
             # Neither assigned nor same ward -- hard-denied regardless of score
-            # (user correction 2026-08-25; see CLAUDE.md's Nurse rule). The only
-            # path to access here is Emergency Override, a separate mechanism.
-            nurse_path = "neither"
+            # (user correction 2026-08-25; see CLAUDE.md's Nurse rule). Break the
+            # Glass remains available here as long as the nurse is on duty (see
+            # scoring.views.EmergencyOverrideView's own gate) -- CLAUDE.md's
+            # documented rescue path for this exact case.
+            role_rule_path = "neither"
+            decision_type = AccessDecision.DecisionType.ACCESS_DENIED
+            granted_categories = []
+    elif staff.role == Staff.Role.DOCTOR:
+        if (
+            not contextual.on_duty_at_login
+            and assignment_status == ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
+        ):
+            # Off duty AND no connection to this patient at all (not assigned, not
+            # even on their ward) -- hard-denied regardless of score, same standard
+            # the Nurse rule already applies to its own worst case (user request,
+            # 2026-08-29). Every other doctor combination (on duty regardless of
+            # assignment; off duty but same ward; off duty but assigned) is
+            # untouched and keeps today's standard weighted-scoring result.
+            role_rule_path = "off_duty_denied"
             decision_type = AccessDecision.DecisionType.ACCESS_DENIED
             granted_categories = []
 
@@ -204,7 +220,7 @@ def compute_access_decision(session, patient):
         score_band=score_band,
         decision_type=decision_type,
         granted_categories=granted_categories,
-        nurse_path=nurse_path,
+        role_rule_path=role_rule_path,
         factor_breakdown={
             "weights": weights,
             "factor_scores": factor_scores,
