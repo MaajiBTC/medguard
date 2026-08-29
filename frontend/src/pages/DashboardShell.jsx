@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 // Small hand-rolled icon set (no icon library dependency) -- just enough to match
 // the sidebar/search affordances the reference design uses.
 function SearchIcon() {
@@ -47,16 +49,58 @@ function LedgerIcon() {
   );
 }
 
-export { SearchIcon, StaffIcon, PatientsIcon, LedgerIcon };
+function OverviewIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="7" height="9" rx="1" />
+      <rect x="14" y="3" width="7" height="5" rx="1" />
+      <rect x="14" y="12" width="7" height="9" rx="1" />
+      <rect x="3" y="16" width="7" height="5" rx="1" />
+    </svg>
+  );
+}
 
-/** Shared layout for the three authenticated dashboards: a plum-deep left sidebar
- * (wordmark, role-scoped nav, logout) plus a main area (page title/subtitle + staff
- * identity, then a white card containing `children`). Uses the fixed light brand
- * palette (--plum/--plum-deep/--lavender/--off-white), same as the login page. */
+function DisasterIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+function MenuIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
+export { SearchIcon, StaffIcon, PatientsIcon, LedgerIcon, OverviewIcon, DisasterIcon };
+
+/** Shared layout for the three authenticated dashboards: a plum-deep off-canvas
+ * drawer (wordmark, role-scoped nav, logout), opened via a hamburger button in the
+ * header, plus a main area (page title/subtitle + staff identity, then a white card
+ * containing `children`). Closed by default -- the dashboard's own content is what
+ * you see first, not the menu. Uses the fixed light brand palette (--plum/
+ * --plum-deep/--lavender/--off-white), same as the login page. */
 function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, title, subtitle, children }) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const selectNav = (key) => {
+    onNavChange(key);
+    setDrawerOpen(false);
+  };
+
   return (
     <div className="dashboard-shell">
-      <aside className="sidebar">
+      {drawerOpen && <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />}
+
+      <aside className={`sidebar${drawerOpen ? ' open' : ''}`}>
         <div className="sidebar-brand">MedGuard</div>
 
         {navItems && navItems.length > 0 && (
@@ -66,7 +110,7 @@ function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, ti
                 key={item.key}
                 type="button"
                 className={`sidebar-nav-item${activeItem === item.key ? ' active' : ''}`}
-                onClick={() => onNavChange(item.key)}
+                onClick={() => selectNav(item.key)}
               >
                 {item.icon}
                 {item.label}
@@ -83,9 +127,19 @@ function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, ti
 
       <div className="dashboard-main">
         <header className="shell-header">
-          <div>
-            <h1>{title}</h1>
-            {subtitle && <p className="shell-subtitle">{subtitle}</p>}
+          <div className="shell-header-title">
+            <button
+              type="button"
+              className="menu-button"
+              onClick={() => setDrawerOpen((open) => !open)}
+              aria-label="Toggle navigation menu"
+            >
+              <MenuIcon />
+            </button>
+            <div>
+              <h1>{title}</h1>
+              {subtitle && <p className="shell-subtitle">{subtitle}</p>}
+            </div>
           </div>
           {staff && (
             <div className="shell-identity">

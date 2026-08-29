@@ -1,9 +1,20 @@
 import { request } from './client';
 
-/** GET /api/patients/?q=... — any authenticated staff, matches hospital_number or full_name. */
-function searchPatients(q) {
-  const params = q ? `?q=${encodeURIComponent(q)}` : '';
-  return request(`/patients/${params}`);
+/** GET /api/patients/?q=...&ward=... — any authenticated staff, matches
+ * hospital_number or full_name, optionally filtered to an exact ward (Admin
+ * dashboard's ward-category drill-down). */
+function searchPatients(q, ward) {
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (ward) params.set('ward', ward);
+  const qs = params.toString();
+  return request(`/patients/${qs ? `?${qs}` : ''}`);
+}
+
+/** GET /api/patients/summary/ — admin-only real counts (total, by_ward) for the
+ * Overview page and ward-category tiles. */
+function getPatientSummary() {
+  return request('/patients/summary/');
 }
 
 /** GET /api/patients/assigned-to-me/ — active PatientAssignment rows for the caller. */
@@ -51,6 +62,7 @@ function deactivatePatientAssignment(patientId, assignmentId) {
 
 export {
   searchPatients,
+  getPatientSummary,
   getMyAssignedPatients,
   createPatient,
   updatePatientWard,

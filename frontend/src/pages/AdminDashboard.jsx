@@ -6,6 +6,7 @@ import {
   deactivatePatientAssignment,
   getAllPatientCategoryRecords,
   getPatientAssignments,
+  getPatientSummary,
   searchPatients,
   updatePatientCategory,
   updatePatientWard,
@@ -18,12 +19,14 @@ import {
 import {
   createStaff,
   deactivateStaff,
+  getStaffSummary,
   reactivateStaff,
   searchStaff,
   updateStaffDuty,
 } from '../api/staff';
 import Modal from '../components/Modal';
-import DashboardShell, { PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
+import { WARDS } from '../wards';
+import DashboardShell, { DisasterIcon, OverviewIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
 
 const STAFF_ROLES = ['doctor', 'nurse', 'pharmacist', 'lab_technician', 'clerk', 'admin', 'security_officer'];
 const ASSIGNMENT_ROLES = ['doctor', 'nurse'];
@@ -36,10 +39,56 @@ function formatRole(role) {
   return role.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
 }
 
+function wardLabel(value) {
+  return WARDS.find((w) => w.value === value)?.label || value;
+}
+
+function OverviewPanel() {
+  const [staffSummary, setStaffSummary] = useState(null);
+  const [patientSummary, setPatientSummary] = useState(null);
+  const [disasterStatus, setDisasterStatus] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    Promise.all([getStaffSummary(), getPatientSummary(), getDisasterModeStatus()])
+      .then(([staff, patients, disaster]) => {
+        setStaffSummary(staff);
+        setPatientSummary(patients);
+        setDisasterStatus(disaster);
+      })
+      .catch((err) => setError(errorMessage(err)));
+  }, []);
+
+  if (error) return <p role="alert" className="dev-error">{error}</p>;
+  if (!staffSummary || !patientSummary || !disasterStatus) return <p>Loading overview…</p>;
+
+  return (
+    <div className="overview-grid">
+      <div className="stat-card">
+        <span className="stat-label">Total Patients</span>
+        <span className="stat-value">{patientSummary.total}</span>
+      </div>
+      <div className="stat-card">
+        <span className="stat-label">Total Staff</span>
+        <span className="stat-value">{staffSummary.total}</span>
+      </div>
+      <div className="stat-card">
+        <span className="stat-label">Staff On Duty</span>
+        <span className="stat-value">{staffSummary.on_duty}</span>
+      </div>
+      <div className={`stat-card${disasterStatus.active ? ' stat-card-alert' : ''}`}>
+        <span className="stat-label">Disaster Mode</span>
+        <span className="stat-value">{disasterStatus.active ? 'ACTIVE' : 'Inactive'}</span>
+      </div>
+    </div>
+  );
+}
+
 function StaffPanel() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
-  const [roleFilter, setRoleFilter] = useState('all');
+  const [selectedRole, setSelectedRole] = useState(null);
+  const [roleCounts, setRoleCounts] = useState(null);
   const [selected, setSelected] = useState(null);
   const [ward, setWard] = useState('');
   const [onDuty, setOnDuty] = useState(false);
@@ -52,14 +101,42 @@ function StaffPanel() {
     username: '', password: '', staff_id: '', full_name: '', role: 'doctor', ward: '', on_duty: false, on_call: false,
   });
 
+  const refreshCounts = () => {
+    getStaffSummary().then(setRoleCounts).catch((err) => setError(errorMessage(err)));
+  };
+
+  useEffect(() => {
+    refreshCounts();
+  }, []);
+
   const runSearch = async (event) => {
     event.preventDefault();
     setError(null);
     try {
-      setResults(await searchStaff(query));
+      setResults(await searchStaff(query, selectedRole || undefined));
     } catch (err) {
       setError(errorMessage(err));
     }
+  };
+
+  const selectRole = async (role) => {
+    setSelectedRole(role);
+    setQuery('');
+    setSelected(null);
+    setNotice(null);
+    setError(null);
+    try {
+      setResults(await searchStaff('', role));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const backToCategories = () => {
+    setSelectedRole(null);
+    setQuery('');
+    setResults([]);
+    setSelected(null);
   };
 
   const select = (s) => {
@@ -103,76 +180,81 @@ function StaffPanel() {
       setNotice(`Staff account "${newStaff.staff_id}" created.`);
       setNewStaff({ username: '', password: '', staff_id: '', full_name: '', role: 'doctor', ward: '', on_duty: false, on_call: false });
       setCreateOpen(false);
+      refreshCounts();
     } catch (err) {
       setError(errorMessage(err));
     }
   };
 
-  const filteredResults = roleFilter === 'all' ? results : results.filter((s) => s.role === roleFilter);
+  const showingCategories = selectedRole === null && !query.trim();
 
   return (
     <div>
+      {selectedRole !== null && (
+        <button type="button" className="back-link" onClick={backToCategories}>
+          ← Back to categories
+        </button>
+      )}
+
       <div className="search-row">
         <form className="search-bar" onSubmit={runSearch} role="search">
           <SearchIcon />
-          <input placeholder="Staff ID or name" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input
+            placeholder={selectedRole ? `Search within ${formatRole(selectedRole)}` : 'Staff ID or name'}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
         </form>
         <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>
           + Add Staff
         </button>
       </div>
 
-      <div className="role-tabs">
-        <button
-          type="button"
-          className={`role-tab${roleFilter === 'all' ? ' active' : ''}`}
-          onClick={() => setRoleFilter('all')}
-        >
-          All
-        </button>
-        {STAFF_ROLES.map((r) => (
-          <button
-            key={r}
-            type="button"
-            className={`role-tab${roleFilter === r ? ' active' : ''}`}
-            onClick={() => setRoleFilter(r)}
-          >
-            {formatRole(r)}
-          </button>
-        ))}
-      </div>
-
       {error && <p role="alert" className="dev-error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
 
-      {filteredResults.map((s) => (
-        <div className="card-row" key={s.id}>
-          <div className="card-row-main">
-            <div className="name-line">
-              {s.full_name}
-              <span className={`badge ${s.account_active ? 'badge-active' : 'badge-inactive'}`}>
-                {s.account_active ? 'Active' : 'Deactivated'}
-              </span>
-            </div>
-            <div className="meta-line">
-              {formatRole(s.role)} · {s.staff_id}
-              {s.ward ? ` · ${s.ward}` : ''}
-            </div>
-          </div>
-          <div className="card-row-actions">
-            <button type="button" className="btn-secondary" onClick={() => select(s)}>
-              Manage
+      {showingCategories ? (
+        <div className="category-grid">
+          {STAFF_ROLES.map((r) => (
+            <button key={r} type="button" className="category-tile" onClick={() => selectRole(r)}>
+              <span className="category-tile-label">{formatRole(r)}</span>
+              <span className="category-tile-count">{roleCounts ? roleCounts.by_role[r] ?? 0 : '—'}</span>
             </button>
-          </div>
+          ))}
         </div>
-      ))}
+      ) : (
+        results.map((s) => (
+          <div className="card-row" key={s.id}>
+            <div className="card-row-main">
+              <div className="name-line">
+                {s.full_name}
+                <span className={`badge ${s.account_active ? 'badge-active' : 'badge-inactive'}`}>
+                  {s.account_active ? 'Active' : 'Deactivated'}
+                </span>
+              </div>
+              <div className="meta-line">
+                {formatRole(s.role)} · {s.staff_id}
+                {s.ward ? ` · ${wardLabel(s.ward)}` : ''}
+              </div>
+            </div>
+            <div className="card-row-actions">
+              <button type="button" className="btn-secondary" onClick={() => select(s)}>
+                Manage
+              </button>
+            </div>
+          </div>
+        ))
+      )}
 
       {selected && (
         <div className="panel-card">
           <h3>{selected.full_name} ({selected.staff_id})</h3>
           <label className="form-label">
             Ward
-            <input className="form-input" value={ward} onChange={(e) => setWard(e.target.value)} />
+            <select className="form-input" value={ward} onChange={(e) => setWard(e.target.value)}>
+              <option value="">— None —</option>
+              {WARDS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+            </select>
           </label>
           <label className="form-checkbox">
             <input type="checkbox" checked={onDuty} onChange={(e) => setOnDuty(e.target.checked)} />
@@ -218,7 +300,10 @@ function StaffPanel() {
             </label>
             <label className="form-label">
               Ward
-              <input className="form-input" value={newStaff.ward} onChange={(e) => setNewStaff({ ...newStaff, ward: e.target.value })} />
+              <select className="form-input" value={newStaff.ward} onChange={(e) => setNewStaff({ ...newStaff, ward: e.target.value })}>
+                <option value="">— None —</option>
+                {WARDS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+              </select>
             </label>
             <label className="form-checkbox">
               <input type="checkbox" checked={newStaff.on_duty} onChange={(e) => setNewStaff({ ...newStaff, on_duty: e.target.checked })} />
@@ -243,6 +328,8 @@ function StaffPanel() {
 function PatientPanel() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
+  const [selectedWard, setSelectedWard] = useState(null);
+  const [wardCounts, setWardCounts] = useState(null);
   const [selected, setSelected] = useState(null);
   const [ward, setWard] = useState('');
   const [categoryRecords, setCategoryRecords] = useState([]);
@@ -253,16 +340,54 @@ function PatientPanel() {
   const [notice, setNotice] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
 
-  const [newPatient, setNewPatient] = useState({ hospital_number: '', full_name: '', ward: '' });
+  const [newPatient, setNewPatient] = useState({ hospital_number: '', full_name: '', ward: WARDS[0].value });
+
+  const refreshCounts = () => {
+    getPatientSummary().then(setWardCounts).catch((err) => setError(errorMessage(err)));
+  };
+
+  useEffect(() => {
+    refreshCounts();
+  }, []);
 
   const runSearch = async (event) => {
     event.preventDefault();
     setError(null);
     try {
-      setResults(await searchPatients(query));
+      if (selectedWard === 'unassigned') {
+        const all = await searchPatients(query);
+        setResults(all.filter((p) => !p.ward));
+      } else {
+        setResults(await searchPatients(query, selectedWard || undefined));
+      }
     } catch (err) {
       setError(errorMessage(err));
     }
+  };
+
+  const selectWardCategory = async (wardValue) => {
+    setSelectedWard(wardValue);
+    setQuery('');
+    setSelected(null);
+    setNotice(null);
+    setError(null);
+    try {
+      if (wardValue === 'unassigned') {
+        const all = await searchPatients('');
+        setResults(all.filter((p) => !p.ward));
+      } else {
+        setResults(await searchPatients('', wardValue));
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const backToCategories = () => {
+    setSelectedWard(null);
+    setQuery('');
+    setResults([]);
+    setSelected(null);
   };
 
   const select = async (p) => {
@@ -288,6 +413,7 @@ function PatientPanel() {
       const updated = await updatePatientWard(selected.id, ward);
       setSelected(updated);
       setNotice('Ward saved.');
+      refreshCounts();
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -333,19 +459,32 @@ function PatientPanel() {
     try {
       await createPatient(newPatient);
       setNotice(`Patient "${newPatient.hospital_number}" created.`);
-      setNewPatient({ hospital_number: '', full_name: '', ward: '' });
+      setNewPatient({ hospital_number: '', full_name: '', ward: WARDS[0].value });
       setCreateOpen(false);
+      refreshCounts();
     } catch (err) {
       setError(errorMessage(err));
     }
   };
 
+  const showingCategories = selectedWard === null && !query.trim();
+
   return (
     <div>
+      {selectedWard !== null && (
+        <button type="button" className="back-link" onClick={backToCategories}>
+          ← Back to categories
+        </button>
+      )}
+
       <div className="search-row">
         <form className="search-bar" onSubmit={runSearch} role="search">
           <SearchIcon />
-          <input placeholder="Hospital number or name" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input
+            placeholder={selectedWard ? 'Search within this ward' : 'Hospital number or name'}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
         </form>
         <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>
           + Add Patient
@@ -355,29 +494,47 @@ function PatientPanel() {
       {error && <p role="alert" className="dev-error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
 
-      {results.map((p) => (
-        <div className="card-row" key={p.id}>
-          <div className="card-row-main">
-            <div className="name-line">{p.full_name}</div>
-            <div className="meta-line">
-              {p.hospital_number}
-              {p.ward ? ` · ${p.ward}` : ''}
+      {showingCategories ? (
+        <div className="category-grid">
+          {WARDS.map((w) => (
+            <button key={w.value} type="button" className="category-tile" onClick={() => selectWardCategory(w.value)}>
+              <span className="category-tile-label">{w.label}</span>
+              <span className="category-tile-count">{wardCounts ? wardCounts.by_ward[w.value] ?? 0 : '—'}</span>
+            </button>
+          ))}
+          <button type="button" className="category-tile" onClick={() => selectWardCategory('unassigned')}>
+            <span className="category-tile-label">Unassigned</span>
+            <span className="category-tile-count">{wardCounts ? wardCounts.by_ward.unassigned ?? 0 : '—'}</span>
+          </button>
+        </div>
+      ) : (
+        results.map((p) => (
+          <div className="card-row" key={p.id}>
+            <div className="card-row-main">
+              <div className="name-line">{p.full_name}</div>
+              <div className="meta-line">
+                {p.hospital_number}
+                {p.ward ? ` · ${wardLabel(p.ward)}` : ' · Unassigned'}
+              </div>
+            </div>
+            <div className="card-row-actions">
+              <button type="button" className="btn-secondary" onClick={() => select(p)}>
+                Manage
+              </button>
             </div>
           </div>
-          <div className="card-row-actions">
-            <button type="button" className="btn-secondary" onClick={() => select(p)}>
-              Manage
-            </button>
-          </div>
-        </div>
-      ))}
+        ))
+      )}
 
       {selected && (
         <div className="panel-card">
           <h3>{selected.full_name} ({selected.hospital_number})</h3>
           <label className="form-label">
             Ward
-            <input className="form-input" value={ward} onChange={(e) => setWard(e.target.value)} />
+            <select className="form-input" value={ward} onChange={(e) => setWard(e.target.value)}>
+              <option value="">— Unassigned —</option>
+              {WARDS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+            </select>
           </label>
           <div className="button-row">
             <button type="button" className="btn-primary" onClick={saveWard}>Save ward</button>
@@ -427,7 +584,9 @@ function PatientPanel() {
             </label>
             <label className="form-label">
               Ward
-              <input className="form-input" value={newPatient.ward} onChange={(e) => setNewPatient({ ...newPatient, ward: e.target.value })} />
+              <select className="form-input" value={newPatient.ward} onChange={(e) => setNewPatient({ ...newPatient, ward: e.target.value })} required>
+                {WARDS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+              </select>
             </label>
             {error && <p role="alert" className="dev-error">{error}</p>}
             <div className="button-row">
@@ -487,11 +646,12 @@ function DisasterModePanel() {
     }
   };
 
-  if (!status) return null;
+  if (!status) {
+    return error ? <p role="alert" className="dev-error">{error}</p> : <p>Loading…</p>;
+  }
 
   return (
     <div className="panel-card disaster-panel">
-      <h2>Disaster / Mass Casualty Mode</h2>
       <p className={status.active ? 'access-override' : 'notice'}>
         {status.active ? 'ACTIVE' : 'Inactive'}
         {status.last_event &&
@@ -522,12 +682,21 @@ function DisasterModePanel() {
   );
 }
 
+const PAGE_META = {
+  overview: { title: 'Overview', subtitle: "A snapshot of the hospital's patients and staff." },
+  staff: { title: 'Staff Management', subtitle: 'Monitor and manage staff accounts across roles.' },
+  patients: { title: 'Patient Records', subtitle: 'Search, view, and manage patient records by ward.' },
+  disaster: { title: 'Disaster / Mass Casualty Mode', subtitle: 'Hospital-wide override for the Doctor and Break the Glass gates.' },
+};
+
 function AdminDashboard({ staff, onLogout }) {
-  const [activePage, setActivePage] = useState('staff');
+  const [activePage, setActivePage] = useState('overview');
 
   const navItems = [
+    { key: 'overview', label: 'Overview', icon: <OverviewIcon /> },
     { key: 'staff', label: 'Staff', icon: <StaffIcon /> },
     { key: 'patients', label: 'Patients', icon: <PatientsIcon /> },
+    { key: 'disaster', label: 'Disaster Mode', icon: <DisasterIcon /> },
   ];
 
   return (
@@ -537,15 +706,13 @@ function AdminDashboard({ staff, onLogout }) {
       onNavChange={setActivePage}
       staff={staff}
       onLogout={onLogout}
-      title={activePage === 'staff' ? 'Staff Management' : 'Patient Records'}
-      subtitle={
-        activePage === 'staff'
-          ? 'Monitor and manage staff accounts across roles.'
-          : 'Search, view, and manage patient records.'
-      }
+      title={PAGE_META[activePage].title}
+      subtitle={PAGE_META[activePage].subtitle}
     >
-      <DisasterModePanel />
-      {activePage === 'staff' ? <StaffPanel /> : <PatientPanel />}
+      {activePage === 'overview' && <OverviewPanel />}
+      {activePage === 'staff' && <StaffPanel />}
+      {activePage === 'patients' && <PatientPanel />}
+      {activePage === 'disaster' && <DisasterModePanel />}
     </DashboardShell>
   );
 }

@@ -312,8 +312,21 @@ button {
   background: var(--off-white);
 }
 
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(42, 15, 92, 0.35);
+  z-index: 90;
+}
+
+/* Off-canvas drawer, closed by default -- slides in from the left when .open is
+   toggled by the header's hamburger button (DashboardShell.jsx). */
 .sidebar {
-  flex: 0 0 260px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 260px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -321,6 +334,13 @@ button {
   box-sizing: border-box;
   background: var(--plum-deep);
   color: var(--off-white);
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+  z-index: 100;
+}
+
+.sidebar.open {
+  transform: translateX(0);
 }
 
 .sidebar-brand {
@@ -398,6 +418,30 @@ button {
   gap: 16px;
   padding: 28px 32px 20px;
   border-bottom: 1px solid #e6def6;
+}
+
+.shell-header-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.menu-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border: 1px solid #ece5fa;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--plum-deep);
+  cursor: pointer;
+}
+
+.menu-button:hover {
+  background: #f6f1fd;
 }
 
 .shell-header h1 {
@@ -706,4 +750,97 @@ button {
 .detail-block summary {
   cursor: pointer;
   font-weight: 600;
+}
+
+/* Back link (category detail -> categories) */
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 14px;
+  border: none;
+  background: transparent;
+  color: var(--plum);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+/* Category tiles (Staff by role, Patients by ward) */
+
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.category-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid #ece5fa;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.category-tile:hover {
+  border-color: var(--plum);
+  background: #f8f5fd;
+}
+
+.category-tile-label {
+  font-weight: 600;
+  color: var(--plum-deep);
+}
+
+.category-tile-count {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--plum);
+}
+
+/* Overview stat cards */
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px;
+  border: 1px solid #ece5fa;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: #7a6f96;
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--plum-deep);
+}
+
+.stat-card-alert {
+  border-color: #e879f9;
+  background: #fdf4ff;
+}
+
+.stat-card-alert .stat-value {
+  color: #a21caf;
 }
