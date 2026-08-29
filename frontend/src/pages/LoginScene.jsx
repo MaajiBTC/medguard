@@ -8,7 +8,6 @@ import * as THREE from 'three';
 // smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
 
 const PLUM = 0x6528d9;
-const PLUM_DEEP = 0x2a0f5c;
 const WHITE = 0xffffff;
 const EMISSIVE_INTENSITY = 0.9;
 
@@ -99,15 +98,9 @@ function LoginScene() {
       curveSegments: 24,
     });
     shieldGeometry.center();
-    // Shield body keeps its original subtler shading (emissive is a darker shade,
-    // not matched to the base color/intensity like the emblems below).
-    const shieldMaterial = new THREE.MeshStandardMaterial({
-      color: PLUM,
-      emissive: PLUM_DEEP,
-      emissiveIntensity: 0.25,
-      metalness: 0.35,
-      roughness: 0.4,
-    });
+    // Unlit -- flat, constant plum, no shading. Also makes this an exact pixel
+    // match for the Sign In button's flat CSS color (both are #6528D9).
+    const shieldMaterial = new THREE.MeshBasicMaterial({ color: PLUM });
     const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
     medallion.add(shield);
 
@@ -171,8 +164,8 @@ function LoginScene() {
     ring.rotation.x = Math.PI / 2.4;
     scene.add(ring);
 
-    // Lavender key light for extra shading/depth on top of each material's own
-    // emissive glow.
+    // Lavender key light for extra shading/depth on the cross/back-shield/ring's
+    // own emissive glow -- the shield body is unlit now, so these don't affect it.
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     const key = new THREE.PointLight(0xc4b5fd, 1.4);
     key.position.set(2, 2, 3);
