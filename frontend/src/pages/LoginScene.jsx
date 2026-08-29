@@ -171,9 +171,10 @@ function LoginScene() {
 
     // Two chain-link strips scrolling continuously behind the shield (strength /
     // decentralization motif) -- far back in Z (not "on the same level" as the
-    // shield), faint (50% opacity), same metal material family as everything else.
-    // Links alternate rotation.y so consecutive links read as interlocking, like a
-    // real chain, rather than a row of identical flat rings.
+    // shield), same metal material family as everything else. No per-link tilt
+    // (unlike the old ring) -- alternating links are flat-on vs. rotated 90
+    // degrees around Y, tightly spaced so each threads through the last one's
+    // opening, like a real metal chain, not a row of separate decorative rings.
     const chainGeometry = new THREE.TorusGeometry(0.16, 0.045, 8, 24);
     const chainMaterial = new THREE.MeshStandardMaterial({
       color: WHITE,
@@ -183,11 +184,11 @@ function LoginScene() {
       envMap,
       envMapIntensity: 0.75,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.8,
     });
 
-    const CHAIN_LINK_SPACING = 0.42;
-    const CHAIN_LINK_COUNT = 40;
+    const CHAIN_LINK_SPACING = 0.26;
+    const CHAIN_LINK_COUNT = 80; // wide margin so it still spans edge-to-edge on wide panels
     const chainRowWidth = CHAIN_LINK_COUNT * CHAIN_LINK_SPACING;
 
     function buildChainRow(y, z) {
@@ -195,7 +196,6 @@ function LoginScene() {
       for (let i = 0; i < CHAIN_LINK_COUNT; i += 1) {
         const link = new THREE.Mesh(chainGeometry, chainMaterial);
         link.position.x = i * CHAIN_LINK_SPACING - chainRowWidth / 2;
-        link.rotation.x = Math.PI / 2.4;
         link.rotation.y = i % 2 === 0 ? 0 : Math.PI / 2;
         row.add(link);
       }

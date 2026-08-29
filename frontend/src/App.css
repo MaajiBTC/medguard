@@ -33,8 +33,10 @@
 }
 
 .login-scene {
-  width: min(280px, 55vw);
-  height: min(280px, 55vw);
+  /* Full panel width (not a small centered square) so the background chain
+     strips can span edge-to-edge of the brand panel, not just around the shield. */
+  width: 100%;
+  height: min(280px, 40vh);
 }
 
 .login-brand-text {
@@ -152,8 +154,8 @@ button {
   }
 
   .login-scene {
-    width: min(200px, 45vw);
-    height: min(200px, 45vw);
+    width: 100%;
+    height: min(200px, 30vh);
   }
 
   .login-form-panel {
