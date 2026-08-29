@@ -112,9 +112,9 @@ function LoginScene() {
       color: PLUM,
       emissive: 0x000000,
       metalness: 0.9,
-      roughness: 0.15,
+      roughness: 0.4,
       envMap,
-      envMapIntensity: 1.2,
+      envMapIntensity: 0.75,
     });
     const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
     medallion.add(shield);
