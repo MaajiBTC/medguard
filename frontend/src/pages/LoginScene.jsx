@@ -9,8 +9,7 @@ import * as THREE from 'three';
 
 const PLUM = 0x6528d9;
 const PLUM_DEEP = 0x2a0f5c;
-const LAVENDER = 0xc4b5fd;
-const OFF_WHITE = 0xfaf7ff;
+const WHITE = 0xffffff;
 
 function buildCrossShape() {
   const w = 0.22; // half-width of the cross arms
@@ -118,9 +117,9 @@ function LoginScene() {
       curveSegments: 8,
     });
     const crossMaterial = new THREE.MeshStandardMaterial({
-      color: OFF_WHITE,
-      emissive: LAVENDER,
-      emissiveIntensity: 0.15,
+      color: WHITE,
+      emissive: WHITE,
+      emissiveIntensity: 0.1,
       metalness: 0.1,
       roughness: 0.5,
     });
@@ -140,9 +139,9 @@ function LoginScene() {
     });
     backShieldGeometry.center();
     const backShieldMaterial = new THREE.MeshStandardMaterial({
-      color: LAVENDER,
-      emissive: PLUM,
-      emissiveIntensity: 0.2,
+      color: WHITE,
+      emissive: WHITE,
+      emissiveIntensity: 0.1,
       metalness: 0.2,
       roughness: 0.45,
     });
@@ -156,7 +155,7 @@ function LoginScene() {
 
     const ringGeometry = new THREE.TorusGeometry(1.5, 0.012, 8, 96);
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: LAVENDER,
+      color: WHITE,
       transparent: true,
       opacity: reduceMotion ? 0.5 : 0,
     });
@@ -165,7 +164,9 @@ function LoginScene() {
     scene.add(ring);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
-    const key = new THREE.PointLight(LAVENDER, 1.4);
+    // Lavender key light for shading/depth on the white emblems -- lighting only,
+    // not an object color (the cross/shield/ring are all white per their materials).
+    const key = new THREE.PointLight(0xc4b5fd, 1.4);
     key.position.set(2, 2, 3);
     const rim = new THREE.PointLight(PLUM, 0.9);
     rim.position.set(-3, -1, -2);
