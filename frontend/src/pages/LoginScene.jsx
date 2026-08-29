@@ -4,10 +4,12 @@ import * as THREE from 'three';
 // CLAUDE.md scopes three.js to exactly two places: this login/landing page and the
 // Security Dashboard visualization (LedgerVisualization.jsx). Purely decorative --
 // the actual login form is plain HTML/React; this is just the animated brand shield
-// beside it. A red shield body with a hospital cross emblem on its front face and a
-// smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
+// beside it. A plum shield body with a hospital cross emblem on its front face and a
+// smaller shield emblem on its back -- both revealed during the 360-degree entrance
+// spin. Every piece is a flat, unlit, constant color (MeshBasicMaterial) -- no PBR
+// shading/gradient anywhere on the logo, by request.
 
-const SHIELD_RED = 0xe2231a;
+const PLUM = 0x6528d9;
 const WHITE = 0xffffff;
 
 function buildCrossShape() {
@@ -135,16 +137,9 @@ function LoginScene() {
       curveSegments: 24,
     });
     shieldGeometry.center();
-    // Glossy toy-plastic look (per reference image): saturated flat color (no
-    // emissive wash muddying it), zero metalness, low roughness, and a clearcoat
-    // top layer so it picks up a crisp bright highlight from the key light.
-    const shieldMaterial = new THREE.MeshPhysicalMaterial({
-      color: SHIELD_RED,
-      metalness: 0,
-      roughness: 0.22,
-      clearcoat: 1,
-      clearcoatRoughness: 0.08,
-    });
+    // Unlit -- a flat, constant plum with zero shading/gradient (no highlight, no
+    // darker "shadow" side), by request.
+    const shieldMaterial = new THREE.MeshBasicMaterial({ color: PLUM });
     const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
     medallion.add(shield);
 
@@ -157,18 +152,7 @@ function LoginScene() {
       bevelSegments: 2,
       curveSegments: 8,
     });
-    const crossMaterial = new THREE.MeshPhysicalMaterial({
-      color: WHITE,
-      // A self-illuminating baseline keeps this bright regardless of light angle --
-      // a pure clearcoat white otherwise reads as gray away from the highlight spot
-      // (clearcoat trades away some diffuse brightness for the specular sheen).
-      emissive: WHITE,
-      emissiveIntensity: 0.35,
-      metalness: 0,
-      roughness: 0.2,
-      clearcoat: 1,
-      clearcoatRoughness: 0.08,
-    });
+    const crossMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
     cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
@@ -186,18 +170,7 @@ function LoginScene() {
       curveSegments: 16,
     });
     backShieldGeometry.center();
-    const backShieldMaterial = new THREE.MeshPhysicalMaterial({
-      color: WHITE,
-      // A self-illuminating baseline keeps this bright regardless of light angle --
-      // a pure clearcoat white otherwise reads as gray away from the highlight spot
-      // (clearcoat trades away some diffuse brightness for the specular sheen).
-      emissive: WHITE,
-      emissiveIntensity: 0.35,
-      metalness: 0,
-      roughness: 0.2,
-      clearcoat: 1,
-      clearcoatRoughness: 0.08,
-    });
+    const backShieldMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
     const backShield = new THREE.Mesh(backShieldGeometry, backShieldMaterial);
     backShield.scale.set(0.62, 0.62, 1);
     backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
@@ -223,21 +196,8 @@ function LoginScene() {
     // sprite blends smoothly into the ring (and the shield behind it) with no boundary.
     addGlowSprite(scene, { scale: 3.6, baseOpacity: 0.75 });
 
-    // Neutral-white key light, positioned upper-left for that classic glossy-toy
-    // 3/4 highlight (per the reference image) -- a colored key light would tint the
-    // clearcoat's specular reflection, not just the shading, so it stays white here.
-    // Lavender only comes in as a subtle rim/fill for a touch of mood color.
-    const ambient = new THREE.AmbientLight(0xffffff, 0.8);
-    // Broad frontal fill (close to the camera axis) keeps front-facing surfaces
-    // bright/saturated; the key sits only slightly off-axis for a subtle highlight
-    // offset, not a dramatic side-light that leaves the front looking dim/gray.
-    const fill = new THREE.PointLight(0xffffff, 1.1);
-    fill.position.set(0, 0.5, 4.5);
-    const key = new THREE.PointLight(0xffffff, 1.3);
-    key.position.set(-1, 1.6, 3.5);
-    const rim = new THREE.PointLight(0xc4b5fd, 0.4);
-    rim.position.set(3, -1, -2);
-    scene.add(ambient, fill, key, rim);
+    // No scene lights -- every material above is unlit (MeshBasicMaterial), so
+    // lights would have nothing to shade and are just dead code.
 
     let frameId;
     const start = performance.now();
