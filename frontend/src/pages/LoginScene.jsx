@@ -173,17 +173,14 @@ function LoginScene() {
     ring.rotation.x = Math.PI / 2.4;
     scene.add(ring);
 
-    // Neutral-white key + a bright close-in "shine" light for a crisp plastic
-    // specular highlight; the rim stays plum (low intensity) just for a soft
-    // colored bounce on the shadow side -- neither tints the white parts flat-on.
-    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
-    const key = new THREE.PointLight(0xffffff, 1.6);
+    // Lavender key light for shading/depth (the plastic clearcoat still catches a
+    // highlight from it) -- lighting colors reverted to how they were before.
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    const key = new THREE.PointLight(0xc4b5fd, 1.4);
     key.position.set(2, 2, 3);
-    const shine = new THREE.PointLight(0xffffff, 1.0);
-    shine.position.set(0.4, 1.4, 3.6);
-    const rim = new THREE.PointLight(PLUM, 0.5);
+    const rim = new THREE.PointLight(PLUM, 0.9);
     rim.position.set(-3, -1, -2);
-    scene.add(ambient, key, shine, rim);
+    scene.add(ambient, key, rim);
 
     let frameId;
     const start = performance.now();
