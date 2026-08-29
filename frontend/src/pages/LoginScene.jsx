@@ -124,6 +124,22 @@ function LoginScene() {
     cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
 
+    // Glow halo: a larger, faint, additively-blended flat copy of the same shape,
+    // sitting just behind it -- fakes a bloom/illuminated look without a full
+    // post-processing pipeline.
+    const crossGlowGeometry = new THREE.ShapeGeometry(buildCrossShape());
+    const crossGlowMaterial = new THREE.MeshBasicMaterial({
+      color: WHITE,
+      transparent: true,
+      opacity: reduceMotion ? 0.5 : 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const crossGlow = new THREE.Mesh(crossGlowGeometry, crossGlowMaterial);
+    crossGlow.scale.set(1.35, 1.35, 1);
+    crossGlow.position.z = cross.position.z - 0.01;
+    medallion.add(crossGlow);
+
     // Back face: a smaller shield emblem (unchanged shape), revealed as the shield
     // spins during entrance -- distinct from the body's own outer silhouette.
     const backShieldGeometry = new THREE.ExtrudeGeometry(buildShieldShape(), {
@@ -141,6 +157,19 @@ function LoginScene() {
     backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
     medallion.add(backShield);
 
+    const backShieldGlowGeometry = new THREE.ShapeGeometry(buildShieldShape());
+    const backShieldGlowMaterial = new THREE.MeshBasicMaterial({
+      color: WHITE,
+      transparent: true,
+      opacity: reduceMotion ? 0.45 : 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const backShieldGlow = new THREE.Mesh(backShieldGlowGeometry, backShieldGlowMaterial);
+    backShieldGlow.scale.set(0.62 * 1.35, 0.62 * 1.35, 1);
+    backShieldGlow.position.z = backShield.position.z + 0.01;
+    medallion.add(backShieldGlow);
+
     medallion.scale.setScalar(reduceMotion ? 1 : 0.001);
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
@@ -153,6 +182,18 @@ function LoginScene() {
     const ring = new THREE.Mesh(ringGeometry, ringMaterial);
     ring.rotation.x = Math.PI / 2.4;
     scene.add(ring);
+
+    const ringGlowGeometry = new THREE.TorusGeometry(1.5, 0.09, 12, 96);
+    const ringGlowMaterial = new THREE.MeshBasicMaterial({
+      color: WHITE,
+      transparent: true,
+      opacity: reduceMotion ? 0.55 : 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const ringGlow = new THREE.Mesh(ringGlowGeometry, ringGlowMaterial);
+    ringGlow.rotation.x = Math.PI / 2.4;
+    scene.add(ringGlow);
 
     // Lavender key light for shading/depth on the shield body -- lighting only, not
     // an object color (the cross/shield/ring are unlit and pure white regardless).
@@ -188,6 +229,13 @@ function LoginScene() {
       medallion.position.y = Math.sin(elapsed / 1400) * 0.06;
       ring.material.opacity = t;
       ring.rotation.z += 0.0035;
+      ringGlow.rotation.z = ring.rotation.z;
+
+      // Gentle breathing glow (illuminated look) on top of the entrance fade-in.
+      const pulse = 0.75 + 0.25 * Math.sin(elapsed / 900);
+      crossGlowMaterial.opacity = 0.5 * t * pulse;
+      backShieldGlowMaterial.opacity = 0.45 * t * pulse;
+      ringGlowMaterial.opacity = 0.55 * t * pulse;
 
       renderer.render(scene, camera);
       frameId = requestAnimationFrame(animate);
@@ -210,10 +258,16 @@ function LoginScene() {
       shieldMaterial.dispose();
       crossGeometry.dispose();
       crossMaterial.dispose();
+      crossGlowGeometry.dispose();
+      crossGlowMaterial.dispose();
       backShieldGeometry.dispose();
       backShieldMaterial.dispose();
+      backShieldGlowGeometry.dispose();
+      backShieldGlowMaterial.dispose();
       ringGeometry.dispose();
       ringMaterial.dispose();
+      ringGlowGeometry.dispose();
+      ringGlowMaterial.dispose();
       renderer.dispose();
       mount.removeChild(renderer.domElement);
     };
