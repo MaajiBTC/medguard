@@ -58,6 +58,7 @@ const ENTRANCE_MS = 1300;
 const ROTATION_MS = ENTRANCE_MS * 2; // half the angular speed of the entrance spin
 const SHIELD_DEPTH = 0.28;
 const EMBLEM_DEPTH = 0.24;
+const TARGET_SCALE = 1.5; // overall logo size, 50% bigger than the original 1.0
 
 /** Animated shield for the login page's brand panel: a plum shield body that spins a
  * full 360 degrees while popping in (overshoot ease on scale, decelerating spin on
@@ -167,7 +168,7 @@ function LoginScene() {
     backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
     medallion.add(backShield);
 
-    medallion.scale.setScalar(reduceMotion ? 1 : 0.001);
+    medallion.scale.setScalar(reduceMotion ? TARGET_SCALE : 0.001);
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
     // Lavender key light for extra shading/depth on the cross/back-shield's own
@@ -190,7 +191,7 @@ function LoginScene() {
       const elapsed = now - start;
       const t = Math.min(elapsed / ENTRANCE_MS, 1);
       const scaleEased = easeOutBack(t);
-      medallion.scale.setScalar(Math.max(scaleEased, 0.001));
+      medallion.scale.setScalar(Math.max(scaleEased, 0.001) * TARGET_SCALE);
 
       const rt = Math.min(elapsed / ROTATION_MS, 1);
       if (rt < 1) {
