@@ -5,8 +5,7 @@ import * as THREE from 'three';
 // Security Dashboard visualization (LedgerVisualization.jsx). Purely decorative --
 // the actual login form is plain HTML/React; this is just the animated brand shield
 // beside it. A plum shield body with a hospital cross emblem on its front face and a
-// smaller shield emblem on its back -- both revealed during the 360-degree entrance
-// spin. Every piece uses MeshPhysicalMaterial + clearcoat for a glossy plastic look.
+// smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
 
 const PLUM = 0x6528d9;
 const PLUM_DEEP = 0x2a0f5c;
@@ -98,17 +97,12 @@ function LoginScene() {
       curveSegments: 24,
     });
     shieldGeometry.center();
-    // MeshPhysicalMaterial + clearcoat for a glossy plastic look throughout (zero
-    // metalness, low roughness, a lacquered clearcoat top layer with its own
-    // specular highlight) -- applies to every piece of the logo, not just the body.
-    const shieldMaterial = new THREE.MeshPhysicalMaterial({
+    const shieldMaterial = new THREE.MeshStandardMaterial({
       color: PLUM,
       emissive: PLUM_DEEP,
-      emissiveIntensity: 0.12,
-      metalness: 0,
-      roughness: 0.28,
-      clearcoat: 1,
-      clearcoatRoughness: 0.15,
+      emissiveIntensity: 0.25,
+      metalness: 0.35,
+      roughness: 0.4,
     });
     const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
     medallion.add(shield);
@@ -122,13 +116,10 @@ function LoginScene() {
       bevelSegments: 2,
       curveSegments: 8,
     });
-    const crossMaterial = new THREE.MeshPhysicalMaterial({
-      color: WHITE,
-      metalness: 0,
-      roughness: 0.2,
-      clearcoat: 1,
-      clearcoatRoughness: 0.1,
-    });
+    // Unlit (MeshBasicMaterial, like the ring below) -- MeshStandardMaterial still
+    // shades/tints a "white" surface under colored scene lighting, which read as
+    // gray/lavender instead of pure white. Unlit ignores lighting entirely.
+    const crossMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
     cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
@@ -144,13 +135,7 @@ function LoginScene() {
       curveSegments: 16,
     });
     backShieldGeometry.center();
-    const backShieldMaterial = new THREE.MeshPhysicalMaterial({
-      color: WHITE,
-      metalness: 0,
-      roughness: 0.2,
-      clearcoat: 1,
-      clearcoatRoughness: 0.1,
-    });
+    const backShieldMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
     const backShield = new THREE.Mesh(backShieldGeometry, backShieldMaterial);
     backShield.scale.set(0.62, 0.62, 1);
     backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
@@ -160,12 +145,8 @@ function LoginScene() {
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
     const ringGeometry = new THREE.TorusGeometry(1.5, 0.03, 12, 96);
-    const ringMaterial = new THREE.MeshPhysicalMaterial({
+    const ringMaterial = new THREE.MeshBasicMaterial({
       color: WHITE,
-      metalness: 0,
-      roughness: 0.2,
-      clearcoat: 1,
-      clearcoatRoughness: 0.1,
       transparent: true,
       opacity: reduceMotion ? 1 : 0,
     });
@@ -173,8 +154,8 @@ function LoginScene() {
     ring.rotation.x = Math.PI / 2.4;
     scene.add(ring);
 
-    // Lavender key light for shading/depth (the plastic clearcoat still catches a
-    // highlight from it) -- lighting colors reverted to how they were before.
+    // Lavender key light for shading/depth on the shield body -- lighting only, not
+    // an object color (the cross/shield/ring are unlit and pure white regardless).
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     const key = new THREE.PointLight(0xc4b5fd, 1.4);
     key.position.set(2, 2, 3);
