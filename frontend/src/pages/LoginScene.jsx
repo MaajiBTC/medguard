@@ -1,50 +1,34 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // CLAUDE.md scopes three.js to exactly two places: this login/landing page and the
 // Security Dashboard visualization (LedgerVisualization.jsx). Purely decorative --
 // the actual login form is plain HTML/React; this is just the animated brand shield
-// beside it. A plum shield body with a Rod of Asclepius emblem on its front face and a
+// beside it. A plum shield body with a hospital cross emblem on its front face and a
 // smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
 
 const PLUM = 0x6528d9;
 const WHITE = 0xffffff;
 
-// Rod of Asclepius: a staff with a single snake coiled around it, head raised
-// near the top -- built from primitive geometries (cylinder rod, helical tube
-// for the snake's body, cone for its head) merged into one mesh so it behaves
-// like the flat emblems elsewhere in this file (one geometry/material, scaled
-// and positioned as a single unit).
-function buildRodOfAsclepiusGeometry() {
-  const rod = new THREE.CylinderGeometry(0.05, 0.05, 1.3, 12);
-
-  const coilRadius = 0.17;
-  const coilTurns = 2.25;
-  const coilBottom = -0.55;
-  const coilTop = 0.45;
-  const coilPoints = [];
-  const COIL_SAMPLES = 48;
-  for (let i = 0; i <= COIL_SAMPLES; i += 1) {
-    const t = i / COIL_SAMPLES;
-    const angle = Math.PI * 2 * coilTurns * t;
-    coilPoints.push(
-      new THREE.Vector3(
-        Math.cos(angle) * coilRadius,
-        coilBottom + (coilTop - coilBottom) * t,
-        Math.sin(angle) * coilRadius
-      )
-    );
-  }
-  const coil = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(coilPoints), 120, 0.065, 8, false);
-
-  // Head sits where the coil ends, raised a little further up past the rod.
-  const headAngle = Math.PI * 2 * coilTurns;
-  const head = new THREE.ConeGeometry(0.12, 0.28, 10);
-  head.translate(Math.cos(headAngle) * coilRadius * 1.1, coilTop + 0.16, Math.sin(headAngle) * coilRadius * 1.1);
-
-  return mergeGeometries([rod, coil, head]);
+function buildCrossShape() {
+  const w = 0.22; // half-width of the cross arms
+  const l = 0.62; // half-length of the cross arms
+  const shape = new THREE.Shape();
+  shape.moveTo(-w, -l);
+  shape.lineTo(w, -l);
+  shape.lineTo(w, -w);
+  shape.lineTo(l, -w);
+  shape.lineTo(l, w);
+  shape.lineTo(w, w);
+  shape.lineTo(w, l);
+  shape.lineTo(-w, l);
+  shape.lineTo(-w, w);
+  shape.lineTo(-l, w);
+  shape.lineTo(-l, -w);
+  shape.lineTo(-w, -w);
+  shape.lineTo(-w, -l);
+  return shape;
 }
 
 // Classic clean shield silhouette: a pointed apex at top-center, curving
@@ -75,12 +59,12 @@ const ROTATION_MS = ENTRANCE_MS * 2; // half the angular speed of the entrance s
 const SHIELD_DEPTH = 0.28;
 const EMBLEM_DEPTH = 0.24;
 const TARGET_SCALE = 1.5; // overall logo size, 50% bigger than the original 1.0
-const POP_SCALE = 0.75; // rod/back-shield pop-up (z-offset from the shield body), 25% less
+const POP_SCALE = 0.75; // cross/back-shield pop-up (z-offset from the shield body), 25% less
 
 /** Animated shield for the login page's brand panel: a plum shield body that spins a
  * full 360 degrees while popping in (overshoot ease on scale, decelerating spin on
- * rotation), revealing the Rod of Asclepius on its front and a shield emblem on its
- * back before settling to a stop facing forward (rod side). Idles with a gentle
+ * rotation), revealing the hospital cross on its front and a shield emblem on its
+ * back before settling to a stop facing forward (cross side). Idles with a gentle
  * sway + bob afterward. Respects prefers-reduced-motion (renders the settled
  * shield, front-facing, with no spin). */
 function LoginScene() {
@@ -139,11 +123,18 @@ function LoginScene() {
     shield.scale.set(0.8, 0.8, 1); // 20% smaller
     medallion.add(shield);
 
-    // Front face: a Rod of Asclepius emblem, sitting proud of the shield.
-    const rodGeometry = buildRodOfAsclepiusGeometry();
+    // Front face: a hospital cross emblem (unchanged shape), sitting proud of the shield.
+    const crossGeometry = new THREE.ExtrudeGeometry(buildCrossShape(), {
+      depth: EMBLEM_DEPTH,
+      bevelEnabled: true,
+      bevelThickness: 0.0375,
+      bevelSize: 0.0375,
+      bevelSegments: 2,
+      curveSegments: 8,
+    });
     // Same metal treatment as the shield body (color/metalness/roughness/envMap),
     // just plum instead of white.
-    const rodMaterial = new THREE.MeshStandardMaterial({
+    const crossMaterial = new THREE.MeshStandardMaterial({
       color: PLUM,
       emissive: 0x000000,
       metalness: 0.9,
@@ -151,18 +142,10 @@ function LoginScene() {
       envMap,
       envMapIntensity: 0.75,
     });
-    const rod = new THREE.Mesh(rodGeometry, rodMaterial);
-    const ROD_SCALE = 0.55; // 10% bigger than the previous cross's 0.5
-    rod.scale.setScalar(ROD_SCALE);
-    // Unlike the flat cross this replaced, the coil has real depth of its own
-    // (it wraps all the way around the rod), so a flat POP_SCALE offset isn't
-    // enough to clear the shield's front face -- most of the coil would render
-    // embedded inside the solid shield mesh. Push it out by the geometry's own
-    // half-depth (from its bounding box) plus a small visible gap instead.
-    rodGeometry.computeBoundingBox();
-    const rodBackZ = rodGeometry.boundingBox.min.z * ROD_SCALE;
-    rod.position.z = SHIELD_DEPTH / 2 - rodBackZ + 0.02;
-    medallion.add(rod);
+    const cross = new THREE.Mesh(crossGeometry, crossMaterial);
+    cross.scale.set(0.55, 0.55, 1); // 0.5 base, 10% bigger
+    cross.position.z = (SHIELD_DEPTH / 2) * POP_SCALE; // pop-up reduced 25%
+    medallion.add(cross);
 
     // Back face: a smaller shield emblem (unchanged shape), revealed as the shield
     // spins during entrance -- distinct from the body's own outer silhouette.
@@ -191,7 +174,7 @@ function LoginScene() {
     medallion.scale.setScalar(reduceMotion ? TARGET_SCALE : 0.001);
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
-    // Lavender key light for extra shading/depth on the rod/back-shield's own
+    // Lavender key light for extra shading/depth on the cross/back-shield's own
     // emissive glow -- the shield body is unlit now, so these don't affect it.
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     const key = new THREE.PointLight(0xc4b5fd, 1.4);
@@ -242,8 +225,8 @@ function LoginScene() {
       cancelAnimationFrame(frameId);
       shieldGeometry.dispose();
       shieldMaterial.dispose();
-      rodGeometry.dispose();
-      rodMaterial.dispose();
+      crossGeometry.dispose();
+      crossMaterial.dispose();
       backShieldGeometry.dispose();
       backShieldMaterial.dispose();
       envMap.dispose();
