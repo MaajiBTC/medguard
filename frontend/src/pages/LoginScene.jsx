@@ -8,6 +8,7 @@ import * as THREE from 'three';
 // smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
 
 const PLUM = 0x6528d9;
+const PLUM_DEEP = 0x2a0f5c;
 const WHITE = 0xffffff;
 const CROSS_RED = 0xeb1c24;
 const EMISSIVE_INTENSITY = 0.9;
@@ -99,12 +100,12 @@ function LoginScene() {
       curveSegments: 24,
     });
     shieldGeometry.center();
-    // Emissive matches the base color (not a darker shade) at a high intensity --
-    // the material glows in its own color without needing a separate glow layer.
+    // Shield body keeps its original subtler shading (emissive is a darker shade,
+    // not matched to the base color/intensity like the emblems below).
     const shieldMaterial = new THREE.MeshStandardMaterial({
       color: PLUM,
-      emissive: PLUM,
-      emissiveIntensity: EMISSIVE_INTENSITY,
+      emissive: PLUM_DEEP,
+      emissiveIntensity: 0.25,
       metalness: 0.35,
       roughness: 0.4,
     });
