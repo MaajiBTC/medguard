@@ -148,7 +148,7 @@ function LoginScene() {
     const ringMaterial = new THREE.MeshBasicMaterial({
       color: WHITE,
       transparent: true,
-      opacity: reduceMotion ? 0.5 : 0,
+      opacity: reduceMotion ? 1 : 0,
     });
     const ring = new THREE.Mesh(ringGeometry, ringMaterial);
     ring.rotation.x = Math.PI / 2.4;
@@ -186,7 +186,7 @@ function LoginScene() {
         medallion.rotation.y = Math.sin(idleElapsed / 1800) * 0.12;
       }
       medallion.position.y = Math.sin(elapsed / 1400) * 0.06;
-      ring.material.opacity = 0.5 * t;
+      ring.material.opacity = t;
       ring.rotation.z += 0.0035;
 
       renderer.render(scene, camera);
