@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 // CLAUDE.md scopes three.js to exactly two places: this login/landing page and the
 // Security Dashboard visualization (LedgerVisualization.jsx). Purely decorative --
@@ -85,6 +86,13 @@ function LoginScene() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mount.appendChild(renderer.domElement);
 
+    // Synthetic "studio" environment (no HDR file needed) so the shield's metal has
+    // something colorful to reflect everywhere, not just at the direct-light
+    // highlight spots. Scoped to shieldMaterial.envMap only (not scene.environment)
+    // so it doesn't affect the cross/back-shield/ring's own emissive look.
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    const envMap = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+
     const medallion = new THREE.Group();
     scene.add(medallion);
 
@@ -105,6 +113,8 @@ function LoginScene() {
       emissive: 0x000000,
       metalness: 0.9,
       roughness: 0.15,
+      envMap,
+      envMapIntensity: 1.2,
     });
     const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
     medallion.add(shield);
@@ -230,6 +240,8 @@ function LoginScene() {
       backShieldMaterial.dispose();
       ringGeometry.dispose();
       ringMaterial.dispose();
+      envMap.dispose();
+      pmremGenerator.dispose();
       renderer.dispose();
       mount.removeChild(renderer.domElement);
     };
