@@ -115,8 +115,8 @@ function LoginScene() {
     const medallion = new THREE.Group();
     scene.add(medallion);
 
-    // Body: a rounded rectangle (not the pointed shield silhouette anymore).
-    const shieldGeometry = new THREE.ExtrudeGeometry(buildRoundedRectShape(1.9, 2.5, 0.35), {
+    // Body: a horizontal rounded rectangle (not the pointed shield silhouette anymore).
+    const shieldGeometry = new THREE.ExtrudeGeometry(buildRoundedRectShape(2.5, 1.9, 0.35), {
       depth: SHIELD_DEPTH,
       bevelEnabled: true,
       bevelThickness: 0.06,
