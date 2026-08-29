@@ -55,7 +55,7 @@ function easeOutCubic(x) {
 
 const ENTRANCE_MS = 1300;
 const SHIELD_DEPTH = 0.28;
-const EMBLEM_DEPTH = 0.32;
+const EMBLEM_DEPTH = 0.24;
 
 /** Animated shield for the login page's brand panel: a plum shield body that spins a
  * full 360 degrees while popping in (overshoot ease on scale, decelerating spin on
@@ -111,8 +111,8 @@ function LoginScene() {
     const crossGeometry = new THREE.ExtrudeGeometry(buildCrossShape(), {
       depth: EMBLEM_DEPTH,
       bevelEnabled: true,
-      bevelThickness: 0.05,
-      bevelSize: 0.05,
+      bevelThickness: 0.0375,
+      bevelSize: 0.0375,
       bevelSegments: 2,
       curveSegments: 8,
     });
@@ -129,8 +129,8 @@ function LoginScene() {
     const backShieldGeometry = new THREE.ExtrudeGeometry(buildShieldShape(), {
       depth: EMBLEM_DEPTH,
       bevelEnabled: true,
-      bevelThickness: 0.05,
-      bevelSize: 0.05,
+      bevelThickness: 0.0375,
+      bevelSize: 0.0375,
       bevelSegments: 2,
       curveSegments: 16,
     });
