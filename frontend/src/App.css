@@ -237,13 +237,6 @@ button {
   font-size: 14px;
 }
 
-.category-list details {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-}
-
 .category-editor {
   display: flex;
   flex-direction: column;
