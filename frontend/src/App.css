@@ -8,11 +8,14 @@
    brand moment, not a data screen, so it doesn't follow the viewer's light/dark
    preference the way the dashboards do. */
 
-.login-page {
+:root {
   --plum: #6528d9;
   --plum-deep: #2a0f5c;
   --lavender: #c4b5fd;
   --off-white: #faf7ff;
+}
+
+.login-page {
   display: flex;
   min-height: 100svh;
   width: 100%;
@@ -431,4 +434,371 @@ button {
   overflow-x: auto;
   font-size: 12px;
   max-height: 320px;
+}
+
+/* Dashboard shell (new): fixed light plum/lavender/off-white brand palette, same
+   as the login page -- replaces the dark-mode-aware --bg/--text/--accent look
+   above as each dashboard (Admin/Clinical/Security) migrates to <DashboardShell>. */
+
+.dashboard-shell {
+  display: flex;
+  min-height: 100svh;
+  width: 100%;
+  background: var(--off-white);
+}
+
+.sidebar {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 24px 16px;
+  box-sizing: border-box;
+  background: var(--plum-deep);
+  color: var(--off-white);
+}
+
+.sidebar-brand {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: #fff;
+  padding: 8px 12px 24px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(250, 247, 255, 0.75);
+  font: inherit;
+  cursor: pointer;
+}
+
+.sidebar-nav-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.sidebar-nav-item.active {
+  background: var(--plum);
+  color: #fff;
+  font-weight: 600;
+}
+
+.sidebar-logout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  margin-top: auto;
+  padding: 10px 12px;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(250, 247, 255, 0.75);
+  font: inherit;
+  cursor: pointer;
+}
+
+.sidebar-logout:hover {
+  color: #fff;
+}
+
+.dashboard-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 28px 32px 20px;
+  border-bottom: 1px solid #e6def6;
+}
+
+.shell-header h1 {
+  margin: 0 0 4px;
+  font-size: 26px;
+  color: var(--plum-deep);
+}
+
+.shell-subtitle {
+  margin: 0;
+  color: #7a6f96;
+  font-size: 14px;
+}
+
+.shell-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 14px;
+  color: var(--plum-deep);
+}
+
+.shell-identity span {
+  color: #7a6f96;
+  font-size: 12px;
+}
+
+.shell-content {
+  flex: 1 1 auto;
+  padding: 24px 32px;
+  box-sizing: border-box;
+}
+
+/* Search bar */
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  max-width: 420px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f1ecfb;
+  color: #7a6f96;
+}
+
+.search-bar svg {
+  flex: 0 0 auto;
+}
+
+.search-bar input {
+  flex: 1 1 auto;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: var(--plum-deep);
+  outline: none;
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+/* Role/section tabs */
+
+.role-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.role-tab {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 8px;
+  background: #f1ecfb;
+  color: var(--plum-deep);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.role-tab.active {
+  background: var(--plum-deep);
+  color: #fff;
+}
+
+/* Card list rows */
+
+.card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  border: 1px solid #ece5fa;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.card-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.card-row-main .name-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--plum-deep);
+}
+
+.card-row-main .meta-line {
+  font-size: 13px;
+  color: #7a6f96;
+}
+
+.card-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Badges */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge-active {
+  background: #e7ddfb;
+  color: var(--plum-deep);
+}
+
+.badge-inactive {
+  background: #f3d9dc;
+  color: #9d2f3d;
+}
+
+/* Buttons */
+
+.btn-primary,
+.btn-secondary {
+  padding: 9px 16px;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-primary {
+  border: none;
+  background: var(--plum);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #5420b8;
+}
+
+.btn-secondary {
+  border: 1px solid #d8cdf2;
+  background: #fff;
+  color: var(--plum-deep);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #f6f1fd;
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Modal */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(42, 15, 92, 0.45);
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px;
+  background: var(--plum-deep);
+  color: #fff;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.modal-close {
+  border: none;
+  background: transparent;
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-body {
+  padding: 20px 22px;
+  overflow-y: auto;
+}
+
+.modal-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--plum-deep);
+  margin-bottom: 14px;
+}
+
+.modal-body input,
+.modal-body select,
+.modal-body textarea {
+  font: inherit;
+  font-weight: 400;
+  padding: 10px 12px;
+  border: 1px solid #e2d9f6;
+  border-radius: 8px;
+  background: #f8f5fd;
+  color: var(--plum-deep);
+}
+
+.modal-body .button-row {
+  justify-content: flex-end;
+  margin-top: 8px;
 }
