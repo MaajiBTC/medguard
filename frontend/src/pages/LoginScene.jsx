@@ -5,11 +5,10 @@ import * as THREE from 'three';
 // Security Dashboard visualization (LedgerVisualization.jsx). Purely decorative --
 // the actual login form is plain HTML/React; this is just the animated brand shield
 // beside it. A plum shield body with a hospital cross emblem on its front face and a
-// smaller shield emblem on its back -- both revealed during the 360-degree entrance
-// spin. Every piece is a flat, unlit, constant color (MeshBasicMaterial) -- no PBR
-// shading/gradient anywhere on the logo, by request.
+// smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
 
 const PLUM = 0x6528d9;
+const PLUM_DEEP = 0x2a0f5c;
 const WHITE = 0xffffff;
 
 function buildCrossShape() {
@@ -137,9 +136,13 @@ function LoginScene() {
       curveSegments: 24,
     });
     shieldGeometry.center();
-    // Unlit -- a flat, constant plum with zero shading/gradient (no highlight, no
-    // darker "shadow" side), by request.
-    const shieldMaterial = new THREE.MeshBasicMaterial({ color: PLUM });
+    const shieldMaterial = new THREE.MeshStandardMaterial({
+      color: PLUM,
+      emissive: PLUM_DEEP,
+      emissiveIntensity: 0.25,
+      metalness: 0.35,
+      roughness: 0.4,
+    });
     const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
     medallion.add(shield);
 
@@ -152,6 +155,9 @@ function LoginScene() {
       bevelSegments: 2,
       curveSegments: 8,
     });
+    // Unlit (MeshBasicMaterial, like the ring below) -- MeshStandardMaterial still
+    // shades/tints a "white" surface under colored scene lighting, which read as
+    // gray/lavender instead of pure white. Unlit ignores lighting entirely.
     const crossMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
     cross.position.z = SHIELD_DEPTH / 2;
@@ -196,8 +202,14 @@ function LoginScene() {
     // sprite blends smoothly into the ring (and the shield behind it) with no boundary.
     addGlowSprite(scene, { scale: 3.6, baseOpacity: 0.75 });
 
-    // No scene lights -- every material above is unlit (MeshBasicMaterial), so
-    // lights would have nothing to shade and are just dead code.
+    // Lavender key light for shading/depth on the shield body -- lighting only, not
+    // an object color (the cross/shield/ring are unlit and pure white regardless).
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    const key = new THREE.PointLight(0xc4b5fd, 1.4);
+    key.position.set(2, 2, 3);
+    const rim = new THREE.PointLight(PLUM, 0.9);
+    rim.position.set(-3, -1, -2);
+    scene.add(ambient, key, rim);
 
     let frameId;
     const start = performance.now();
