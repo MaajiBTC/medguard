@@ -10,7 +10,6 @@ import * as THREE from 'three';
 const PLUM = 0x6528d9;
 const PLUM_DEEP = 0x2a0f5c;
 const WHITE = 0xffffff;
-const CROSS_RED = 0xeb1c24;
 const EMISSIVE_INTENSITY = 0.9;
 
 function buildCrossShape() {
@@ -122,8 +121,8 @@ function LoginScene() {
       curveSegments: 8,
     });
     const crossMaterial = new THREE.MeshStandardMaterial({
-      color: CROSS_RED,
-      emissive: CROSS_RED,
+      color: WHITE,
+      emissive: WHITE,
       emissiveIntensity: EMISSIVE_INTENSITY,
       metalness: 0,
       roughness: 0.5,
