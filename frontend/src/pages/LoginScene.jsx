@@ -43,25 +43,6 @@ function buildShieldShape() {
   return shape;
 }
 
-// A soft radial-gradient blob (white center fading smoothly to fully transparent) --
-// used as a texture on camera-facing sprites so glows have zero hard edge/boundary,
-// unlike a flat oversized copy of a shape (which just shows a bigger silhouette).
-function createGlowTexture() {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  gradient.addColorStop(0, 'rgba(255,255,255,1)');
-  gradient.addColorStop(0.25, 'rgba(255,255,255,0.85)');
-  gradient.addColorStop(0.55, 'rgba(255,255,255,0.3)');
-  gradient.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
-  return new THREE.CanvasTexture(canvas);
-}
-
 function easeOutBack(x) {
   const c1 = 1.70158;
   const c3 = c1 + 1;
@@ -80,9 +61,8 @@ const EMBLEM_DEPTH = 0.24;
  * full 360 degrees while popping in (overshoot ease on scale, decelerating spin on
  * rotation), revealing the hospital cross on its front and a shield emblem on its
  * back before settling to a stop facing forward (cross side). Idles with a gentle
- * sway + bob afterward, plus a softly pulsing glow (radial-gradient sprites, no
- * hard edges) behind the ring, cross, and back shield. Respects
- * prefers-reduced-motion (renders the settled shield, front-facing, with no spin). */
+ * sway + bob afterward. Respects prefers-reduced-motion (renders the settled
+ * shield, front-facing, with no spin). */
 function LoginScene() {
   const mountRef = useRef(null);
 
@@ -103,25 +83,6 @@ function LoginScene() {
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mount.appendChild(renderer.domElement);
-
-    const glowTexture = createGlowTexture();
-    const glowSprites = []; // { sprite, material, baseOpacity }
-    function addGlowSprite(parent, { scale, baseOpacity, z = 0 }) {
-      const material = new THREE.SpriteMaterial({
-        map: glowTexture,
-        color: WHITE,
-        transparent: true,
-        opacity: reduceMotion ? baseOpacity : 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      });
-      const sprite = new THREE.Sprite(material);
-      sprite.scale.set(scale, scale, 1);
-      sprite.position.z = z;
-      parent.add(sprite);
-      glowSprites.push({ material, baseOpacity });
-      return material;
-    }
 
     const medallion = new THREE.Group();
     scene.add(medallion);
@@ -163,8 +124,6 @@ function LoginScene() {
     cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
 
-    addGlowSprite(medallion, { scale: 2.4, baseOpacity: 0.7, z: cross.position.z + EMBLEM_DEPTH / 2 });
-
     // Back face: a smaller shield emblem (unchanged shape), revealed as the shield
     // spins during entrance -- distinct from the body's own outer silhouette.
     const backShieldGeometry = new THREE.ExtrudeGeometry(buildShieldShape(), {
@@ -182,8 +141,6 @@ function LoginScene() {
     backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
     medallion.add(backShield);
 
-    addGlowSprite(medallion, { scale: 1.9, baseOpacity: 0.65, z: backShield.position.z - EMBLEM_DEPTH / 2 });
-
     medallion.scale.setScalar(reduceMotion ? 1 : 0.001);
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
@@ -196,11 +153,6 @@ function LoginScene() {
     const ring = new THREE.Mesh(ringGeometry, ringMaterial);
     ring.rotation.x = Math.PI / 2.4;
     scene.add(ring);
-
-    // One big soft sprite centered on the ring rather than a second, thicker torus --
-    // a torus copy would still show its own tube-shaped edge; a radial-gradient
-    // sprite blends smoothly into the ring (and the shield behind it) with no boundary.
-    addGlowSprite(scene, { scale: 3.6, baseOpacity: 0.75 });
 
     // Lavender key light for shading/depth on the shield body -- lighting only, not
     // an object color (the cross/shield/ring are unlit and pure white regardless).
@@ -237,12 +189,6 @@ function LoginScene() {
       ring.material.opacity = t;
       ring.rotation.z += 0.0035;
 
-      // Gentle breathing glow (illuminated look) on top of the entrance fade-in.
-      const pulse = 0.75 + 0.25 * Math.sin(elapsed / 900);
-      glowSprites.forEach(({ material, baseOpacity }) => {
-        material.opacity = baseOpacity * t * pulse;
-      });
-
       renderer.render(scene, camera);
       frameId = requestAnimationFrame(animate);
     };
@@ -268,8 +214,6 @@ function LoginScene() {
       backShieldMaterial.dispose();
       ringGeometry.dispose();
       ringMaterial.dispose();
-      glowSprites.forEach(({ material }) => material.dispose());
-      glowTexture.dispose();
       renderer.dispose();
       mount.removeChild(renderer.domElement);
     };
