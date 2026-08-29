@@ -28,7 +28,7 @@
   gap: 4px;
   padding: 48px 32px;
   box-sizing: border-box;
-  background: linear-gradient(160deg, var(--plum) 0%, var(--plum-deep) 100%);
+  background: var(--plum);
   border-radius: 0 56px 56px 0;
 }
 
