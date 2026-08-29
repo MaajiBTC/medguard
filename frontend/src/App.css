@@ -202,7 +202,6 @@ button {
 }
 
 .search-form,
-.create-form,
 .assign-form,
 .ledger-filters {
   display: flex;
@@ -212,24 +211,7 @@ button {
   margin-bottom: 12px;
 }
 
-.create-form {
-  flex-direction: column;
-  align-items: stretch;
-  max-width: 360px;
-}
-
-.create-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 14px;
-}
-
 .search-form input,
-.create-form input,
-.create-form select,
-.assign-form input,
-.assign-form select,
 .ledger-filters input,
 .ledger-filters select {
   font: inherit;
@@ -240,8 +222,7 @@ button {
   color: var(--text-h);
 }
 
-.patient-list,
-.result-list {
+.patient-list {
   list-style: none;
   padding: 0;
   display: flex;
@@ -249,8 +230,7 @@ button {
   gap: 4px;
 }
 
-.patient-list button,
-.result-list button {
+.patient-list button {
   width: 100%;
   text-align: left;
   padding: 8px 10px;
@@ -261,20 +241,11 @@ button {
   cursor: pointer;
 }
 
-.patient-view,
-.edit-panel {
+.patient-view {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 16px;
   margin-top: 12px;
-}
-
-.edit-panel label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 14px;
-  margin-bottom: 10px;
 }
 
 .button-row {
@@ -340,8 +311,7 @@ button {
   font-size: 14px;
 }
 
-.category-list details,
-.edit-panel details {
+.category-list details {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 12px;
@@ -353,30 +323,6 @@ button {
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
-}
-
-.category-editor textarea {
-  font: inherit;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text-h);
-  resize: vertical;
-}
-
-/* Admin dashboard */
-
-.admin-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-}
-
-@media (max-width: 800px) {
-  .admin-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* Security dashboard */
@@ -776,7 +722,14 @@ button {
   overflow-y: auto;
 }
 
-.modal-body label {
+.modal-body .button-row {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* Form fields (used inside modals and inline panel-cards alike) */
+
+.form-label {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -786,9 +739,7 @@ button {
   margin-bottom: 14px;
 }
 
-.modal-body input,
-.modal-body select,
-.modal-body textarea {
+.form-input {
   font: inherit;
   font-weight: 400;
   padding: 10px 12px;
@@ -798,7 +749,42 @@ button {
   color: var(--plum-deep);
 }
 
-.modal-body .button-row {
-  justify-content: flex-end;
-  margin-top: 8px;
+.form-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--plum-deep);
+  margin-bottom: 14px;
+}
+
+/* Inline detail/edit panel (fixed light palette, not dark-mode reactive) */
+
+.panel-card {
+  border: 1px solid #ece5fa;
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 16px;
+  background: #fff;
+}
+
+.panel-card h3,
+.panel-card h4 {
+  margin-top: 0;
+  color: var(--plum-deep);
+}
+
+.detail-block {
+  border: 1px solid #ece5fa;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  background: #fff;
+  color: var(--plum-deep);
+}
+
+.detail-block summary {
+  cursor: pointer;
+  font-weight: 600;
 }
