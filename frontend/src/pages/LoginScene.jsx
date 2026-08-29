@@ -8,9 +8,9 @@ import * as THREE from 'three';
 // smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
 
 const PLUM = 0x6528d9;
-const PLUM_DEEP = 0x2a0f5c;
 const WHITE = 0xffffff;
 const CROSS_RED = 0xeb1c24;
+const EMISSIVE_INTENSITY = 0.9;
 
 function buildCrossShape() {
   const w = 0.22; // half-width of the cross arms
@@ -99,10 +99,12 @@ function LoginScene() {
       curveSegments: 24,
     });
     shieldGeometry.center();
+    // Emissive matches the base color (not a darker shade) at a high intensity --
+    // the material glows in its own color without needing a separate glow layer.
     const shieldMaterial = new THREE.MeshStandardMaterial({
       color: PLUM,
-      emissive: PLUM_DEEP,
-      emissiveIntensity: 0.25,
+      emissive: PLUM,
+      emissiveIntensity: EMISSIVE_INTENSITY,
       metalness: 0.35,
       roughness: 0.4,
     });
@@ -118,10 +120,13 @@ function LoginScene() {
       bevelSegments: 2,
       curveSegments: 8,
     });
-    // Unlit (MeshBasicMaterial, like the ring below) -- MeshStandardMaterial still
-    // shades/tints a "white" surface under colored scene lighting, which read as
-    // gray/lavender instead of pure white. Unlit ignores lighting entirely.
-    const crossMaterial = new THREE.MeshBasicMaterial({ color: CROSS_RED });
+    const crossMaterial = new THREE.MeshStandardMaterial({
+      color: CROSS_RED,
+      emissive: CROSS_RED,
+      emissiveIntensity: EMISSIVE_INTENSITY,
+      metalness: 0,
+      roughness: 0.5,
+    });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
     cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
@@ -137,7 +142,13 @@ function LoginScene() {
       curveSegments: 16,
     });
     backShieldGeometry.center();
-    const backShieldMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
+    const backShieldMaterial = new THREE.MeshStandardMaterial({
+      color: WHITE,
+      emissive: WHITE,
+      emissiveIntensity: EMISSIVE_INTENSITY,
+      metalness: 0,
+      roughness: 0.5,
+    });
     const backShield = new THREE.Mesh(backShieldGeometry, backShieldMaterial);
     backShield.scale.set(0.62, 0.62, 1);
     backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
@@ -147,8 +158,12 @@ function LoginScene() {
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
     const ringGeometry = new THREE.TorusGeometry(1.5, 0.03, 12, 96);
-    const ringMaterial = new THREE.MeshBasicMaterial({
+    const ringMaterial = new THREE.MeshStandardMaterial({
       color: WHITE,
+      emissive: WHITE,
+      emissiveIntensity: EMISSIVE_INTENSITY,
+      metalness: 0,
+      roughness: 0.5,
       transparent: true,
       opacity: reduceMotion ? 1 : 0,
     });
@@ -156,8 +171,8 @@ function LoginScene() {
     ring.rotation.x = Math.PI / 2.4;
     scene.add(ring);
 
-    // Lavender key light for shading/depth on the shield body -- lighting only, not
-    // an object color (the cross/shield/ring are unlit and pure white regardless).
+    // Lavender key light for extra shading/depth on top of each material's own
+    // emissive glow.
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     const key = new THREE.PointLight(0xc4b5fd, 1.4);
     key.position.set(2, 2, 3);
