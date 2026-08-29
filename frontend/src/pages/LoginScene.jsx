@@ -109,7 +109,7 @@ function LoginScene() {
     // High metalness + low roughness for a brushed-steel look; emissive black so
     // it never glows (relies entirely on scene lights for its highlight/shading).
     const shieldMaterial = new THREE.MeshStandardMaterial({
-      color: PLUM,
+      color: WHITE,
       emissive: 0x000000,
       metalness: 0.9,
       roughness: 0.4,
@@ -129,9 +129,9 @@ function LoginScene() {
       curveSegments: 8,
     });
     // Same metal treatment as the shield body (color/metalness/roughness/envMap),
-    // just red instead of plum.
+    // just plum instead of white.
     const crossMaterial = new THREE.MeshStandardMaterial({
-      color: WHITE,
+      color: PLUM,
       emissive: 0x000000,
       metalness: 0.9,
       roughness: 0.4,
@@ -154,7 +154,7 @@ function LoginScene() {
     });
     backShieldGeometry.center();
     const backShieldMaterial = new THREE.MeshStandardMaterial({
-      color: WHITE,
+      color: PLUM,
       emissive: 0x000000,
       metalness: 0.9,
       roughness: 0.4,
