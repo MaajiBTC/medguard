@@ -54,6 +54,7 @@ function easeOutCubic(x) {
 }
 
 const ENTRANCE_MS = 1300;
+const ROTATION_MS = ENTRANCE_MS * 2; // half the angular speed of the entrance spin
 const SHIELD_DEPTH = 0.28;
 const EMBLEM_DEPTH = 0.24;
 
@@ -178,11 +179,12 @@ function LoginScene() {
       const scaleEased = easeOutBack(t);
       medallion.scale.setScalar(Math.max(scaleEased, 0.001));
 
-      if (t < 1) {
+      const rt = Math.min(elapsed / ROTATION_MS, 1);
+      if (rt < 1) {
         // One full 360-degree turn, decelerating to a stop facing forward (cross-side).
-        medallion.rotation.y = -Math.PI * 2 * (1 - easeOutCubic(t));
+        medallion.rotation.y = -Math.PI * 2 * (1 - easeOutCubic(rt));
       } else {
-        const idleElapsed = elapsed - ENTRANCE_MS;
+        const idleElapsed = elapsed - ROTATION_MS;
         medallion.rotation.y = Math.sin(idleElapsed / 1800) * 0.12;
       }
       medallion.position.y = Math.sin(elapsed / 1400) * 0.06;
