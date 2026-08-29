@@ -204,7 +204,7 @@ function LoginScene() {
       envMapIntensity: 0.75,
     });
     const padlock = new THREE.Mesh(padlockGeometry, padlockMaterial);
-    padlock.scale.set(0.341, 0.341, 1); // same size as the shield emblem it replaced
+    padlock.scale.set(0.426, 0.392, 1); // 0.341 base, 25% wider and 15% taller
     padlock.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2) * POP_SCALE; // pop-up reduced 25%
     medallion.add(padlock);
 
