@@ -36,11 +36,11 @@ function buildCrossShape() {
 // one smooth curve to a point at the bottom -- all curves, no straight edges.
 function buildShieldShape() {
   const shape = new THREE.Shape();
-  shape.moveTo(0, 1.0);
-  shape.bezierCurveTo(0.35, 0.98, 0.75, 0.85, 0.9, 0.65);
+  shape.moveTo(0, 1.05);
+  shape.bezierCurveTo(0.05, 0.95, 0.3, 0.8, 0.9, 0.65);
   shape.bezierCurveTo(0.95, 0.0, 0.55, -0.85, 0, -1.05);
   shape.bezierCurveTo(-0.55, -0.85, -0.95, 0.0, -0.9, 0.65);
-  shape.bezierCurveTo(-0.75, 0.85, -0.35, 0.98, 0, 1.0);
+  shape.bezierCurveTo(-0.3, 0.8, -0.05, 0.95, 0, 1.05);
   return shape;
 }
 
