@@ -116,13 +116,10 @@ function LoginScene() {
       bevelSegments: 2,
       curveSegments: 8,
     });
-    const crossMaterial = new THREE.MeshStandardMaterial({
-      color: WHITE,
-      emissive: WHITE,
-      emissiveIntensity: 0.1,
-      metalness: 0.1,
-      roughness: 0.5,
-    });
+    // Unlit (MeshBasicMaterial, like the ring below) -- MeshStandardMaterial still
+    // shades/tints a "white" surface under colored scene lighting, which read as
+    // gray/lavender instead of pure white. Unlit ignores lighting entirely.
+    const crossMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
     cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
@@ -138,13 +135,7 @@ function LoginScene() {
       curveSegments: 16,
     });
     backShieldGeometry.center();
-    const backShieldMaterial = new THREE.MeshStandardMaterial({
-      color: WHITE,
-      emissive: WHITE,
-      emissiveIntensity: 0.1,
-      metalness: 0.2,
-      roughness: 0.45,
-    });
+    const backShieldMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
     const backShield = new THREE.Mesh(backShieldGeometry, backShieldMaterial);
     backShield.scale.set(0.62, 0.62, 1);
     backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
