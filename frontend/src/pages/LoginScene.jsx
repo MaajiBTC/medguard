@@ -10,7 +10,7 @@ import * as THREE from 'three';
 const PLUM = 0x6528d9;
 const PLUM_DEEP = 0x2a0f5c;
 const WHITE = 0xffffff;
-const CROSS_RED = 0xed1b2e;
+const CROSS_RED = 0xeb1c24;
 
 function buildCrossShape() {
   const w = 0.22; // half-width of the cross arms
