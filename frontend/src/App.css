@@ -1,72 +1,123 @@
 /* LoginPage + the three step-4 dashboards (Clinical/Admin/Security). Plain CSS
-   throughout -- three.js is scoped to exactly the login placeholder and the
-   Security Dashboard's LedgerVisualization panel, per CLAUDE.md. */
+   throughout -- three.js is scoped to exactly the login scene (LoginScene.jsx) and
+   the Security Dashboard's LedgerVisualization panel, per CLAUDE.md.
+
+   The login page uses its own fixed navy/teal brand palette (added 2026-08-29),
+   deliberately independent of the --accent/--bg tokens the authenticated dashboards
+   use -- a login/landing screen is a one-time brand moment, not a data screen, so it
+   doesn't follow the viewer's light/dark preference the way the dashboards do. */
 
 .login-page {
+  display: flex;
+  min-height: 100svh;
+  width: 100%;
+}
+
+.login-brand-panel {
+  flex: 1 1 46%;
+  min-width: 320px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 32px;
-  min-height: 100svh;
-  padding: 24px;
+  gap: 4px;
+  padding: 48px 32px;
   box-sizing: border-box;
+  background: linear-gradient(160deg, #16213e 0%, #0b0f1f 100%);
+  border-radius: 0 56px 56px 0;
 }
 
-.three-scene-placeholder {
-  width: 100%;
-  max-width: 420px;
-  height: 200px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
+.login-scene {
+  width: min(280px, 55vw);
+  height: min(280px, 55vw);
+}
+
+.login-brand-text {
+  text-align: center;
+}
+
+.login-brand-text h1 {
+  margin: 8px 0 6px;
+  font-size: 40px;
+  letter-spacing: -0.5px;
+  color: #fff;
+}
+
+.login-tagline {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 15px;
+}
+
+.login-form-panel {
+  flex: 1 1 54%;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text);
-  font-size: 14px;
+  padding: 32px;
+  box-sizing: border-box;
+  background: #f4f6fb;
 }
 
 .login-form {
   width: 100%;
-  max-width: 320px;
+  max-width: 360px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
-.login-form h1 {
+.login-form h2 {
   margin: 0;
   font-size: 32px;
+  color: #14213d;
 }
 
 .login-subtitle {
-  margin: 0 0 16px;
-  color: var(--text);
+  margin: 0 0 20px;
+  color: #6b7280;
 }
 
 .login-form label {
-  font-size: 14px;
-  margin-top: 8px;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .login-form input {
   font: inherit;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text-h);
+  padding: 14px 16px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: #e9ecf3;
+  color: #14213d;
+  margin-bottom: 4px;
+}
+
+.login-form input:focus {
+  outline: none;
+  border-color: #2dd4bf;
+  background: #fff;
 }
 
 .login-form button {
   margin-top: 20px;
-  padding: 10px;
+  padding: 14px;
   font: inherit;
-  border-radius: 6px;
-  border: 1px solid var(--accent-border);
-  background: var(--accent-bg);
-  color: var(--accent);
+  font-weight: 600;
+  border-radius: 12px;
+  border: none;
+  background: #16213e;
+  color: #fff;
   cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.login-form button:hover:not(:disabled) {
+  background: #223055;
 }
 
 .login-form button:disabled {
@@ -82,6 +133,27 @@
 
 button {
   font: inherit;
+}
+
+@media (max-width: 860px) {
+  .login-page {
+    flex-direction: column;
+  }
+
+  .login-brand-panel {
+    flex: 0 0 auto;
+    padding: 32px 24px;
+    border-radius: 0 0 40px 40px;
+  }
+
+  .login-scene {
+    width: min(200px, 45vw);
+    height: min(200px, 45vw);
+  }
+
+  .login-form-panel {
+    flex: 1 1 auto;
+  }
 }
 
 /* Shared dashboard shell (Clinical/Admin/Security) */

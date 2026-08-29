@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 
 import { login } from '../api/auth';
 import { computeKeystrokeFeatures, createKeystrokeAccumulator } from '../capture/behavioral/keystrokeFeatures';
+import LoginScene from './LoginScene';
 
 /**
  * Staff login screen.
@@ -43,59 +44,60 @@ function LoginPage({ onLoginSuccess }) {
 
   return (
     <div className="login-page">
-      {/*
-        Inert placeholder for the future three.js login scene. CLAUDE.md scopes
-        three.js to exactly two places: this login/landing page and the Security
-        Dashboard visualization (step 4+). The `three` package is intentionally NOT
-        installed yet -- no unused dependency until that later task actually builds
-        the 3D piece.
-      */}
-      <div className="three-scene-placeholder" aria-hidden="true">
-        <span>three.js scene placeholder</span>
+      <div className="login-brand-panel">
+        <LoginScene />
+        <div className="login-brand-text">
+          <h1>MedGuard</h1>
+          <p className="login-tagline">Safe access, seamless healthcare.</p>
+        </div>
       </div>
 
-      <form className="login-form" onSubmit={handleSubmit}>
-        <h1>MedGuard</h1>
-        <p className="login-subtitle">Staff login</p>
+      <div className="login-form-panel">
+        <form className="login-form" onSubmit={handleSubmit}>
+          <h2>Welcome back</h2>
+          <p className="login-subtitle">Sign in with your staff ID and password.</p>
 
-        <label htmlFor="username">Username</label>
-        <input
-          id="username"
-          name="username"
-          type="text"
-          autoComplete="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onKeyUp={handleKeyUp}
-          onPaste={handlePaste}
-          required
-        />
+          <label htmlFor="username">Username</label>
+          <input
+            id="username"
+            name="username"
+            type="text"
+            placeholder="Enter staff username"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onKeyUp={handleKeyUp}
+            onPaste={handlePaste}
+            required
+          />
 
-        <label htmlFor="password">Password</label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onKeyUp={handleKeyUp}
-          onPaste={handlePaste}
-          required
-        />
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            placeholder="Enter your password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onKeyUp={handleKeyUp}
+            onPaste={handlePaste}
+            required
+          />
 
-        {error && (
-          <p className="login-error" role="alert">
-            {error}
-          </p>
-        )}
+          {error && (
+            <p className="login-error" role="alert">
+              {error}
+            </p>
+          )}
 
-        <button type="submit" disabled={submitting}>
-          {submitting ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
+          <button type="submit" disabled={submitting}>
+            {submitting ? 'Signing in…' : 'Sign In'}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

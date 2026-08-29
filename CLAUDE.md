@@ -189,7 +189,7 @@ A monitoring screen showing a live feed of `AUDITED_DEVIATION`, `REDUCED_ACCESS`
 - Backend: Python + Django (+ Django REST Framework for the API layer, since the frontend is a separate React app, not Django templates)
 - Database: SQLite
 - Frontend: React + three.js
-  - three.js is scoped to two places only: the **Security Dashboard visualization** and the **login/landing page**. Do not use it in the functional record-access screens (search, category views, etc.) — keep those plain React for clarity and performance.
+  - three.js is scoped to two places only: the **Security Dashboard visualization** and the **login/landing page**. Do not use it in the functional record-access screens (search, category views, etc.) — keep those plain React for clarity and performance. Login page's three.js piece implemented 2026-08-29 (`LoginScene.jsx`): an animated shield (extruded `THREE.Shape`, teal, orbiting ring) in the split-screen login redesign — scale/rotate entrance with an overshoot ease, then an idle bob; respects `prefers-reduced-motion`. Was a bare placeholder div before this.
 - Ledger: Python's built-in `hashlib`
 - Behavioral matching reference: adapt `abhijeet3922/User-Verification-based-on-Keystroke-Dynamics` (GitHub) rather than building matching math from scratch
 - Fingerprint matching: SourceAFIS
