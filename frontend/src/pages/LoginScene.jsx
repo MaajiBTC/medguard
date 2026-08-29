@@ -144,7 +144,7 @@ function LoginScene() {
     medallion.scale.setScalar(reduceMotion ? 1 : 0.001);
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
-    const ringGeometry = new THREE.TorusGeometry(1.5, 0.012, 8, 96);
+    const ringGeometry = new THREE.TorusGeometry(1.5, 0.03, 12, 96);
     const ringMaterial = new THREE.MeshBasicMaterial({
       color: WHITE,
       transparent: true,
