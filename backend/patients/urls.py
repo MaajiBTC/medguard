@@ -6,6 +6,7 @@ app_name = "patients"
 
 urlpatterns = [
     path("", views.PatientSearchView.as_view(), name="search"),
+    path("summary/", views.PatientSummaryView.as_view(), name="summary"),
     path("assigned-to-me/", views.MyAssignedPatientsView.as_view(), name="assigned-to-me"),
     path("create/", views.PatientCreateView.as_view(), name="create"),
     path("<int:patient_id>/ward/", views.PatientWardUpdateView.as_view(), name="ward-update"),

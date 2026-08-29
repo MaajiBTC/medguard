@@ -7,7 +7,7 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from staff.models import Staff
+from staff.models import Staff, Ward
 
 from .models import Patient, PatientAssignment, PatientCategoryRecord
 
@@ -120,7 +120,7 @@ class PatientApiTests(APITestCase):
         _admin, token = self._login("adminPatientApi1", "pw-patient-api-3", "STF-P902", Staff.Role.ADMIN)
         resp = self.client.post(
             "/api/patients/create/",
-            {"hospital_number": "HN-P902", "full_name": "New Patient", "ward": "Ward A"},
+            {"hospital_number": "HN-P902", "full_name": "New Patient", "ward": Ward.GENERAL_MALE},
             format="json",
             **self._auth(token),
         )
@@ -140,11 +140,11 @@ class PatientApiTests(APITestCase):
         )
 
         ward_resp = self.client.patch(
-            f"/api/patients/{patient.id}/ward/", {"ward": "Ward C"}, format="json", **self._auth(token)
+            f"/api/patients/{patient.id}/ward/", {"ward": Ward.SURGICAL}, format="json", **self._auth(token)
         )
         self.assertEqual(ward_resp.status_code, status.HTTP_200_OK)
         patient.refresh_from_db()
-        self.assertEqual(patient.ward, "Ward C")
+        self.assertEqual(patient.ward, Ward.SURGICAL)
 
         content_resp = self.client.patch(
             f"/api/patients/{patient.id}/records/6/",
@@ -207,3 +207,50 @@ class PatientApiTests(APITestCase):
         resp = self.client.get("/api/patients/assigned-to-me/", **self._auth(token))
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data, [])
+
+    def test_invalid_ward_rejected_on_create(self):
+        _admin, token = self._login("adminPatientApi4", "pw-patient-api-11", "STF-P910", Staff.Role.ADMIN)
+        resp = self.client.post(
+            "/api/patients/create/",
+            {"hospital_number": "HN-P910", "full_name": "Bad Ward", "ward": "Ward A"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invalid_ward_rejected_on_ward_update(self):
+        _admin, token = self._login("adminPatientApi5", "pw-patient-api-12", "STF-P911", Staff.Role.ADMIN)
+        patient = Patient.objects.create(hospital_number="HN-P911", full_name="P", ward=Ward.EMERGENCY)
+        resp = self.client.patch(
+            f"/api/patients/{patient.id}/ward/", {"ward": "Ward A"}, format="json", **self._auth(token)
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_search_filters_by_ward(self):
+        Patient.objects.create(hospital_number="HN-P912", full_name="Male Ward Patient", ward=Ward.GENERAL_MALE)
+        Patient.objects.create(hospital_number="HN-P913", full_name="Surgical Patient", ward=Ward.SURGICAL)
+        _staff, token = self._login("clerkWardFilterApi", "pw-patient-api-13", "STF-P912", Staff.Role.CLERK)
+
+        resp = self.client.get(f"/api/patients/?ward={Ward.GENERAL_MALE}", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        hospital_numbers = {row["hospital_number"] for row in resp.data}
+        self.assertIn("HN-P912", hospital_numbers)
+        self.assertNotIn("HN-P913", hospital_numbers)
+
+    def test_summary_counts_by_ward_including_unassigned(self):
+        Patient.objects.create(hospital_number="HN-P914", full_name="A", ward=Ward.GENERAL_MALE)
+        Patient.objects.create(hospital_number="HN-P915", full_name="B", ward=Ward.GENERAL_MALE)
+        Patient.objects.create(hospital_number="HN-P916", full_name="C", ward="")
+        _admin, token = self._login("adminPatientApi6", "pw-patient-api-14", "STF-P913", Staff.Role.ADMIN)
+
+        resp = self.client.get("/api/patients/summary/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["total"], 3)
+        self.assertEqual(resp.data["by_ward"]["general_male"], 2)
+        self.assertEqual(resp.data["by_ward"]["surgical"], 0)
+        self.assertEqual(resp.data["by_ward"]["unassigned"], 1)
+
+    def test_non_admin_cannot_read_patient_summary(self):
+        _staff, token = self._login("clerkSummaryDeniedApi", "pw-patient-api-15", "STF-P914", Staff.Role.CLERK)
+        resp = self.client.get("/api/patients/summary/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)

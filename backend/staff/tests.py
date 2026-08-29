@@ -13,7 +13,7 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Staff
+from .models import Staff, Ward
 
 
 class StaffModelTests(TestCase):
@@ -74,6 +74,11 @@ class StaffModelTests(TestCase):
         actual = {role.value for role in Staff.CLINICAL_ROLES}
         self.assertEqual(expected, actual)
 
+    def test_four_wards_are_valid_choices(self):
+        expected = {"general_male", "general_female", "surgical", "emergency"}
+        actual = {value for value, _label in Ward.choices}
+        self.assertEqual(expected, actual)
+
 
 class StaffApiTests(APITestCase):
     """Admin-only staff-management endpoints (staff/views.py). Mirrors the
@@ -111,7 +116,7 @@ class StaffApiTests(APITestCase):
                 "staff_id": "STF-S902",
                 "full_name": "New Nurse",
                 "role": Staff.Role.NURSE,
-                "ward": "Ward A",
+                "ward": Ward.GENERAL_MALE,
             },
             format="json",
             **self._auth(token),
@@ -129,13 +134,13 @@ class StaffApiTests(APITestCase):
 
         resp = self.client.patch(
             f"/api/staff/{nurse.id}/duty/",
-            {"ward": "Ward B", "on_duty": True},
+            {"ward": Ward.SURGICAL, "on_duty": True},
             format="json",
             **self._auth(admin_token),
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         nurse.refresh_from_db()
-        self.assertEqual(nurse.ward, "Ward B")
+        self.assertEqual(nurse.ward, Ward.SURGICAL)
         self.assertTrue(nurse.on_duty)
 
     def test_admin_can_update_on_call(self):
@@ -182,3 +187,59 @@ class StaffApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(login_again_resp.status_code, status.HTTP_201_CREATED)
+
+    def test_invalid_ward_rejected_on_create(self):
+        _admin, token = self._login("adminApi5", "pw-staff-api-9", "STF-S909", Staff.Role.ADMIN)
+        resp = self.client.post(
+            "/api/staff/create/",
+            {
+                "username": "badWardNurse",
+                "password": "pw-bad-ward-1",
+                "staff_id": "STF-S910",
+                "full_name": "Bad Ward Nurse",
+                "role": Staff.Role.NURSE,
+                "ward": "Ward A",
+            },
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invalid_ward_rejected_on_duty_update(self):
+        _admin, admin_token = self._login("adminApi6", "pw-staff-api-10", "STF-S911", Staff.Role.ADMIN)
+        nurse, _token = self._login("nurseBadWardApi", "pw-staff-api-11", "STF-S912", Staff.Role.NURSE)
+        resp = self.client.patch(
+            f"/api/staff/{nurse.id}/duty/",
+            {"ward": "Ward A"},
+            format="json",
+            **self._auth(admin_token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_search_filters_by_role(self):
+        _admin, token = self._login("adminApi7", "pw-staff-api-12", "STF-S913", Staff.Role.ADMIN)
+        self._login("doctorRoleFilterApi", "pw-staff-api-13", "STF-S914", Staff.Role.DOCTOR)
+        self._login("nurseRoleFilterApi", "pw-staff-api-14", "STF-S915", Staff.Role.NURSE)
+
+        resp = self.client.get("/api/staff/?role=doctor", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        staff_ids = {row["staff_id"] for row in resp.data}
+        self.assertIn("STF-S914", staff_ids)
+        self.assertNotIn("STF-S915", staff_ids)
+
+    def test_summary_counts(self):
+        _admin, token = self._login("adminApi8", "pw-staff-api-15", "STF-S916", Staff.Role.ADMIN)
+        self._login("doctorSummaryApi1", "pw-staff-api-16", "STF-S917", Staff.Role.DOCTOR, on_duty=True)
+        self._login("doctorSummaryApi2", "pw-staff-api-17", "STF-S918", Staff.Role.DOCTOR, on_duty=False)
+
+        resp = self.client.get("/api/staff/summary/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["total"], 3)  # admin + 2 doctors
+        self.assertEqual(resp.data["on_duty"], 2)  # admin logged in with on_duty=True default + 1 doctor
+        self.assertEqual(resp.data["by_role"]["doctor"], 2)
+        self.assertEqual(resp.data["by_role"]["nurse"], 0)
+
+    def test_non_admin_cannot_read_summary(self):
+        _staff, token = self._login("docSummaryDeniedApi", "pw-staff-api-18", "STF-S919", Staff.Role.DOCTOR)
+        resp = self.client.get("/api/staff/summary/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)

@@ -2,6 +2,18 @@ from django.conf import settings
 from django.db import models
 
 
+class Ward(models.TextChoices):
+    """Fixed hospital ward taxonomy, shared by Staff.ward and Patient.ward (see
+    patients/models.py) so the Nurse/Doctor "same ward" access rules in
+    scoring/engine.py can rely on an exact match between the two fields instead of
+    free text typed independently on each side."""
+
+    GENERAL_MALE = "general_male", "General Male Ward"
+    GENERAL_FEMALE = "general_female", "General Female Ward"
+    SURGICAL = "surgical", "Surgical Ward"
+    EMERGENCY = "emergency", "Emergency Ward"
+
+
 class Staff(models.Model):
     """A hospital staff member. One row per person, linked to their login (auth.User).
 
@@ -37,8 +49,9 @@ class Staff(models.Model):
     role = models.CharField(max_length=32, choices=Role.choices)
     ward = models.CharField(
         max_length=128,
+        choices=Ward.choices,
         blank=True,
-        help_text="Ward this staff member is generally assigned to (free text, manually set).",
+        help_text="Ward this staff member is generally assigned to (manually set).",
     )
     on_duty = models.BooleanField(
         default=False,

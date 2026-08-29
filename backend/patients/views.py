@@ -1,11 +1,11 @@
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from staff.models import Staff
+from staff.models import Staff, Ward
 from staff.permissions import IsAdmin
 
 from .models import Patient, PatientAssignment, PatientCategoryRecord
@@ -22,16 +22,38 @@ from .serializers import (
 
 
 class PatientSearchView(APIView):
-    """GET /api/patients/?q=... -- any authenticated staff (the search step has to
-    happen before the system knows what the caller is allowed to see; the actual
-    category content is gated separately, in scoring.views.PatientRecordView)."""
+    """GET /api/patients/?q=...&ward=... -- any authenticated staff (the search step
+    has to happen before the system knows what the caller is allowed to see; the
+    actual category content is gated separately, in scoring.views.PatientRecordView).
+    ward is an exact match against Ward, used by the Admin dashboard's ward-category
+    drill-down so results aren't limited by the 50-row search cap below."""
 
     def get(self, request):
         q = request.query_params.get("q", "").strip()
+        ward = request.query_params.get("ward", "").strip()
         patients = Patient.objects.all()
         if q:
             patients = patients.filter(Q(hospital_number__icontains=q) | Q(full_name__icontains=q))
+        if ward:
+            patients = patients.filter(ward=ward)
         return Response(PatientSummarySerializer(patients[:50], many=True).data)
+
+
+class PatientSummaryView(APIView):
+    """GET /api/patients/summary/ -- real counts for the Admin dashboard's overview
+    page and ward-category tiles (not the 50-row search cap)."""
+
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        by_ward = {ward: 0 for ward, _ in Ward.choices}
+        by_ward["unassigned"] = 0
+        for row in Patient.objects.values("ward").annotate(count=Count("id")):
+            by_ward[row["ward"] or "unassigned"] = row["count"]
+        return Response({
+            "total": Patient.objects.count(),
+            "by_ward": by_ward,
+        })
 
 
 class PatientCreateView(APIView):

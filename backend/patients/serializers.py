@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from staff.models import Ward
+
 from .models import Patient, PatientAssignment, PatientCategoryRecord
 
 
@@ -19,7 +21,7 @@ class PatientCreateSerializer(serializers.ModelSerializer):
 
 
 class PatientWardUpdateSerializer(serializers.Serializer):
-    ward = serializers.CharField(max_length=128, allow_blank=True)
+    ward = serializers.ChoiceField(choices=Ward.choices, allow_blank=True)
 
 
 class PatientCategoryRecordSerializer(serializers.ModelSerializer):

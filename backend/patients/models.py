@@ -1,5 +1,7 @@
 from django.db import models
 
+from staff.models import Ward
+
 
 class Patient(models.Model):
     """Deliberately minimal patient record for step 1.
@@ -14,8 +16,9 @@ class Patient(models.Model):
     full_name = models.CharField(max_length=255)
     ward = models.CharField(
         max_length=128,
+        choices=Ward.choices,
         blank=True,
-        help_text="Ward the patient currently occupies (free text).",
+        help_text="Ward the patient currently occupies.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

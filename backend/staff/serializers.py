@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import Staff
+from .models import Staff, Ward
 
 
 class StaffSummarySerializer(serializers.ModelSerializer):
@@ -24,7 +24,7 @@ class StaffCreateSerializer(serializers.Serializer):
     staff_id = serializers.CharField(max_length=64)
     full_name = serializers.CharField(max_length=255)
     role = serializers.ChoiceField(choices=Staff.Role.choices)
-    ward = serializers.CharField(max_length=128, required=False, allow_blank=True, default="")
+    ward = serializers.ChoiceField(choices=Ward.choices, required=False, allow_blank=True, default="")
     on_duty = serializers.BooleanField(required=False, default=False)
     on_call = serializers.BooleanField(required=False, default=False)
 
@@ -40,7 +40,7 @@ class StaffCreateSerializer(serializers.Serializer):
 
 
 class StaffDutyWardUpdateSerializer(serializers.Serializer):
-    ward = serializers.CharField(max_length=128, required=False, allow_blank=True)
+    ward = serializers.ChoiceField(choices=Ward.choices, required=False, allow_blank=True)
     on_duty = serializers.BooleanField(required=False)
     on_call = serializers.BooleanField(required=False)
 

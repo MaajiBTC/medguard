@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.response import Response
@@ -12,16 +12,38 @@ from .serializers import StaffCreateSerializer, StaffDutyWardUpdateSerializer, S
 
 
 class StaffSearchView(APIView):
-    """GET /api/staff/?q=... -- matches staff_id or full_name."""
+    """GET /api/staff/?q=...&role=... -- q matches staff_id or full_name; role is an
+    exact match against Staff.Role, used by the Admin dashboard's role-category
+    drill-down so results aren't limited by the 50-row search cap below."""
 
     permission_classes = [IsAdmin]
 
     def get(self, request):
         q = request.query_params.get("q", "").strip()
+        role = request.query_params.get("role", "").strip()
         staff = Staff.objects.select_related("user").all()
         if q:
             staff = staff.filter(Q(staff_id__icontains=q) | Q(full_name__icontains=q))
+        if role:
+            staff = staff.filter(role=role)
         return Response(StaffSummarySerializer(staff[:50], many=True).data)
+
+
+class StaffSummaryView(APIView):
+    """GET /api/staff/summary/ -- real counts for the Admin dashboard's overview
+    page and role-category tiles (not the 50-row search cap)."""
+
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        by_role = {role: 0 for role, _ in Staff.Role.choices}
+        for row in Staff.objects.values("role").annotate(count=Count("id")):
+            by_role[row["role"]] = row["count"]
+        return Response({
+            "total": Staff.objects.count(),
+            "on_duty": Staff.objects.filter(on_duty=True).count(),
+            "by_role": by_role,
+        })
 
 
 class StaffCreateView(APIView):
