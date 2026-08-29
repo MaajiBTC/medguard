@@ -6,7 +6,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 // Security Dashboard visualization (LedgerVisualization.jsx). Purely decorative --
 // the actual login form is plain HTML/React; this is just the animated brand shield
 // beside it. A plum shield body with a hospital cross emblem on its front face and a
-// smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
+// padlock emblem on its back -- both revealed during the 360-degree entrance spin.
 
 const PLUM = 0x6528d9;
 const WHITE = 0xffffff;
@@ -28,6 +28,44 @@ function buildCrossShape() {
   shape.lineTo(-l, -w);
   shape.lineTo(-w, -w);
   shape.lineTo(-w, -l);
+  return shape;
+}
+
+// Padlock silhouette: a rounded body with a U-shaped shackle on top, the
+// shackle's interior cut out as a hole so it reads as an open loop.
+function buildPadlockShape() {
+  const bw = 0.62; // body half-width
+  const bodyTop = 0.05;
+  const bodyBottom = -0.85;
+  const bodyRadius = 0.14; // bottom corner radius
+  const topRadius = 0.08; // top corner radius
+  const outerRadius = 0.35; // shackle outer radius
+  const innerRadius = 0.19; // shackle inner radius
+  const archBaseY = 0.5; // where the shackle legs meet the arc
+
+  const shape = new THREE.Shape();
+  shape.moveTo(-bw + bodyRadius, bodyBottom);
+  shape.lineTo(bw - bodyRadius, bodyBottom);
+  shape.quadraticCurveTo(bw, bodyBottom, bw, bodyBottom + bodyRadius);
+  shape.lineTo(bw, bodyTop - topRadius);
+  shape.quadraticCurveTo(bw, bodyTop, bw - topRadius, bodyTop);
+  shape.lineTo(outerRadius, bodyTop);
+  shape.lineTo(outerRadius, archBaseY);
+  shape.absarc(0, archBaseY, outerRadius, 0, Math.PI, false);
+  shape.lineTo(-outerRadius, bodyTop);
+  shape.lineTo(-bw + topRadius, bodyTop);
+  shape.quadraticCurveTo(-bw, bodyTop, -bw, bodyTop - topRadius);
+  shape.lineTo(-bw, bodyBottom + bodyRadius);
+  shape.quadraticCurveTo(-bw, bodyBottom, -bw + bodyRadius, bodyBottom);
+
+  const hole = new THREE.Path();
+  hole.moveTo(-innerRadius, bodyTop);
+  hole.lineTo(-innerRadius, archBaseY);
+  hole.absarc(0, archBaseY, innerRadius, Math.PI, 0, true);
+  hole.lineTo(innerRadius, bodyTop);
+  hole.lineTo(-innerRadius, bodyTop);
+  shape.holes.push(hole);
+
   return shape;
 }
 
@@ -59,11 +97,11 @@ const ROTATION_MS = ENTRANCE_MS * 2; // half the angular speed of the entrance s
 const SHIELD_DEPTH = 0.28;
 const EMBLEM_DEPTH = 0.24;
 const TARGET_SCALE = 1.5; // overall logo size, 50% bigger than the original 1.0
-const POP_SCALE = 0.75; // cross/back-shield pop-up (z-offset from the shield body), 25% less
+const POP_SCALE = 0.75; // cross/padlock pop-up (z-offset from the shield body), 25% less
 
 /** Animated shield for the login page's brand panel: a plum shield body that spins a
  * full 360 degrees while popping in (overshoot ease on scale, decelerating spin on
- * rotation), revealing the hospital cross on its front and a shield emblem on its
+ * rotation), revealing the hospital cross on its front and a padlock emblem on its
  * back before settling to a stop facing forward (cross side). Idles with a gentle
  * sway + bob afterward. Respects prefers-reduced-motion (renders the settled
  * shield, front-facing, with no spin). */
@@ -147,9 +185,8 @@ function LoginScene() {
     cross.position.z = (SHIELD_DEPTH / 2) * POP_SCALE; // pop-up reduced 25%
     medallion.add(cross);
 
-    // Back face: a smaller shield emblem (unchanged shape), revealed as the shield
-    // spins during entrance -- distinct from the body's own outer silhouette.
-    const backShieldGeometry = new THREE.ExtrudeGeometry(buildShieldShape(), {
+    // Back face: a padlock emblem, revealed as the shield spins during entrance.
+    const padlockGeometry = new THREE.ExtrudeGeometry(buildPadlockShape(), {
       depth: EMBLEM_DEPTH,
       bevelEnabled: true,
       bevelThickness: 0.0375,
@@ -157,8 +194,8 @@ function LoginScene() {
       bevelSegments: 2,
       curveSegments: 16,
     });
-    backShieldGeometry.center();
-    const backShieldMaterial = new THREE.MeshStandardMaterial({
+    padlockGeometry.center();
+    const padlockMaterial = new THREE.MeshStandardMaterial({
       color: PLUM,
       emissive: 0x000000,
       metalness: 0.9,
@@ -166,15 +203,15 @@ function LoginScene() {
       envMap,
       envMapIntensity: 0.75,
     });
-    const backShield = new THREE.Mesh(backShieldGeometry, backShieldMaterial);
-    backShield.scale.set(0.341, 0.341, 1); // 0.31 base, 10% bigger
-    backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2) * POP_SCALE; // pop-up reduced 25%
-    medallion.add(backShield);
+    const padlock = new THREE.Mesh(padlockGeometry, padlockMaterial);
+    padlock.scale.set(0.341, 0.341, 1); // same size as the shield emblem it replaced
+    padlock.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2) * POP_SCALE; // pop-up reduced 25%
+    medallion.add(padlock);
 
     medallion.scale.setScalar(reduceMotion ? TARGET_SCALE : 0.001);
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
-    // Lavender key light for extra shading/depth on the cross/back-shield's own
+    // Lavender key light for extra shading/depth on the cross/padlock's own
     // emissive glow -- the shield body is unlit now, so these don't affect it.
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     const key = new THREE.PointLight(0xc4b5fd, 1.4);
@@ -227,8 +264,8 @@ function LoginScene() {
       shieldMaterial.dispose();
       crossGeometry.dispose();
       crossMaterial.dispose();
-      backShieldGeometry.dispose();
-      backShieldMaterial.dispose();
+      padlockGeometry.dispose();
+      padlockMaterial.dispose();
       envMap.dispose();
       pmremGenerator.dispose();
       renderer.dispose();
