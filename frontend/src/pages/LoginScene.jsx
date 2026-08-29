@@ -98,9 +98,14 @@ function LoginScene() {
       curveSegments: 24,
     });
     shieldGeometry.center();
-    // Unlit -- flat, constant plum, no shading. Also makes this an exact pixel
-    // match for the Sign In button's flat CSS color (both are #6528D9).
-    const shieldMaterial = new THREE.MeshBasicMaterial({ color: PLUM });
+    // High metalness + low roughness for a brushed-steel look; emissive black so
+    // it never glows (relies entirely on scene lights for its highlight/shading).
+    const shieldMaterial = new THREE.MeshStandardMaterial({
+      color: PLUM,
+      emissive: 0x000000,
+      metalness: 0.9,
+      roughness: 0.15,
+    });
     const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
     medallion.add(shield);
 
