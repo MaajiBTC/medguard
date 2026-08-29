@@ -31,18 +31,16 @@ function buildCrossShape() {
   return shape;
 }
 
-// Classic clean shield silhouette: a nearly flat top edge with a shallow
-// center notch and rounded shoulder corners, widening only slightly before a
-// single long, smooth taper down to a point at the bottom.
+// Classic clean shield silhouette: a pointed apex at top-center, curving
+// outward to the widest point at the shoulders, then tapering back inward in
+// one smooth curve to a point at the bottom -- all curves, no straight edges.
 function buildShieldShape() {
   const shape = new THREE.Shape();
-  shape.moveTo(0, 0.95);
-  shape.lineTo(-0.75, 1.05);
-  shape.quadraticCurveTo(-0.95, 1.08, -1.0, 0.85);
-  shape.bezierCurveTo(-1.05, 0.4, -0.85, -0.6, 0, -1.3);
-  shape.bezierCurveTo(0.85, -0.6, 1.05, 0.4, 1.0, 0.85);
-  shape.quadraticCurveTo(0.95, 1.08, 0.75, 1.05);
-  shape.lineTo(0, 0.95);
+  shape.moveTo(0, 1.0);
+  shape.bezierCurveTo(0.35, 0.98, 0.75, 0.85, 0.9, 0.65);
+  shape.bezierCurveTo(0.95, 0.0, 0.55, -0.85, 0, -1.05);
+  shape.bezierCurveTo(-0.55, -0.85, -0.95, 0.0, -0.9, 0.65);
+  shape.bezierCurveTo(-0.75, 0.85, -0.35, 0.98, 0, 1.0);
   return shape;
 }
 
