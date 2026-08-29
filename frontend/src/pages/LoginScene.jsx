@@ -4,8 +4,8 @@ import * as THREE from 'three';
 // CLAUDE.md scopes three.js to exactly two places: this login/landing page and the
 // Security Dashboard visualization (LedgerVisualization.jsx). Purely decorative --
 // the actual login form is plain HTML/React; this is just the animated brand shield
-// beside it. A plum shield body with a hospital cross emblem on its front face --
-// the shield's own silhouette is what reads on the back as it spins during entrance.
+// beside it. A plum shield body with a hospital cross emblem on its front face and a
+// smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
 
 const PLUM = 0x6528d9;
 const PLUM_DEEP = 0x2a0f5c;
@@ -58,12 +58,12 @@ const ENTRANCE_MS = 1300;
 const SHIELD_DEPTH = 0.28;
 const EMBLEM_DEPTH = 0.05;
 
-/** Animated shield for the login page's brand panel: a plum shield body (its own
- * silhouette, unchanged from the original design) that spins a full 360 degrees
- * while popping in (overshoot ease on scale, decelerating spin on rotation),
- * revealing the hospital cross on its front before settling to a stop facing
- * forward. Idles with a gentle sway + bob afterward. Respects
- * prefers-reduced-motion (renders the settled shield, front-facing, with no spin). */
+/** Animated shield for the login page's brand panel: a plum shield body that spins a
+ * full 360 degrees while popping in (overshoot ease on scale, decelerating spin on
+ * rotation), revealing the hospital cross on its front and a shield emblem on its
+ * back before settling to a stop facing forward (cross side). Idles with a gentle
+ * sway + bob afterward. Respects prefers-reduced-motion (renders the settled
+ * shield, front-facing, with no spin). */
 function LoginScene() {
   const mountRef = useRef(null);
 
@@ -127,6 +127,29 @@ function LoginScene() {
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
     cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
+
+    // Back face: a smaller shield emblem (unchanged shape), revealed as the shield
+    // spins during entrance -- distinct from the body's own outer silhouette.
+    const backShieldGeometry = new THREE.ExtrudeGeometry(buildShieldShape(), {
+      depth: EMBLEM_DEPTH,
+      bevelEnabled: true,
+      bevelThickness: 0.015,
+      bevelSize: 0.015,
+      bevelSegments: 2,
+      curveSegments: 16,
+    });
+    backShieldGeometry.center();
+    const backShieldMaterial = new THREE.MeshStandardMaterial({
+      color: LAVENDER,
+      emissive: PLUM,
+      emissiveIntensity: 0.2,
+      metalness: 0.2,
+      roughness: 0.45,
+    });
+    const backShield = new THREE.Mesh(backShieldGeometry, backShieldMaterial);
+    backShield.scale.set(0.62, 0.62, 1);
+    backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
+    medallion.add(backShield);
 
     medallion.scale.setScalar(reduceMotion ? 1 : 0.001);
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
@@ -195,6 +218,8 @@ function LoginScene() {
       shieldMaterial.dispose();
       crossGeometry.dispose();
       crossMaterial.dispose();
+      backShieldGeometry.dispose();
+      backShieldMaterial.dispose();
       ringGeometry.dispose();
       ringMaterial.dispose();
       renderer.dispose();
