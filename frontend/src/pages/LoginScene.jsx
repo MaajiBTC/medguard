@@ -59,6 +59,7 @@ const ROTATION_MS = ENTRANCE_MS * 2; // half the angular speed of the entrance s
 const SHIELD_DEPTH = 0.28;
 const EMBLEM_DEPTH = 0.24;
 const TARGET_SCALE = 1.5; // overall logo size, 50% bigger than the original 1.0
+const POP_SCALE = 0.75; // cross/back-shield pop-up (z-offset from the shield body), 25% less
 
 /** Animated shield for the login page's brand panel: a plum shield body that spins a
  * full 360 degrees while popping in (overshoot ease on scale, decelerating spin on
@@ -142,8 +143,8 @@ function LoginScene() {
       envMapIntensity: 0.75,
     });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
-    cross.scale.set(0.5, 0.5, 1); // 50% smaller
-    cross.position.z = SHIELD_DEPTH / 2;
+    cross.scale.set(0.55, 0.55, 1); // 0.5 base, 10% bigger
+    cross.position.z = (SHIELD_DEPTH / 2) * POP_SCALE; // pop-up reduced 25%
     medallion.add(cross);
 
     // Back face: a smaller shield emblem (unchanged shape), revealed as the shield
@@ -166,8 +167,8 @@ function LoginScene() {
       envMapIntensity: 0.75,
     });
     const backShield = new THREE.Mesh(backShieldGeometry, backShieldMaterial);
-    backShield.scale.set(0.31, 0.31, 1); // 0.62 base, 50% smaller
-    backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
+    backShield.scale.set(0.341, 0.341, 1); // 0.31 base, 10% bigger
+    backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2) * POP_SCALE; // pop-up reduced 25%
     medallion.add(backShield);
 
     medallion.scale.setScalar(reduceMotion ? TARGET_SCALE : 0.001);
