@@ -5,7 +5,8 @@ import * as THREE from 'three';
 // Security Dashboard visualization (LedgerVisualization.jsx). Purely decorative --
 // the actual login form is plain HTML/React; this is just the animated brand shield
 // beside it. A plum shield body with a hospital cross emblem on its front face and a
-// smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
+// smaller shield emblem on its back -- both revealed during the 360-degree entrance
+// spin. Every piece uses MeshPhysicalMaterial + clearcoat for a glossy plastic look.
 
 const PLUM = 0x6528d9;
 const PLUM_DEEP = 0x2a0f5c;
@@ -97,12 +98,17 @@ function LoginScene() {
       curveSegments: 24,
     });
     shieldGeometry.center();
-    const shieldMaterial = new THREE.MeshStandardMaterial({
+    // MeshPhysicalMaterial + clearcoat for a glossy plastic look throughout (zero
+    // metalness, low roughness, a lacquered clearcoat top layer with its own
+    // specular highlight) -- applies to every piece of the logo, not just the body.
+    const shieldMaterial = new THREE.MeshPhysicalMaterial({
       color: PLUM,
       emissive: PLUM_DEEP,
-      emissiveIntensity: 0.25,
-      metalness: 0.35,
-      roughness: 0.4,
+      emissiveIntensity: 0.12,
+      metalness: 0,
+      roughness: 0.28,
+      clearcoat: 1,
+      clearcoatRoughness: 0.15,
     });
     const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
     medallion.add(shield);
@@ -116,10 +122,13 @@ function LoginScene() {
       bevelSegments: 2,
       curveSegments: 8,
     });
-    // Unlit (MeshBasicMaterial, like the ring below) -- MeshStandardMaterial still
-    // shades/tints a "white" surface under colored scene lighting, which read as
-    // gray/lavender instead of pure white. Unlit ignores lighting entirely.
-    const crossMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
+    const crossMaterial = new THREE.MeshPhysicalMaterial({
+      color: WHITE,
+      metalness: 0,
+      roughness: 0.2,
+      clearcoat: 1,
+      clearcoatRoughness: 0.1,
+    });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
     cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
@@ -135,7 +144,13 @@ function LoginScene() {
       curveSegments: 16,
     });
     backShieldGeometry.center();
-    const backShieldMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
+    const backShieldMaterial = new THREE.MeshPhysicalMaterial({
+      color: WHITE,
+      metalness: 0,
+      roughness: 0.2,
+      clearcoat: 1,
+      clearcoatRoughness: 0.1,
+    });
     const backShield = new THREE.Mesh(backShieldGeometry, backShieldMaterial);
     backShield.scale.set(0.62, 0.62, 1);
     backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
@@ -145,8 +160,12 @@ function LoginScene() {
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
     const ringGeometry = new THREE.TorusGeometry(1.5, 0.03, 12, 96);
-    const ringMaterial = new THREE.MeshBasicMaterial({
+    const ringMaterial = new THREE.MeshPhysicalMaterial({
       color: WHITE,
+      metalness: 0,
+      roughness: 0.2,
+      clearcoat: 1,
+      clearcoatRoughness: 0.1,
       transparent: true,
       opacity: reduceMotion ? 1 : 0,
     });
@@ -154,14 +173,17 @@ function LoginScene() {
     ring.rotation.x = Math.PI / 2.4;
     scene.add(ring);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
-    // Lavender key light for shading/depth on the white emblems -- lighting only,
-    // not an object color (the cross/shield/ring are all white per their materials).
-    const key = new THREE.PointLight(0xc4b5fd, 1.4);
+    // Neutral-white key + a bright close-in "shine" light for a crisp plastic
+    // specular highlight; the rim stays plum (low intensity) just for a soft
+    // colored bounce on the shadow side -- neither tints the white parts flat-on.
+    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+    const key = new THREE.PointLight(0xffffff, 1.6);
     key.position.set(2, 2, 3);
-    const rim = new THREE.PointLight(PLUM, 0.9);
+    const shine = new THREE.PointLight(0xffffff, 1.0);
+    shine.position.set(0.4, 1.4, 3.6);
+    const rim = new THREE.PointLight(PLUM, 0.5);
     rim.position.set(-3, -1, -2);
-    scene.add(ambient, key, rim);
+    scene.add(ambient, key, shine, rim);
 
     let frameId;
     const start = performance.now();
