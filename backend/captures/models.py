@@ -28,6 +28,10 @@ class ContextualCapture(models.Model):
     )
 
     on_duty_at_login = models.BooleanField()
+    on_call_at_login = models.BooleanField(
+        default=False,
+        help_text="Snapshot of staff.on_call at login time (added 2026-08-29) -- same historical-accuracy reasoning as on_duty_at_login above.",
+    )
     ward_assignment_at_login = models.CharField(max_length=128, blank=True)
 
     target_patient = models.ForeignKey(

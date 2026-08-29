@@ -11,7 +11,7 @@ function createStaff(data) {
   return request('/staff/create/', { method: 'POST', body: data });
 }
 
-/** PATCH /api/staff/<id>/duty/ — admin-only. {ward?, on_duty?} */
+/** PATCH /api/staff/<id>/duty/ — admin-only. {ward?, on_duty?, on_call?} */
 function updateStaffDuty(staffId, data) {
   return request(`/staff/${staffId}/duty/`, { method: 'PATCH', body: data });
 }

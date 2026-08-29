@@ -9,14 +9,16 @@ from ledger.models import LedgerEntry
 from ledger.services import record_event
 from patients.models import Patient, PatientCategoryRecord
 from patients.serializers import PatientCategoryRecordSerializer
-from staff.permissions import IsClinicalStaff
+from staff.permissions import IsAdmin, IsClinicalStaff
 
 from .baseline import update_baseline
+from .disaster_mode import is_disaster_mode_active
 from .engine import ROLE_CEILINGS, compute_access_decision
-from .models import AccessDecision, BehavioralBaseline
+from .models import AccessDecision, BehavioralBaseline, DisasterModeEvent
 from .serializers import (
     AccessDecisionSerializer,
     DecideRequestSerializer,
+    DisasterModeActionSerializer,
     EmergencyOverrideRequestSerializer,
 )
 
@@ -103,21 +105,26 @@ class EmergencyOverrideView(APIView):
     still only gets categories 1-2, never the full 13.
 
     Not unconditional, though (user request, 2026-08-29): it is blocked for a doctor
-    or nurse who is BOTH off duty AND has no connection to the patient at all (not
-    assigned, not even on their ward) -- the one combination where the system has
-    already concluded there is no legitimate reason to be looking at this patient.
-    Every other combination (on duty regardless of assignment; off duty but same
-    ward; off duty but assigned) still has BTG available, including a nurse's
-    existing "neither assigned nor same-ward but on duty" rescue path.
+    or nurse who is BOTH off duty (and not on call) AND has no connection to the
+    patient at all (not assigned, not even on their ward) -- the one combination
+    where the system has already concluded there is no legitimate reason to be
+    looking at this patient. Every other combination (on duty/on call regardless of
+    assignment; off duty but same ward; off duty but assigned) still has BTG
+    available, including a nurse's existing "neither assigned nor same-ward but on
+    duty" rescue path. The block is also lifted entirely by selecting the
+    "cross_coverage" reason_category (self-attested, no location/time verification --
+    see EmergencyOverrideRequestSerializer) or while Disaster/Mass Casualty Mode is
+    active (see disaster_mode.is_disaster_mode_active()).
 
     Deliberately does NOT check contextual.target_patient_id the way DecideView does
     -- the whole point of an emergency path is that it must still work even if the
     normal capture/contextual state is missing, stale, or itself the reason normal
-    access failed. For the same reason, the new availability gate below looks up
-    on-duty status and assignment/ward relationship FRESH (live staff.on_duty,
+    access failed. For the same reason, the availability gate below looks up on-duty/
+    on-call status and assignment/ward relationship FRESH (live staff fields,
     captures.services.compute_patient_assignment_status) rather than depending on
     ContextualCapture -- unlike scoring/engine.py's Doctor rule, which reads the
-    session-time snapshot (contextual.on_duty_at_login) like every other factor there.
+    session-time snapshot (contextual.on_duty_at_login/on_call_at_login) like every
+    other factor there.
 
     Baseline is deliberately NOT reinforced here (unlike DecideView) -- an override is
     by definition an abnormal session, so folding it into the rolling baseline could
@@ -130,21 +137,29 @@ class EmergencyOverrideView(APIView):
         serializer = EmergencyOverrideRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         patient_id = serializer.validated_data["patient_id"]
+        reason_category = serializer.validated_data["reason_category"]
         reason = serializer.validated_data["reason"]
 
         session = request.auth
         patient = get_object_or_404(Patient, pk=patient_id)
 
         assignment_status = compute_patient_assignment_status(session.staff, patient)
-        if (
-            not session.staff.on_duty
+        effectively_on_duty = session.staff.on_duty or session.staff.on_call
+        blocked = (
+            not effectively_on_duty
             and assignment_status == ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
+        )
+        if (
+            blocked
+            and reason_category != EmergencyOverrideRequestSerializer.CROSS_COVERAGE
+            and not is_disaster_mode_active()
         ):
             return Response(
                 {
                     "detail": (
                         "Break the Glass is not available: you are off duty and have "
-                        "no connection (assignment or ward) to this patient."
+                        "no connection (assignment or ward) to this patient. Select "
+                        "\"Cross-coverage\" if you are covering an unrostered shift."
                     )
                 },
                 status=status.HTTP_403_FORBIDDEN,
@@ -161,7 +176,7 @@ class EmergencyOverrideView(APIView):
             decision_type=AccessDecision.DecisionType.EMERGENCY_OVERRIDE,
             granted_categories=granted_categories,
             role_rule_path="",
-            factor_breakdown={"reason": reason},
+            factor_breakdown={"reason": reason, "reason_category": reason_category},
         )
 
         record_event(
@@ -169,10 +184,84 @@ class EmergencyOverrideView(APIView):
             staff=session.staff,
             patient=patient,
             session=session,
-            details={"reason": reason, "granted_categories": granted_categories},
+            details={
+                "reason": reason,
+                "reason_category": reason_category,
+                "granted_categories": granted_categories,
+            },
         )
 
         return Response(AccessDecisionSerializer(decision).data, status=status.HTTP_201_CREATED)
+
+
+class DisasterModeView(APIView):
+    """GET /api/scoring/disaster-mode/ -- current status. Admin-only, matching the
+    Admin-dashboard-only UI for this feature."""
+
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        latest = DisasterModeEvent.objects.order_by("-occurred_at").first()
+        return Response(
+            {
+                "active": is_disaster_mode_active(),
+                "last_event": (
+                    {
+                        "event_type": latest.event_type,
+                        "staff_id": latest.staff.staff_id,
+                        "staff_full_name": latest.staff.full_name,
+                        "reason": latest.reason,
+                        "occurred_at": latest.occurred_at,
+                    }
+                    if latest
+                    else None
+                ),
+            }
+        )
+
+
+class DisasterModeActivateView(APIView):
+    """POST /api/scoring/disaster-mode/activate/ -- {reason}. Suspends the Doctor
+    off-duty+unconnected hard-deny rule and BTG's availability gate hospital-wide
+    (see engine.py and EmergencyOverrideView above) until deactivated. Rejects with
+    400 if already active, so the history table stays a meaningful audit trail
+    rather than accumulating redundant entries."""
+
+    permission_classes = [IsAdmin]
+
+    def post(self, request):
+        if is_disaster_mode_active():
+            return Response({"detail": "Disaster Mode is already active."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = DisasterModeActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        event = DisasterModeEvent.objects.create(
+            event_type=DisasterModeEvent.EventType.ACTIVATED,
+            staff=request.auth.staff,
+            reason=serializer.validated_data["reason"],
+        )
+        return Response(
+            {"active": True, "occurred_at": event.occurred_at}, status=status.HTTP_201_CREATED
+        )
+
+
+class DisasterModeDeactivateView(APIView):
+    """POST /api/scoring/disaster-mode/deactivate/ -- {reason}."""
+
+    permission_classes = [IsAdmin]
+
+    def post(self, request):
+        if not is_disaster_mode_active():
+            return Response({"detail": "Disaster Mode is not active."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = DisasterModeActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        event = DisasterModeEvent.objects.create(
+            event_type=DisasterModeEvent.EventType.DEACTIVATED,
+            staff=request.auth.staff,
+            reason=serializer.validated_data["reason"],
+        )
+        return Response(
+            {"active": False, "occurred_at": event.occurred_at}, status=status.HTTP_201_CREATED
+        )
 
 
 class PatientRecordView(APIView):

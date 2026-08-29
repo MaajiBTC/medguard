@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   createPatient,
@@ -10,6 +10,11 @@ import {
   updatePatientCategory,
   updatePatientWard,
 } from '../api/patients';
+import {
+  activateDisasterMode,
+  deactivateDisasterMode,
+  getDisasterModeStatus,
+} from '../api/scoring';
 import {
   createStaff,
   deactivateStaff,
@@ -31,11 +36,12 @@ function StaffPanel() {
   const [selected, setSelected] = useState(null);
   const [ward, setWard] = useState('');
   const [onDuty, setOnDuty] = useState(false);
+  const [onCall, setOnCall] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
 
   const [newStaff, setNewStaff] = useState({
-    username: '', password: '', staff_id: '', full_name: '', role: 'doctor', ward: '', on_duty: false,
+    username: '', password: '', staff_id: '', full_name: '', role: 'doctor', ward: '', on_duty: false, on_call: false,
   });
 
   const runSearch = async (event) => {
@@ -52,6 +58,7 @@ function StaffPanel() {
     setSelected(s);
     setWard(s.ward || '');
     setOnDuty(s.on_duty);
+    setOnCall(s.on_call);
     setNotice(null);
     setError(null);
   };
@@ -59,7 +66,7 @@ function StaffPanel() {
   const saveDuty = async () => {
     setError(null);
     try {
-      const updated = await updateStaffDuty(selected.id, { ward, on_duty: onDuty });
+      const updated = await updateStaffDuty(selected.id, { ward, on_duty: onDuty, on_call: onCall });
       setSelected(updated);
       setNotice('Saved.');
     } catch (err) {
@@ -86,7 +93,7 @@ function StaffPanel() {
     try {
       await createStaff(newStaff);
       setNotice(`Staff account "${newStaff.staff_id}" created.`);
-      setNewStaff({ username: '', password: '', staff_id: '', full_name: '', role: 'doctor', ward: '', on_duty: false });
+      setNewStaff({ username: '', password: '', staff_id: '', full_name: '', role: 'doctor', ward: '', on_duty: false, on_call: false });
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -122,6 +129,10 @@ function StaffPanel() {
           <label>
             <input type="checkbox" checked={onDuty} onChange={(e) => setOnDuty(e.target.checked)} />
             On duty
+          </label>
+          <label>
+            <input type="checkbox" checked={onCall} onChange={(e) => setOnCall(e.target.checked)} />
+            On call
           </label>
           <div className="button-row">
             <button type="button" onClick={saveDuty}>Save ward/duty</button>
@@ -163,6 +174,10 @@ function StaffPanel() {
         <label>
           <input type="checkbox" checked={newStaff.on_duty} onChange={(e) => setNewStaff({ ...newStaff, on_duty: e.target.checked })} />
           On duty
+        </label>
+        <label>
+          <input type="checkbox" checked={newStaff.on_call} onChange={(e) => setNewStaff({ ...newStaff, on_call: e.target.checked })} />
+          On call
         </label>
         <button type="submit">Create staff account</button>
       </form>
@@ -359,6 +374,76 @@ function CategoryNotesEditor({ record, onSave }) {
   );
 }
 
+function DisasterModePanel() {
+  const [status, setStatus] = useState(null);
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const refresh = () => {
+    getDisasterModeStatus().then(setStatus).catch((err) => setError(errorMessage(err)));
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const handleToggle = async (event) => {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      if (status.active) {
+        await deactivateDisasterMode(reason);
+        setNotice('Disaster Mode deactivated.');
+      } else {
+        await activateDisasterMode(reason);
+        setNotice('Disaster Mode activated — the Doctor off-duty hard-deny rule and Break the Glass gate are suspended hospital-wide.');
+      }
+      setReason('');
+      refresh();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!status) return null;
+
+  return (
+    <section className="disaster-panel">
+      <h2>Disaster / Mass Casualty Mode</h2>
+      <p className={status.active ? 'access-override' : 'notice'}>
+        {status.active ? 'ACTIVE' : 'Inactive'}
+        {status.last_event &&
+          ` — last ${status.last_event.event_type} by ${status.last_event.staff_full_name} (${status.last_event.staff_id})`}
+      </p>
+      {error && <p role="alert" className="dev-error">{error}</p>}
+      {notice && <p className="notice">{notice}</p>}
+      <form className="override-form" onSubmit={handleToggle}>
+        <label htmlFor="disaster-reason">
+          Reason (required, min 10 characters):
+        </label>
+        <textarea
+          id="disaster-reason"
+          rows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          required
+          minLength={10}
+        />
+        <div className="button-row">
+          <button type="submit" disabled={submitting || reason.trim().length < 10}>
+            {status.active ? 'Deactivate' : 'Activate'} Disaster Mode
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 function AdminDashboard({ staff, onLogout }) {
   return (
     <div className="dashboard">
@@ -369,6 +454,8 @@ function AdminDashboard({ staff, onLogout }) {
         </div>
         <button type="button" onClick={onLogout}>Log out</button>
       </header>
+
+      <DisasterModePanel />
 
       <div className="admin-grid">
         <StaffPanel />

@@ -44,6 +44,7 @@ class StaffCreateView(APIView):
                 role=data["role"],
                 ward=data.get("ward", ""),
                 on_duty=data.get("on_duty", False),
+                on_call=data.get("on_call", False),
             )
 
         return Response(StaffSummarySerializer(staff).data, status=status.HTTP_201_CREATED)
@@ -67,6 +68,9 @@ class StaffDutyWardUpdateView(APIView):
         if "on_duty" in serializer.validated_data:
             staff.on_duty = serializer.validated_data["on_duty"]
             update_fields.append("on_duty")
+        if "on_call" in serializer.validated_data:
+            staff.on_call = serializer.validated_data["on_call"]
+            update_fields.append("on_call")
         staff.save(update_fields=update_fields)
 
         return Response(StaffSummarySerializer(staff).data)

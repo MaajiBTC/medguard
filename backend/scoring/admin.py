@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AccessDecision, BehavioralBaseline
+from .models import AccessDecision, BehavioralBaseline, DisasterModeEvent
 
 
 @admin.register(BehavioralBaseline)
@@ -38,3 +38,21 @@ class AccessDecisionAdmin(admin.ModelAdmin):
     )
     search_fields = ("session__staff__staff_id", "patient__hospital_number")
     autocomplete_fields = ("session", "patient")
+
+
+@admin.register(DisasterModeEvent)
+class DisasterModeEventAdmin(admin.ModelAdmin):
+    """Read-only -- history of Disaster Mode toggles, same audit-not-editable spirit
+    as the Security Ledger, even though this lives in scoring, not ledger."""
+
+    list_display = ("event_type", "staff", "occurred_at")
+    list_filter = ("event_type",)
+    readonly_fields = ("event_type", "staff", "reason", "occurred_at")
+    search_fields = ("staff__staff_id", "staff__full_name")
+    autocomplete_fields = ("staff",)
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

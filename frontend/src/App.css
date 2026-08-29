@@ -239,13 +239,17 @@ button {
   padding: 12px;
 }
 
-.override-form textarea {
+.override-form textarea,
+.override-form select {
   font: inherit;
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: var(--text-h);
+}
+
+.override-form textarea {
   resize: vertical;
 }
 

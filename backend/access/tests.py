@@ -66,8 +66,25 @@ class LoginViewTests(APITestCase):
 
         self.assertEqual(session.behavioral_capture.keystroke_features, {"login": None, "session_windows": []})
         self.assertEqual(session.contextual_capture.on_duty_at_login, True)
+        self.assertEqual(session.contextual_capture.on_call_at_login, False)
         self.assertEqual(session.contextual_capture.ward_assignment_at_login, "Ward A")
         self.assertEqual(session.contextual_capture.patient_assignment_status, "no_patient_selected")
+
+    def test_login_snapshots_on_call_status(self):
+        user = User.objects.create_user(username="drOnCall", password="correct-horse-2")
+        Staff.objects.create(
+            user=user, staff_id="STF-201", full_name="Dr B", role=Staff.Role.DOCTOR,
+            ward="Ward A", on_duty=False, on_call=True,
+        )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": "drOnCall", "password": "correct-horse-2", "device_id": "device-def", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        session = AccessSession.objects.get(token=resp.data["token"])
+        self.assertFalse(session.contextual_capture.on_duty_at_login)
+        self.assertTrue(session.contextual_capture.on_call_at_login)
 
     def test_login_with_keystroke_features_stores_login_baseline(self):
         resp = self.client.post(

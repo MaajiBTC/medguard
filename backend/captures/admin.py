@@ -28,10 +28,11 @@ class ContextualCaptureAdmin(admin.ModelAdmin):
     list_display = (
         "session",
         "on_duty_at_login",
+        "on_call_at_login",
         "ward_assignment_at_login",
         "target_patient",
         "patient_assignment_status",
     )
-    list_filter = ("patient_assignment_status", "on_duty_at_login")
+    list_filter = ("patient_assignment_status", "on_duty_at_login", "on_call_at_login")
     search_fields = ("session__staff__staff_id", "session__staff__full_name")
     autocomplete_fields = ("session", "target_patient")

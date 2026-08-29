@@ -13,6 +13,7 @@ from captures.models import ContextualCapture
 from staff.models import Staff
 
 from .baseline import LEARNING_MODE_SAMPLE_THRESHOLD, extract_keystroke_features, extract_mouse_features
+from .disaster_mode import is_disaster_mode_active
 from .models import AccessDecision, BehavioralBaseline
 
 HARD_GATE_THRESHOLD = 15  # keystroke/touch similarity below this = severe mismatch
@@ -198,16 +199,22 @@ def compute_access_decision(session, patient):
             decision_type = AccessDecision.DecisionType.ACCESS_DENIED
             granted_categories = []
     elif staff.role == Staff.Role.DOCTOR:
+        # on_call counts the same as on_duty here (added 2026-08-29, user: "is just
+        # like on duty status but virtually") -- a doctor who's off duty but reachable
+        # isn't treated as disconnected from the hospital.
+        effectively_on_duty = contextual.on_duty_at_login or contextual.on_call_at_login
         if (
-            not contextual.on_duty_at_login
+            not effectively_on_duty
             and assignment_status == ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
+            and not is_disaster_mode_active()
         ):
-            # Off duty AND no connection to this patient at all (not assigned, not
-            # even on their ward) -- hard-denied regardless of score, same standard
-            # the Nurse rule already applies to its own worst case (user request,
-            # 2026-08-29). Every other doctor combination (on duty regardless of
-            # assignment; off duty but same ward; off duty but assigned) is
-            # untouched and keeps today's standard weighted-scoring result.
+            # Off duty (and not on call) AND no connection to this patient at all (not
+            # assigned, not even on their ward) -- hard-denied regardless of score,
+            # same standard the Nurse rule already applies to its own worst case (user
+            # request, 2026-08-29). Suspended hospital-wide during Disaster/Mass
+            # Casualty Mode. Every other doctor combination (on duty/on call
+            # regardless of assignment; off duty but same ward; off duty but assigned)
+            # is untouched and keeps today's standard weighted-scoring result.
             role_rule_path = "off_duty_denied"
             decision_type = AccessDecision.DecisionType.ACCESS_DENIED
             granted_categories = []

@@ -108,6 +108,7 @@ class ContextualCaptureSerializer(serializers.ModelSerializer):
             "device_type",
             "network_segment",
             "on_duty_at_login",
+            "on_call_at_login",
             "ward_assignment_at_login",
             "target_patient_id",
             "target_patient_hospital_number",

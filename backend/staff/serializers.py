@@ -10,7 +10,7 @@ class StaffSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Staff
-        fields = ["id", "staff_id", "full_name", "role", "ward", "on_duty", "username", "account_active"]
+        fields = ["id", "staff_id", "full_name", "role", "ward", "on_duty", "on_call", "username", "account_active"]
         read_only_fields = fields
 
 
@@ -26,6 +26,7 @@ class StaffCreateSerializer(serializers.Serializer):
     role = serializers.ChoiceField(choices=Staff.Role.choices)
     ward = serializers.CharField(max_length=128, required=False, allow_blank=True, default="")
     on_duty = serializers.BooleanField(required=False, default=False)
+    on_call = serializers.BooleanField(required=False, default=False)
 
     def validate_username(self, value):
         if get_user_model().objects.filter(username=value).exists():
@@ -41,8 +42,9 @@ class StaffCreateSerializer(serializers.Serializer):
 class StaffDutyWardUpdateSerializer(serializers.Serializer):
     ward = serializers.CharField(max_length=128, required=False, allow_blank=True)
     on_duty = serializers.BooleanField(required=False)
+    on_call = serializers.BooleanField(required=False)
 
     def validate(self, attrs):
         if not attrs:
-            raise serializers.ValidationError("Provide at least one of: ward, on_duty.")
+            raise serializers.ValidationError("Provide at least one of: ward, on_duty, on_call.")
         return attrs

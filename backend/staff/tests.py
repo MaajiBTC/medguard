@@ -138,6 +138,22 @@ class StaffApiTests(APITestCase):
         self.assertEqual(nurse.ward, "Ward B")
         self.assertTrue(nurse.on_duty)
 
+    def test_admin_can_update_on_call(self):
+        _admin, admin_token = self._login("adminApi4", "pw-staff-api-7", "STF-S907", Staff.Role.ADMIN)
+        doctor, _token = self._login("docOnCallApi", "pw-staff-api-8", "STF-S908", Staff.Role.DOCTOR, on_duty=False)
+        self.assertFalse(doctor.on_call)
+
+        resp = self.client.patch(
+            f"/api/staff/{doctor.id}/duty/",
+            {"on_call": True},
+            format="json",
+            **self._auth(admin_token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["on_call"])
+        doctor.refresh_from_db()
+        self.assertTrue(doctor.on_call)
+
     def test_deactivated_staff_cannot_log_in(self):
         _admin, admin_token = self._login("adminApi3", "pw-staff-api-5", "STF-S905", Staff.Role.ADMIN)
         clerk, _token = self._login("clerkDeactApi", "pw-staff-api-6", "STF-S906", Staff.Role.CLERK)

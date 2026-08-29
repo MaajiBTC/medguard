@@ -14,7 +14,7 @@ from staff.models import Staff
 
 from .baseline import extract_keystroke_features, extract_mouse_features
 from .engine import compute_access_decision
-from .models import AccessDecision, BehavioralBaseline
+from .models import AccessDecision, BehavioralBaseline, DisasterModeEvent
 
 SAMPLE_MOUSE_EVENTS = [
     {"event": "mousemove", "x": 0, "y": 0, "t": 0.0},
@@ -47,10 +47,11 @@ MISMATCHED_KEYSTROKE_FEATURES = {
 
 
 class ScoringTestBase(APITestCase):
-    def _make_staff(self, username, staff_id, role, ward="", on_duty=True):
+    def _make_staff(self, username, staff_id, role, ward="", on_duty=True, on_call=False):
         user = User.objects.create_user(username=username, password="pw-scoring-test-1")
         return Staff.objects.create(
-            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward, on_duty=on_duty
+            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward,
+            on_duty=on_duty, on_call=on_call,
         )
 
     def _make_session(self, staff, device_id="dev-1", device_type="desktop", network_segment="seg-1"):
@@ -71,6 +72,7 @@ class ScoringTestBase(APITestCase):
         contextual = ContextualCapture.objects.create(
             session=session,
             on_duty_at_login=session.staff.on_duty,
+            on_call_at_login=session.staff.on_call,
             ward_assignment_at_login=session.staff.ward,
             target_patient=patient,
             patient_assignment_status=assignment_status or ContextualCapture.PatientAssignmentStatus.NO_PATIENT_SELECTED,
@@ -289,6 +291,24 @@ class DoctorRuleTests(ScoringTestBase):
         self.assertEqual(decision.role_rule_path, "off_duty_denied")
         self.assertEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
         self.assertEqual(decision.granted_categories, [])
+
+    def test_on_call_avoids_the_hard_deny_like_on_duty(self):
+        """on_call counts the same as on_duty (2026-08-29, user: "just like on duty
+        status but virtually") -- off duty but on call must NOT hard-deny."""
+        staff = self._make_staff(
+            "docOnCallNeither", "STF-905", Staff.Role.DOCTOR, ward="Ward A", on_duty=False, on_call=True
+        )
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-905", full_name="P19", ward="Ward B")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD,
+        )
+        self._matching_baseline(staff, session, behavioral)
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "")
+        self.assertNotEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
 
     def test_off_duty_but_assigned_uses_standard_scoring(self):
         staff = self._make_staff("docOffDutyAssigned", "STF-901", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
@@ -535,10 +555,11 @@ class EmergencyOverrideTests(ScoringTestBase):
 
     databases = {"default", "ledger"}
 
-    def _login(self, username, password, staff_id, role, ward="", on_duty=True):
+    def _login(self, username, password, staff_id, role, ward="", on_duty=True, on_call=False):
         user = User.objects.create_user(username=username, password=password)
         staff = Staff.objects.create(
-            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward, on_duty=on_duty
+            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward,
+            on_duty=on_duty, on_call=on_call,
         )
         resp = self.client.post(
             "/api/access/login/",
@@ -567,7 +588,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         override_resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "Patient unresponsive, need immediate chart access"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Patient unresponsive, need immediate chart access"},
             format="json",
             **self._auth(token),
         )
@@ -585,7 +606,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "Need billing folder number urgently"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Need billing folder number urgently"},
             format="json",
             **self._auth(token),
         )
@@ -616,7 +637,7 @@ class EmergencyOverrideTests(ScoringTestBase):
         token = resp.data["token"]
         override_resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "Hard gate false positive, verified identity in person"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Hard gate false positive, verified identity in person"},
             format="json",
             **self._auth(token),
         )
@@ -637,7 +658,7 @@ class EmergencyOverrideTests(ScoringTestBase):
             patient = Patient.objects.create(hospital_number=f"HN-BTG-NC-{suffix}", full_name="P", ward="Ward A")
             resp = self.client.post(
                 "/api/scoring/emergency-override/",
-                {"patient_id": patient.id, "reason": "Should never reach here"},
+                {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Should never reach here"},
                 format="json",
                 **self._auth(token),
             )
@@ -650,7 +671,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": reason},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": reason},
             format="json",
             **self._auth(token),
         )
@@ -662,6 +683,7 @@ class EmergencyOverrideTests(ScoringTestBase):
         self.assertEqual(entry.event_type, LedgerEntry.EventType.EMERGENCY_OVERRIDE)
         self.assertEqual(entry.patient_hospital_number, "HN-BTG5")
         self.assertEqual(entry.details["reason"], reason)
+        self.assertEqual(entry.details["reason_category"], "clinical_emergency")
         self.assertEqual(entry.details["granted_categories"], list(range(1, 14)))
 
     def test_baseline_not_reinforced_by_override(self):
@@ -671,7 +693,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "Confirming baseline stays untouched"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Confirming baseline stays untouched"},
             format="json",
             **self._auth(token),
         )
@@ -689,7 +711,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         override_resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "Need full chart, code blue in progress"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Need full chart, code blue in progress"},
             format="json",
             **self._auth(token),
         )
@@ -712,7 +734,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "Should be blocked before this is evaluated"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Should be blocked before this is evaluated"},
             format="json",
             **self._auth(token),
         )
@@ -729,7 +751,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "Should be blocked before this is evaluated"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Should be blocked before this is evaluated"},
             format="json",
             **self._auth(token),
         )
@@ -743,7 +765,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "On duty, so BTG stays available"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "On duty, so BTG stays available"},
             format="json",
             **self._auth(token),
         )
@@ -758,7 +780,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "Off duty but assigned, BTG stays available"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Off duty but assigned, BTG stays available"},
             format="json",
             **self._auth(token),
         )
@@ -772,7 +794,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "Off duty but same ward, BTG stays available"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Off duty but same ward, BTG stays available"},
             format="json",
             **self._auth(token),
         )
@@ -786,7 +808,7 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "On duty, her rescue path stays open"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "On duty, her rescue path stays open"},
             format="json",
             **self._auth(token),
         )
@@ -802,8 +824,202 @@ class EmergencyOverrideTests(ScoringTestBase):
 
         resp = self.client.post(
             "/api/scoring/emergency-override/",
-            {"patient_id": patient.id, "reason": "No assignment concept for this role"},
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "No assignment concept for this role"},
             format="json",
             **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    # -- reason_category (2026-08-29): required; "cross_coverage" is the one value
+    # that unlocks BTG through the off-duty+unconnected block on its own. --
+
+    def test_reason_category_required_and_validated(self):
+        _staff, token = self._login("docBtg15", "pw-btg-15", "STF-BTG15", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-BTG15", full_name="P", ward="Ward A")
+
+        for body in [
+            {"patient_id": patient.id, "reason": "Missing category entirely here"},
+            {"patient_id": patient.id, "reason_category": "not_a_real_category", "reason": "Invalid category value"},
+        ]:
+            resp = self.client.post("/api/scoring/emergency-override/", body, format="json", **self._auth(token))
+            self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_on_call_unlocks_btg_for_off_duty_unconnected_doctor(self):
+        _staff, token = self._login(
+            "docBtgOnCall", "pw-btg-16", "STF-BTG16", Staff.Role.DOCTOR, ward="Ward A", on_duty=False, on_call=True
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG16", full_name="P", ward="Ward B")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "On call, reachable even though off duty"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_on_call_unlocks_btg_for_off_duty_unconnected_nurse(self):
+        _staff, token = self._login(
+            "nurseBtgOnCall", "pw-btg-17", "STF-BTG17", Staff.Role.NURSE, ward="Ward A", on_duty=False, on_call=True
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG17", full_name="P", ward="Ward B")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "On call, reachable even though off duty"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_cross_coverage_category_unlocks_btg_despite_off_duty_unconnected(self):
+        """Self-attested: no location/time verification, the category itself is
+        what lets it through (user's explicit design choice, 2026-08-29)."""
+        _staff, token = self._login(
+            "docBtgCrossCov", "pw-btg-18", "STF-BTG18", Staff.Role.DOCTOR, ward="Ward A", on_duty=False
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG18", full_name="P", ward="Ward B")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason_category": "cross_coverage", "reason": "Covering for Dr. X, roster not updated yet"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_other_category_does_not_unlock_btg(self):
+        _staff, token = self._login(
+            "docBtgOther", "pw-btg-19", "STF-BTG19", Staff.Role.DOCTOR, ward="Ward A", on_duty=False
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG19", full_name="P", ward="Ward B")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason_category": "other", "reason": "Some other justification here"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class DisasterModeTests(ScoringTestBase):
+    """/api/scoring/disaster-mode/(activate|deactivate)/ -- Admin-only hospital-wide
+    switch (2026-08-29) that suspends the Doctor off-duty+unconnected hard-deny rule
+    and BTG's availability gate. Audited in its own history table, not the Security
+    Ledger (see DisasterModeEvent's docstring)."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role, ward="", on_duty=True):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(
+            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward, on_duty=on_duty
+        )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_non_admin_cannot_activate_or_deactivate(self):
+        _staff, token = self._login("secDisaster1", "pw-dis-1", "STF-DIS1", Staff.Role.SECURITY_OFFICER)
+        for path in ["activate", "deactivate"]:
+            resp = self.client.post(
+                f"/api/scoring/disaster-mode/{path}/", {"reason": "Should never reach here"},
+                format="json", **self._auth(token),
+            )
+            self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_reason_required_to_activate(self):
+        _admin, token = self._login("adminDisaster1", "pw-dis-2", "STF-DIS2", Staff.Role.ADMIN)
+        resp = self.client.post("/api/scoring/disaster-mode/activate/", {}, format="json", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_activate_then_status_then_deactivate(self):
+        admin, token = self._login("adminDisaster2", "pw-dis-3", "STF-DIS3", Staff.Role.ADMIN)
+
+        status_resp = self.client.get("/api/scoring/disaster-mode/", **self._auth(token))
+        self.assertFalse(status_resp.data["active"])
+        self.assertIsNone(status_resp.data["last_event"])
+
+        activate_resp = self.client.post(
+            "/api/scoring/disaster-mode/activate/",
+            {"reason": "Mass casualty incident, multi-vehicle collision"},
+            format="json", **self._auth(token),
+        )
+        self.assertEqual(activate_resp.status_code, status.HTTP_201_CREATED)
+
+        status_resp = self.client.get("/api/scoring/disaster-mode/", **self._auth(token))
+        self.assertTrue(status_resp.data["active"])
+        self.assertEqual(status_resp.data["last_event"]["staff_id"], "STF-DIS3")
+
+        # Activating again while already active is rejected.
+        double_activate_resp = self.client.post(
+            "/api/scoring/disaster-mode/activate/",
+            {"reason": "Trying to activate twice"},
+            format="json", **self._auth(token),
+        )
+        self.assertEqual(double_activate_resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+        deactivate_resp = self.client.post(
+            "/api/scoring/disaster-mode/deactivate/",
+            {"reason": "Incident resolved, situation normal"},
+            format="json", **self._auth(token),
+        )
+        self.assertEqual(deactivate_resp.status_code, status.HTTP_201_CREATED)
+
+        status_resp = self.client.get("/api/scoring/disaster-mode/", **self._auth(token))
+        self.assertFalse(status_resp.data["active"])
+
+        # Deactivating again while already inactive is rejected.
+        double_deactivate_resp = self.client.post(
+            "/api/scoring/disaster-mode/deactivate/",
+            {"reason": "Trying to deactivate twice"},
+            format="json", **self._auth(token),
+        )
+        self.assertEqual(double_deactivate_resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_active_disaster_mode_suspends_doctor_hard_deny(self):
+        admin, admin_token = self._login("adminDisaster3", "pw-dis-4", "STF-DIS4", Staff.Role.ADMIN)
+        self.client.post(
+            "/api/scoring/disaster-mode/activate/", {"reason": "Mass casualty, suspending duty checks"},
+            format="json", **self._auth(admin_token),
+        )
+
+        staff = self._make_staff("docDisaster1", "STF-DIS5", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-DIS5", full_name="P", ward="Ward B")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD,
+        )
+        self._matching_baseline(staff, session, behavioral)
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "")
+        self.assertNotEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+
+    def test_active_disaster_mode_suspends_btg_gate(self):
+        admin, admin_token = self._login("adminDisaster4", "pw-dis-5", "STF-DIS6", Staff.Role.ADMIN)
+        self.client.post(
+            "/api/scoring/disaster-mode/activate/", {"reason": "Mass casualty, suspending BTG gate"},
+            format="json", **self._auth(admin_token),
+        )
+
+        _staff, doc_token = self._login(
+            "docDisaster2", "pw-dis-6", "STF-DIS7", Staff.Role.DOCTOR, ward="Ward A", on_duty=False
+        )
+        patient = Patient.objects.create(hospital_number="HN-DIS7", full_name="P", ward="Ward B")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Disaster mode active, BTG unrestricted"},
+            format="json", **self._auth(doc_token),
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)

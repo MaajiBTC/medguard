@@ -73,3 +73,34 @@ class AccessDecision(models.Model):
             f"AccessDecision(session={self.session_id}, patient={self.patient_id}, "
             f"{self.decision_type}, score={self.score:.1f})"
         )
+
+
+class DisasterModeEvent(models.Model):
+    """History of Disaster/Mass Casualty Mode activations and deactivations (added
+    2026-08-29). "Currently active" is derived from this table (see
+    scoring.disaster_mode.is_disaster_mode_active()), not stored as a separate flag
+    that could drift out of sync.
+
+    Deliberately NOT routed through the Security Ledger: CLAUDE.md pins the Ledger to
+    exactly five event types (STANDARD_ACCESS/AUDITED_DEVIATION/REDUCED_ACCESS/
+    ACCESS_DENIED/EMERGENCY_OVERRIDE), none of which fit "the mode itself changed" --
+    this stays its own small, purpose-built audit trail instead of stretching that
+    spec.
+    """
+
+    class EventType(models.TextChoices):
+        ACTIVATED = "activated", "Activated"
+        DEACTIVATED = "deactivated", "Deactivated"
+
+    event_type = models.CharField(max_length=16, choices=EventType.choices)
+    staff = models.ForeignKey(
+        "staff.Staff", on_delete=models.PROTECT, related_name="disaster_mode_events"
+    )
+    reason = models.CharField(max_length=500)
+    occurred_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-occurred_at"]
+
+    def __str__(self):
+        return f"DisasterModeEvent({self.event_type} by {self.staff}, {self.occurred_at:%Y-%m-%d %H:%M})"

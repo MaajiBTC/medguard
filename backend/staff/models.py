@@ -44,6 +44,14 @@ class Staff(models.Model):
         default=False,
         help_text="Manually toggled on-duty status. Never computed by a scheduler.",
     )
+    on_call = models.BooleanField(
+        default=False,
+        help_text=(
+            "Manually toggled on-call status -- reachable/available even while off "
+            "duty. Treated as equivalent to on_duty by the Doctor rule and BTG's "
+            "availability gate (see scoring app, added 2026-08-29). Never computed."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

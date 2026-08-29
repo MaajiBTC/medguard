@@ -86,6 +86,7 @@ class LoginView(APIView):
             ContextualCapture.objects.create(
                 session=session,
                 on_duty_at_login=staff.on_duty,
+                on_call_at_login=staff.on_call,
                 ward_assignment_at_login=staff.ward,
             )
 

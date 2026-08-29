@@ -27,6 +27,7 @@ function ClinicalDashboard({ staff, onLogout }) {
   const [viewLoading, setViewLoading] = useState(false);
 
   const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideCategory, setOverrideCategory] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideSubmitting, setOverrideSubmitting] = useState(false);
   const [overrideError, setOverrideError] = useState(null);
@@ -60,6 +61,7 @@ function ClinicalDashboard({ staff, onLogout }) {
     setViewError(null);
     setViewLoading(true);
     setOverrideOpen(false);
+    setOverrideCategory('');
     setOverrideReason('');
     setOverrideError(null);
     try {
@@ -83,12 +85,13 @@ function ClinicalDashboard({ staff, onLogout }) {
     setOverrideSubmitting(true);
     setOverrideError(null);
     try {
-      const decisionData = await emergencyOverride(selectedPatient.id, overrideReason);
+      const decisionData = await emergencyOverride(selectedPatient.id, overrideCategory, overrideReason);
       setDecision(decisionData);
       setViewError(null);
       const recordsData = await getPatientRecords(selectedPatient.id);
       setRecords(recordsData);
       setOverrideOpen(false);
+      setOverrideCategory('');
       setOverrideReason('');
     } catch (err) {
       setOverrideError(err.data || { detail: err.message });
@@ -209,8 +212,22 @@ function ClinicalDashboard({ staff, onLogout }) {
               </button>
             ) : (
               <form className="override-form" onSubmit={handleEmergencyOverride}>
+                <label htmlFor="override-category">Reason category (required):</label>
+                <select
+                  id="override-category"
+                  value={overrideCategory}
+                  onChange={(e) => setOverrideCategory(e.target.value)}
+                  required
+                >
+                  <option value="" disabled>
+                    Select a reason category…
+                  </option>
+                  <option value="clinical_emergency">Clinical emergency / direct patient care</option>
+                  <option value="cross_coverage">Cross-coverage (covering an unrostered shift)</option>
+                  <option value="other">Other</option>
+                </select>
                 <label htmlFor="override-reason">
-                  Reason for emergency access (required, min 10 characters):
+                  Reason detail (required, min 10 characters):
                 </label>
                 <textarea
                   id="override-reason"
@@ -226,13 +243,17 @@ function ClinicalDashboard({ staff, onLogout }) {
                   </p>
                 )}
                 <div className="button-row">
-                  <button type="submit" disabled={overrideSubmitting || overrideReason.trim().length < 10}>
+                  <button
+                    type="submit"
+                    disabled={overrideSubmitting || !overrideCategory || overrideReason.trim().length < 10}
+                  >
                     {overrideSubmitting ? 'Granting…' : 'Confirm Break the Glass'}
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       setOverrideOpen(false);
+                      setOverrideCategory('');
                       setOverrideReason('');
                       setOverrideError(null);
                     }}
