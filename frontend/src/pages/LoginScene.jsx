@@ -31,34 +31,18 @@ function buildCrossShape() {
   return shape;
 }
 
+// Classic clean shield silhouette: two rounded shoulders meeting in a shallow
+// notch at top-center, widest just below the shoulders, tapering in a smooth
+// continuous curve to a single point at the bottom.
 function buildShieldShape() {
   const shape = new THREE.Shape();
-  shape.moveTo(-0.95, 0.55);
-  shape.bezierCurveTo(-0.95, 0.95, -0.5, 1.1, 0, 1.15);
-  shape.bezierCurveTo(0.5, 1.1, 0.95, 0.95, 0.95, 0.55);
-  shape.lineTo(0.9, -0.15);
-  shape.bezierCurveTo(0.85, -0.85, 0.4, -1.15, 0, -1.35);
-  shape.bezierCurveTo(-0.4, -1.15, -0.85, -0.85, -0.9, -0.15);
-  shape.lineTo(-0.95, 0.55);
-  return shape;
-}
-
-// Main shield body's shape: a rectangle with rounded corners (replaces the
-// pointed-shield silhouette for the body only -- the back emblem keeps the
-// original shield shape via buildShieldShape() above).
-function buildRoundedRectShape(width, height, radius) {
-  const w = width / 2;
-  const h = height / 2;
-  const shape = new THREE.Shape();
-  shape.moveTo(-w + radius, -h);
-  shape.lineTo(w - radius, -h);
-  shape.quadraticCurveTo(w, -h, w, -h + radius);
-  shape.lineTo(w, h - radius);
-  shape.quadraticCurveTo(w, h, w - radius, h);
-  shape.lineTo(-w + radius, h);
-  shape.quadraticCurveTo(-w, h, -w, h - radius);
-  shape.lineTo(-w, -h + radius);
-  shape.quadraticCurveTo(-w, -h, -w + radius, -h);
+  shape.moveTo(0, 0.92);
+  shape.bezierCurveTo(-0.1, 1.02, -0.45, 1.08, -0.85, 1.05);
+  shape.bezierCurveTo(-1.05, 1.03, -1.1, 0.85, -1.05, 0.55);
+  shape.bezierCurveTo(-1.0, -0.05, -0.65, -0.95, 0, -1.3);
+  shape.bezierCurveTo(0.65, -0.95, 1.0, -0.05, 1.05, 0.55);
+  shape.bezierCurveTo(1.1, 0.85, 1.05, 1.03, 0.85, 1.05);
+  shape.bezierCurveTo(0.45, 1.08, 0.1, 1.02, 0, 0.92);
   return shape;
 }
 
@@ -115,8 +99,8 @@ function LoginScene() {
     const medallion = new THREE.Group();
     scene.add(medallion);
 
-    // Body: a horizontal rounded rectangle (not the pointed shield silhouette anymore).
-    const shieldGeometry = new THREE.ExtrudeGeometry(buildRoundedRectShape(2.5, 1.9, 0.35), {
+    // Body: the shield silhouette itself, not a separate coin.
+    const shieldGeometry = new THREE.ExtrudeGeometry(buildShieldShape(), {
       depth: SHIELD_DEPTH,
       bevelEnabled: true,
       bevelThickness: 0.06,
