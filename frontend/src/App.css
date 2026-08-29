@@ -192,11 +192,6 @@ button {
   margin: 0 0 4px;
 }
 
-.duty-status {
-  color: var(--text);
-  font-size: 14px;
-}
-
 .dashboard section {
   margin-bottom: 28px;
 }
@@ -222,32 +217,6 @@ button {
   color: var(--text-h);
 }
 
-.patient-list {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.patient-list button {
-  width: 100%;
-  text-align: left;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text-h);
-  cursor: pointer;
-}
-
-.patient-view {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
-  margin-top: 12px;
-}
-
 .button-row {
   display: flex;
   gap: 8px;
@@ -262,7 +231,7 @@ button {
 }
 
 .access-audited {
-  color: var(--accent);
+  color: var(--plum);
 }
 
 .access-override {
@@ -290,16 +259,6 @@ button {
   border: 1px solid #e879f9;
   border-radius: 8px;
   padding: 12px;
-}
-
-.override-form textarea,
-.override-form select {
-  font: inherit;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text-h);
 }
 
 .override-form textarea {
