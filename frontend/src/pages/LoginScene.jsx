@@ -3,9 +3,9 @@ import * as THREE from 'three';
 
 // CLAUDE.md scopes three.js to exactly two places: this login/landing page and the
 // Security Dashboard visualization (LedgerVisualization.jsx). Purely decorative --
-// the actual login form is plain HTML/React; this is just the animated brand medallion
-// beside it. A plum coin-shaped medallion with a hospital cross on its front face and
-// a shield on its back face -- both reveal during the 360-degree entrance spin.
+// the actual login form is plain HTML/React; this is just the animated brand shield
+// beside it. A plum shield body with a hospital cross emblem on its front face --
+// the shield's own silhouette is what reads on the back as it spins during entrance.
 
 const PLUM = 0x6528d9;
 const PLUM_DEEP = 0x2a0f5c;
@@ -55,16 +55,15 @@ function easeOutCubic(x) {
 }
 
 const ENTRANCE_MS = 1300;
-const COIN_RADIUS = 1;
-const COIN_DEPTH = 0.22;
+const SHIELD_DEPTH = 0.28;
 const EMBLEM_DEPTH = 0.05;
 
-/** Animated medallion for the login page's brand panel: a plum coin that spins a
- * full 360 degrees while popping in (overshoot ease on scale, decelerating spin on
- * rotation), revealing a hospital cross on its front and a shield on its back
- * before settling to a stop facing the cross forward. Idles with a gentle sway +
- * bob afterward. Respects prefers-reduced-motion (renders the settled medallion,
- * front-facing, with no spin). */
+/** Animated shield for the login page's brand panel: a plum shield body (its own
+ * silhouette, unchanged from the original design) that spins a full 360 degrees
+ * while popping in (overshoot ease on scale, decelerating spin on rotation),
+ * revealing the hospital cross on its front before settling to a stop facing
+ * forward. Idles with a gentle sway + bob afterward. Respects
+ * prefers-reduced-motion (renders the settled shield, front-facing, with no spin). */
 function LoginScene() {
   const mountRef = useRef(null);
 
@@ -89,19 +88,27 @@ function LoginScene() {
     const medallion = new THREE.Group();
     scene.add(medallion);
 
-    const coinGeometry = new THREE.CylinderGeometry(COIN_RADIUS, COIN_RADIUS, COIN_DEPTH, 64);
-    const coinMaterial = new THREE.MeshStandardMaterial({
+    // Body: the shield silhouette itself (unchanged shape), not a separate coin.
+    const shieldGeometry = new THREE.ExtrudeGeometry(buildShieldShape(), {
+      depth: SHIELD_DEPTH,
+      bevelEnabled: true,
+      bevelThickness: 0.06,
+      bevelSize: 0.05,
+      bevelSegments: 4,
+      curveSegments: 24,
+    });
+    shieldGeometry.center();
+    const shieldMaterial = new THREE.MeshStandardMaterial({
       color: PLUM,
       emissive: PLUM_DEEP,
       emissiveIntensity: 0.25,
       metalness: 0.35,
       roughness: 0.4,
     });
-    const coin = new THREE.Mesh(coinGeometry, coinMaterial);
-    coin.rotation.x = Math.PI / 2;
-    medallion.add(coin);
+    const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
+    medallion.add(shield);
 
-    // Front face: a hospital cross.
+    // Front face: a hospital cross emblem (unchanged shape), sitting proud of the shield.
     const crossGeometry = new THREE.ExtrudeGeometry(buildCrossShape(), {
       depth: EMBLEM_DEPTH,
       bevelEnabled: true,
@@ -118,35 +125,13 @@ function LoginScene() {
       roughness: 0.5,
     });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
-    cross.position.z = COIN_DEPTH / 2;
+    cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
-
-    // Back face: a shield, revealed as the medallion spins during entrance.
-    const shieldGeometry = new THREE.ExtrudeGeometry(buildShieldShape(), {
-      depth: EMBLEM_DEPTH,
-      bevelEnabled: true,
-      bevelThickness: 0.015,
-      bevelSize: 0.015,
-      bevelSegments: 2,
-      curveSegments: 16,
-    });
-    shieldGeometry.center();
-    const shieldMaterial = new THREE.MeshStandardMaterial({
-      color: LAVENDER,
-      emissive: PLUM,
-      emissiveIntensity: 0.2,
-      metalness: 0.2,
-      roughness: 0.45,
-    });
-    const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
-    shield.scale.set(0.62, 0.62, 1);
-    shield.position.z = -(COIN_DEPTH / 2 + EMBLEM_DEPTH / 2);
-    medallion.add(shield);
 
     medallion.scale.setScalar(reduceMotion ? 1 : 0.001);
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
-    const ringGeometry = new THREE.TorusGeometry(1.35, 0.012, 8, 96);
+    const ringGeometry = new THREE.TorusGeometry(1.5, 0.012, 8, 96);
     const ringMaterial = new THREE.MeshBasicMaterial({
       color: LAVENDER,
       transparent: true,
@@ -206,12 +191,10 @@ function LoginScene() {
     return () => {
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(frameId);
-      coinGeometry.dispose();
-      coinMaterial.dispose();
-      crossGeometry.dispose();
-      crossMaterial.dispose();
       shieldGeometry.dispose();
       shieldMaterial.dispose();
+      crossGeometry.dispose();
+      crossMaterial.dispose();
       ringGeometry.dispose();
       ringMaterial.dispose();
       renderer.dispose();
