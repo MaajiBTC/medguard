@@ -10,6 +10,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 
 const PLUM = 0x6528d9;
 const WHITE = 0xffffff;
+const RED = 0xeb1c24;
 const EMISSIVE_INTENSITY = 0.9;
 
 function buildCrossShape() {
@@ -128,12 +129,15 @@ function LoginScene() {
       bevelSegments: 2,
       curveSegments: 8,
     });
+    // Same metal treatment as the shield body (color/metalness/roughness/envMap),
+    // just red instead of plum.
     const crossMaterial = new THREE.MeshStandardMaterial({
-      color: WHITE,
-      emissive: WHITE,
-      emissiveIntensity: EMISSIVE_INTENSITY,
-      metalness: 0,
-      roughness: 0.5,
+      color: RED,
+      emissive: 0x000000,
+      metalness: 0.9,
+      roughness: 0.4,
+      envMap,
+      envMapIntensity: 0.75,
     });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
     cross.position.z = SHIELD_DEPTH / 2;
@@ -151,11 +155,12 @@ function LoginScene() {
     });
     backShieldGeometry.center();
     const backShieldMaterial = new THREE.MeshStandardMaterial({
-      color: WHITE,
-      emissive: WHITE,
-      emissiveIntensity: EMISSIVE_INTENSITY,
-      metalness: 0,
-      roughness: 0.5,
+      color: RED,
+      emissive: 0x000000,
+      metalness: 0.9,
+      roughness: 0.4,
+      envMap,
+      envMapIntensity: 0.75,
     });
     const backShield = new THREE.Mesh(backShieldGeometry, backShieldMaterial);
     backShield.scale.set(0.62, 0.62, 1);
