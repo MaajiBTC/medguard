@@ -60,9 +60,9 @@ function AuthenticatedShell({ initialStaff, onLoggedOut }) {
     return <ClinicalDashboard staff={staff} onLogout={handleLogout} />;
   }
   return (
-    <div className="dashboard">
+    <div className="unrecognized-role">
       <p role="alert">Unrecognized role "{staff.role}" — no dashboard available.</p>
-      <button type="button" onClick={handleLogout}>Log out</button>
+      <button type="button" className="btn-secondary" onClick={handleLogout}>Log out</button>
     </div>
   );
 }

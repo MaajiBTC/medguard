@@ -166,37 +166,15 @@ button {
   }
 }
 
-/* Shared dashboard shell (Clinical/Admin/Security) */
-
-.dashboard {
-  max-width: 1100px;
-  margin: 0 auto;
+.unrecognized-role {
+  max-width: 480px;
+  margin: 48px auto;
   padding: 24px;
-  text-align: left;
-  width: 100%;
-  box-sizing: border-box;
+  text-align: center;
 }
 
-.dashboard-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 16px;
-  margin-bottom: 16px;
-}
+/* Shared form-row layouts (used inside the new dashboard shell's panel-cards) */
 
-.dashboard-header h1 {
-  font-size: 28px;
-  margin: 0 0 4px;
-}
-
-.dashboard section {
-  margin-bottom: 28px;
-}
-
-.search-form,
 .assign-form,
 .ledger-filters {
   display: flex;
@@ -204,17 +182,6 @@ button {
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 12px;
-}
-
-.search-form input,
-.ledger-filters input,
-.ledger-filters select {
-  font: inherit;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text-h);
 }
 
 .button-row {
@@ -289,7 +256,7 @@ button {
 .ledger-visualization {
   width: 100%;
   height: 260px;
-  border: 1px solid var(--border);
+  border: 1px solid #ece5fa;
   border-radius: 8px;
   margin-bottom: 20px;
   overflow: hidden;
@@ -305,7 +272,7 @@ button {
 .ledger-table td {
   text-align: left;
   padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid #ece5fa;
 }
 
 .ledger-row {
@@ -313,7 +280,7 @@ button {
 }
 
 .ledger-row:hover {
-  background: var(--code-bg);
+  background: #f6f1fd;
 }
 
 .ledger-row.severity-EMERGENCY_OVERRIDE {
@@ -333,7 +300,7 @@ button {
 }
 
 .ledger-drilldown pre {
-  background: var(--code-bg);
+  background: #f8f5fd;
   padding: 12px;
   border-radius: 6px;
   overflow-x: auto;

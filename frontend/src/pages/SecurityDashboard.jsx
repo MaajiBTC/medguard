@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 
 import { getLedgerEntries } from '../api/ledger';
+import DashboardShell, { LedgerIcon } from './DashboardShell';
 import LedgerVisualization from './LedgerVisualization';
 
 const POLL_INTERVAL_MS = 5000;
@@ -47,31 +48,33 @@ function SecurityDashboard({ staff, onLogout }) {
   }, [fetchEntries]);
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <div>
-          <h1>MedGuard security</h1>
-          {staff && <p><strong>{staff.full_name}</strong> ({staff.staff_id})</p>}
-        </div>
-        <button type="button" onClick={onLogout}>Log out</button>
-      </header>
-
+    <DashboardShell
+      navItems={[{ key: 'ledger', label: 'Ledger', icon: <LedgerIcon /> }]}
+      activeItem="ledger"
+      onNavChange={() => {}}
+      staff={staff}
+      onLogout={onLogout}
+      title="Security Ledger"
+      subtitle="Live feed of audited deviations, reduced access, denials, and emergency overrides."
+    >
       <LedgerVisualization entries={entries} />
 
-      <section>
+      <section className="panel-card">
         <h2>Live feed</h2>
         <form className="ledger-filters" onSubmit={(e) => e.preventDefault()}>
-          <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
+          <select className="form-input" value={eventType} onChange={(e) => setEventType(e.target.value)}>
             {EVENT_TYPE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
           <input
+            className="form-input"
             placeholder="Staff ID"
             value={staffIdFilter}
             onChange={(e) => setStaffIdFilter(e.target.value)}
           />
           <input
+            className="form-input"
             placeholder="Patient hospital number"
             value={patientFilter}
             onChange={(e) => setPatientFilter(e.target.value)}
@@ -115,7 +118,7 @@ function SecurityDashboard({ staff, onLogout }) {
           </tbody>
         </table>
       </section>
-    </div>
+    </DashboardShell>
   );
 }
 
