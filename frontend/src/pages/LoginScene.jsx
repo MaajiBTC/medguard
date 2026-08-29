@@ -4,10 +4,10 @@ import * as THREE from 'three';
 // CLAUDE.md scopes three.js to exactly two places: this login/landing page and the
 // Security Dashboard visualization (LedgerVisualization.jsx). Purely decorative --
 // the actual login form is plain HTML/React; this is just the animated brand shield
-// beside it. A plum shield body with a hospital cross emblem on its front face and a
+// beside it. A red shield body with a hospital cross emblem on its front face and a
 // smaller shield emblem on its back -- both revealed during the 360-degree entrance spin.
 
-const PLUM = 0x6528d9;
+const SHIELD_RED = 0xe2231a;
 const WHITE = 0xffffff;
 
 function buildCrossShape() {
@@ -139,7 +139,7 @@ function LoginScene() {
     // emissive wash muddying it), zero metalness, low roughness, and a clearcoat
     // top layer so it picks up a crisp bright highlight from the key light.
     const shieldMaterial = new THREE.MeshPhysicalMaterial({
-      color: PLUM,
+      color: SHIELD_RED,
       metalness: 0,
       roughness: 0.22,
       clearcoat: 1,
