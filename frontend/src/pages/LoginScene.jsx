@@ -10,6 +10,7 @@ import * as THREE from 'three';
 const PLUM = 0x6528d9;
 const PLUM_DEEP = 0x2a0f5c;
 const WHITE = 0xffffff;
+const CROSS_RED = 0xed1b2e;
 
 function buildCrossShape() {
   const w = 0.22; // half-width of the cross arms
@@ -120,7 +121,7 @@ function LoginScene() {
     // Unlit (MeshBasicMaterial, like the ring below) -- MeshStandardMaterial still
     // shades/tints a "white" surface under colored scene lighting, which read as
     // gray/lavender instead of pure white. Unlit ignores lighting entirely.
-    const crossMaterial = new THREE.MeshBasicMaterial({ color: WHITE });
+    const crossMaterial = new THREE.MeshBasicMaterial({ color: CROSS_RED });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
     cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
