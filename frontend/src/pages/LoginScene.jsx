@@ -85,10 +85,11 @@ function LoginScene() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mount.appendChild(renderer.domElement);
 
-    // Synthetic "studio" environment (no HDR file needed) so the shield's metal has
-    // something colorful to reflect everywhere, not just at the direct-light
-    // highlight spots. Scoped to shieldMaterial.envMap only (not scene.environment)
-    // so it doesn't affect the cross/back-shield/ring's own emissive look.
+    // Synthetic "studio" environment (no HDR file needed) so the metal materials
+    // below have something colorful to reflect everywhere, not just at the
+    // direct-light highlight spots. Assigned explicitly per-material (envMap) --
+    // not via scene.environment, which would silently apply it to anything else
+    // added to the scene later too.
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     const envMap = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
 
@@ -168,8 +169,13 @@ function LoginScene() {
     medallion.scale.setScalar(reduceMotion ? 1 : 0.001);
     medallion.rotation.y = reduceMotion ? 0 : -Math.PI * 2;
 
-    const ringGeometry = new THREE.TorusGeometry(1.5, 0.03, 12, 96);
-    const ringMaterial = new THREE.MeshStandardMaterial({
+    // Two chain-link strips scrolling continuously behind the shield (strength /
+    // decentralization motif) -- far back in Z (not "on the same level" as the
+    // shield), faint (50% opacity), same metal material family as everything else.
+    // Links alternate rotation.y so consecutive links read as interlocking, like a
+    // real chain, rather than a row of identical flat rings.
+    const chainGeometry = new THREE.TorusGeometry(0.16, 0.045, 8, 24);
+    const chainMaterial = new THREE.MeshStandardMaterial({
       color: WHITE,
       emissive: 0x000000,
       metalness: 0.9,
@@ -177,13 +183,32 @@ function LoginScene() {
       envMap,
       envMapIntensity: 0.75,
       transparent: true,
-      opacity: reduceMotion ? 1 : 0,
+      opacity: 0.5,
     });
-    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-    ring.rotation.x = Math.PI / 2.4;
-    scene.add(ring);
 
-    // Lavender key light for extra shading/depth on the cross/back-shield/ring's
+    const CHAIN_LINK_SPACING = 0.42;
+    const CHAIN_LINK_COUNT = 40;
+    const chainRowWidth = CHAIN_LINK_COUNT * CHAIN_LINK_SPACING;
+
+    function buildChainRow(y, z) {
+      const row = new THREE.Group();
+      for (let i = 0; i < CHAIN_LINK_COUNT; i += 1) {
+        const link = new THREE.Mesh(chainGeometry, chainMaterial);
+        link.position.x = i * CHAIN_LINK_SPACING - chainRowWidth / 2;
+        link.rotation.x = Math.PI / 2.4;
+        link.rotation.y = i % 2 === 0 ? 0 : Math.PI / 2;
+        row.add(link);
+      }
+      row.position.set(0, y, z);
+      scene.add(row);
+      return row;
+    }
+
+    const chainRowTop = buildChainRow(1.7, -3.2);
+    const chainRowBottom = buildChainRow(-1.7, -3.2);
+    const chainPeriod = CHAIN_LINK_SPACING * 2; // one alternating pair -- wraps seamlessly
+
+    // Lavender key light for extra shading/depth on the cross/back-shield/chains'
     // own emissive glow -- the shield body is unlit now, so these don't affect it.
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     const key = new THREE.PointLight(0xc4b5fd, 1.4);
@@ -196,7 +221,10 @@ function LoginScene() {
     const start = performance.now();
     const animate = (now) => {
       if (reduceMotion) {
-        ring.rotation.z += 0.001;
+        // Slow, gentle scroll only -- no entrance pop/spin.
+        const slowElapsed = now - start;
+        chainRowTop.position.x = -((slowElapsed * 0.00006) % chainPeriod);
+        chainRowBottom.position.x = (slowElapsed * 0.00006) % chainPeriod;
         renderer.render(scene, camera);
         frameId = requestAnimationFrame(animate);
         return;
@@ -216,8 +244,11 @@ function LoginScene() {
         medallion.rotation.y = Math.sin(idleElapsed / 1800) * 0.12;
       }
       medallion.position.y = Math.sin(elapsed / 1400) * 0.06;
-      ring.material.opacity = t;
-      ring.rotation.z += 0.0035;
+
+      // Continuous horizontal scroll, opposite directions, wrapping seamlessly
+      // every chainPeriod (one alternating link pair) so the loop never pops.
+      chainRowTop.position.x = -((elapsed * 0.0006) % chainPeriod);
+      chainRowBottom.position.x = (elapsed * 0.0006) % chainPeriod;
 
       renderer.render(scene, camera);
       frameId = requestAnimationFrame(animate);
@@ -242,8 +273,8 @@ function LoginScene() {
       crossMaterial.dispose();
       backShieldGeometry.dispose();
       backShieldMaterial.dispose();
-      ringGeometry.dispose();
-      ringMaterial.dispose();
+      chainGeometry.dispose();
+      chainMaterial.dispose();
       envMap.dispose();
       pmremGenerator.dispose();
       renderer.dispose();
