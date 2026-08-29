@@ -119,6 +119,7 @@ function LoginScene() {
       envMapIntensity: 0.75,
     });
     const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
+    shield.scale.set(0.8, 0.8, 1); // 20% smaller
     medallion.add(shield);
 
     // Front face: a hospital cross emblem (unchanged shape), sitting proud of the shield.
@@ -141,6 +142,7 @@ function LoginScene() {
       envMapIntensity: 0.75,
     });
     const cross = new THREE.Mesh(crossGeometry, crossMaterial);
+    cross.scale.set(0.5, 0.5, 1); // 50% smaller
     cross.position.z = SHIELD_DEPTH / 2;
     medallion.add(cross);
 
@@ -164,7 +166,7 @@ function LoginScene() {
       envMapIntensity: 0.75,
     });
     const backShield = new THREE.Mesh(backShieldGeometry, backShieldMaterial);
-    backShield.scale.set(0.62, 0.62, 1);
+    backShield.scale.set(0.31, 0.31, 1); // 0.62 base, 50% smaller
     backShield.position.z = -(SHIELD_DEPTH / 2 + EMBLEM_DEPTH / 2);
     medallion.add(backShield);
 
