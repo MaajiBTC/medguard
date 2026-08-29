@@ -43,6 +43,25 @@ function buildShieldShape() {
   return shape;
 }
 
+// Main shield body's shape: a rectangle with rounded corners (replaces the
+// pointed-shield silhouette for the body only -- the back emblem keeps the
+// original shield shape via buildShieldShape() above).
+function buildRoundedRectShape(width, height, radius) {
+  const w = width / 2;
+  const h = height / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(-w + radius, -h);
+  shape.lineTo(w - radius, -h);
+  shape.quadraticCurveTo(w, -h, w, -h + radius);
+  shape.lineTo(w, h - radius);
+  shape.quadraticCurveTo(w, h, w - radius, h);
+  shape.lineTo(-w + radius, h);
+  shape.quadraticCurveTo(-w, h, -w, h - radius);
+  shape.lineTo(-w, -h + radius);
+  shape.quadraticCurveTo(-w, -h, -w + radius, -h);
+  return shape;
+}
+
 function easeOutBack(x) {
   const c1 = 1.70158;
   const c3 = c1 + 1;
@@ -96,8 +115,8 @@ function LoginScene() {
     const medallion = new THREE.Group();
     scene.add(medallion);
 
-    // Body: the shield silhouette itself (unchanged shape), not a separate coin.
-    const shieldGeometry = new THREE.ExtrudeGeometry(buildShieldShape(), {
+    // Body: a rounded rectangle (not the pointed shield silhouette anymore).
+    const shieldGeometry = new THREE.ExtrudeGeometry(buildRoundedRectShape(1.9, 2.5, 0.35), {
       depth: SHIELD_DEPTH,
       bevelEnabled: true,
       bevelThickness: 0.06,
