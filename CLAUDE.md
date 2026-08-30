@@ -174,12 +174,27 @@ really the staff-access events that targeted them, since patients don't log
 events of their own — kept as its own page anyway, per the user.
 `staff.views.StaffSearchView` widened from `IsAdmin` to
 `IsAdminOrSecurityOfficer` so the new Staff page can reuse it directly.
-`LedgerVisualization.jsx`'s 3D panel also moved from placing markers by their
-index in the entries array to a real-time-based spiral/helix — a marker's
-angle, radius, and height are all now driven by how long ago
-`entry.occurred_at` actually was (normalized against the oldest entry
-currently on screen), so recency reads as physical distance along the spiral
-instead of just color brightness.
+`LedgerVisualization.jsx`'s 3D panel also moved (same day) from placing
+markers by their index in the entries array to a real-time-based spiral/helix
+— a marker's angle, radius, and height driven by how long ago
+`entry.occurred_at` actually was, so recency read as physical distance along
+the spiral instead of just color brightness.
+
+**Amended again (2026-08-30, chart cards replace the spiral):** the spiral
+above was itself replaced the same day, per the user — `LedgerVisualization.jsx`
+is deleted. In its place, the Ledger page now shows two lavender
+`.ledger-chart-card`s side by side (`frontend/src/pages/LedgerCharts3D.jsx`,
+still three.js, still one of CLAUDE.md's two sanctioned three.js spots): a 3D
+area chart (`LedgerAreaChart3D`, extruded ribbons, one per event type,
+bucketed across the current entries' real time span, not list position) and a
+3D donut (`LedgerDonutChart3D`, extruded annulus segments sized by each event
+type's share of the current feed). Both cover the same 4 non-`STANDARD_ACCESS`
+event types already color-coded elsewhere on this page, with an HTML legend
+underneath since this is the first place on the page that needed one
+explicitly. Both grow in on first mount and pulse when the polled data
+actually changes (compared via a cheap entries signature, so an unchanged
+re-poll doesn't visibly re-trigger anything) — same `easeOutBack` entrance
+easing already used for the login shield in `LoginScene.jsx`.
 
 ## Offline Mode
 
