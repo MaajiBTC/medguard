@@ -815,7 +815,7 @@ button {
 }
 
 /* No sub-breakdown here (just a label + count), so it stays a single solid
-   card -- lavender, same as the two-card stat groups' top/headline card. */
+   card -- plum, same as the two-card stat groups' top/headline card. */
 .category-tile {
   display: flex;
   flex-direction: column;
@@ -824,8 +824,8 @@ button {
   padding: 20px;
   border: none;
   border-radius: 12px;
-  background: var(--lavender);
-  color: var(--plum-deep);
+  background: var(--plum);
+  color: var(--off-white);
   cursor: pointer;
   text-align: left;
 }
@@ -836,13 +836,13 @@ button {
 
 .category-tile-label {
   font-weight: 600;
-  color: var(--plum-deep);
+  color: var(--off-white);
 }
 
 .category-tile-count {
   font-size: 28px;
   font-weight: 700;
-  color: var(--plum-deep);
+  color: var(--off-white);
 }
 
 /* Overview stat cards -- same auto-fit reasoning as .category-grid above.
