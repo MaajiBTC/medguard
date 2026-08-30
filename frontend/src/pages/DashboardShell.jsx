@@ -80,14 +80,39 @@ function MenuIcon() {
   );
 }
 
+// Static brand mark for the sticky header -- a flat shield+cross, echoing the
+// login page's 3D shield without using three.js (CLAUDE.md scopes three.js to
+// just the login page and the Security Dashboard visualization).
+function BrandLogoIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M12 2c2.2 1.6 4.6 2.4 7 2.4V11c0 5.2-3 8.8-7 10.6C8 19.8 5 16.2 5 11V4.4c2.4 0 4.8-.8 7-2.4Z"
+        fill="var(--plum)"
+      />
+      <path d="M12 7.5v9M7.5 12h9" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ProfileIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" />
+    </svg>
+  );
+}
+
 export { SearchIcon, StaffIcon, PatientsIcon, LedgerIcon, OverviewIcon, DisasterIcon };
 
-/** Shared layout for the three authenticated dashboards: a plum-deep off-canvas
- * drawer (wordmark, role-scoped nav, logout), opened via a hamburger button in the
- * header, plus a main area (page title/subtitle + staff identity, then a white card
- * containing `children`). Closed by default -- the dashboard's own content is what
- * you see first, not the menu. Uses the fixed light brand palette (--plum/
- * --plum-deep/--lavender/--off-white), same as the login page. */
+/** Shared layout for the three authenticated dashboards (every page except the
+ * login page): a sticky top header (hamburger menu, MedGuard brand mark, page
+ * title/subtitle, profile icon + staff identity) plus a plum-deep off-canvas nav
+ * drawer (wordmark, role-scoped nav, logout) toggled by the header's hamburger
+ * button, closed by default -- the dashboard's own content is what you see first,
+ * not the menu. Uses the fixed light brand palette (--plum/--plum-deep/
+ * --lavender/--off-white), same as the login page. */
 function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, title, subtitle, children }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -127,7 +152,7 @@ function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, ti
 
       <div className="dashboard-main">
         <header className="shell-header">
-          <div className="shell-header-title">
+          <div className="shell-header-brand">
             <button
               type="button"
               className="menu-button"
@@ -136,15 +161,26 @@ function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, ti
             >
               <MenuIcon />
             </button>
-            <div>
-              <h1>{title}</h1>
-              {subtitle && <p className="shell-subtitle">{subtitle}</p>}
+            <div className="brand-mark">
+              <BrandLogoIcon />
+              <span>MedGuard</span>
             </div>
           </div>
+
+          <div className="shell-header-page">
+            <h1>{title}</h1>
+            {subtitle && <p className="shell-subtitle">{subtitle}</p>}
+          </div>
+
           {staff && (
             <div className="shell-identity">
-              <strong>{staff.full_name}</strong>
-              <span>{staff.staff_id}</span>
+              <div className="profile-avatar">
+                <ProfileIcon />
+              </div>
+              <div className="shell-identity-text">
+                <strong>{staff.full_name}</strong>
+                <span>{staff.staff_id}</span>
+              </div>
             </div>
           )}
         </header>
