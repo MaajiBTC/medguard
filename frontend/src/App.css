@@ -840,10 +840,25 @@ button {
 
 /* Overview stat cards */
 
+/* Exactly 4 equal columns spanning the full row -- auto-fill left a gap on the
+   right on wide screens (it reserves an extra empty track once the container
+   is wide enough for a 5th 200px card that doesn't exist). */
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .overview-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .stat-card {

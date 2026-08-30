@@ -29,8 +29,16 @@ import { WARDS } from '../wards';
 import DashboardShell, { DisasterIcon, OverviewIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
 
 const STAFF_ROLES = ['doctor', 'nurse', 'pharmacist', 'lab_technician', 'clerk', 'admin', 'security_officer'];
-// Admins cannot create other admin accounts -- that moved to the Security
-// dashboard (only a Security Officer can create an admin account).
+// The Staff page's category browsing/search is scoped to clinical roles only --
+// admin and security_officer accounts are shared system accounts an admin
+// shouldn't be able to browse/manage from here (an admin manages only its own
+// account, via the profile page); security officer accounts are likewise
+// self-managed only. See ProfilePanel in DashboardShell.jsx.
+const STAFF_BROWSE_ROLES = ['doctor', 'nurse', 'pharmacist', 'lab_technician', 'clerk'];
+// Admins still cannot create other admin accounts -- that moved to the Security
+// dashboard (only a Security Officer can create an admin account) -- but can
+// still create a security_officer account (just can't browse/manage it after,
+// per above).
 const ADMIN_CREATABLE_ROLES = STAFF_ROLES.filter((r) => r !== 'admin');
 // Shared accounts (admin/security officer) have no ward/on-duty/on-call concept.
 const NO_WARD_DUTY_ROLES = new Set(['admin', 'security_officer']);
@@ -118,7 +126,10 @@ function StaffPanel() {
     event.preventDefault();
     setError(null);
     try {
-      setResults(await searchStaff(query, selectedRole || undefined));
+      const data = await searchStaff(query, selectedRole || undefined);
+      // Global search (no role selected) isn't scoped server-side, so filter out
+      // admin/security_officer here too -- same reasoning as STAFF_BROWSE_ROLES.
+      setResults(selectedRole ? data : data.filter((s) => STAFF_BROWSE_ROLES.includes(s.role)));
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -220,7 +231,7 @@ function StaffPanel() {
 
       {showingCategories ? (
         <div className="category-grid">
-          {STAFF_ROLES.map((r) => (
+          {STAFF_BROWSE_ROLES.map((r) => (
             <button key={r} type="button" className="category-tile" onClick={() => selectRole(r)}>
               <span className="category-tile-label">{formatRole(r)}</span>
               <span className="category-tile-count">{roleCounts ? roleCounts.by_role[r] ?? 0 : '—'}</span>
