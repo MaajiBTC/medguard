@@ -814,6 +814,9 @@ button {
   gap: 14px;
 }
 
+/* All three brand colors in one gradient (not the header's --plum-deep) --
+   plum at the top where the label/count sit, fading through lavender to
+   off-white toward the bottom. */
 .category-tile {
   display: flex;
   flex-direction: column;
@@ -822,7 +825,7 @@ button {
   padding: 20px;
   border: none;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--plum) 0%, var(--lavender) 100%);
+  background: linear-gradient(180deg, var(--plum) 0%, var(--lavender) 85%, var(--off-white) 100%);
   color: var(--off-white);
   cursor: pointer;
   text-align: left;
@@ -850,6 +853,12 @@ button {
   gap: 14px;
 }
 
+/* All three brand colors in one gradient (not the header's --plum-deep):
+   plum behind the label/value at the top, fading through lavender to
+   off-white behind the sub-breakdown rows at the bottom. Text color follows
+   the gradient -- off-white over the dark plum top, plum-deep over the light
+   off-white bottom -- rather than one fixed color that would lose contrast
+   at one end. */
 .stat-card {
   display: flex;
   flex-direction: column;
@@ -857,7 +866,7 @@ button {
   padding: 22px;
   border: none;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--plum) 0%, var(--lavender) 100%);
+  background: linear-gradient(180deg, var(--plum) 0%, var(--lavender) 45%, var(--off-white) 100%);
   color: var(--off-white);
 }
 
@@ -882,7 +891,7 @@ button {
   gap: 4px;
   margin-top: 8px;
   padding-top: 10px;
-  border-top: 1px solid rgba(250, 247, 255, 0.3);
+  border-top: 1px solid rgba(101, 40, 217, 0.2);
 }
 
 .stat-subrow {
@@ -891,10 +900,19 @@ button {
   justify-content: space-between;
   gap: 8px;
   font-size: 12px;
-  color: rgba(250, 247, 255, 0.75);
+  color: rgba(42, 15, 92, 0.7);
 }
 
 .stat-subrow span:last-child {
   font-weight: 600;
+  color: var(--plum-deep);
+}
+
+.stat-card-alert .stat-sublist {
+  border-top-color: rgba(255, 255, 255, 0.3);
+}
+
+.stat-card-alert .stat-subrow,
+.stat-card-alert .stat-subrow span:last-child {
   color: var(--off-white);
 }
