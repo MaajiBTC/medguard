@@ -243,3 +243,101 @@ class StaffApiTests(APITestCase):
         _staff, token = self._login("docSummaryDeniedApi", "pw-staff-api-18", "STF-S919", Staff.Role.DOCTOR)
         resp = self.client.get("/api/staff/summary/", **self._auth(token))
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_cannot_create_another_admin(self):
+        _admin, token = self._login("adminApi9", "pw-staff-api-19", "STF-S920", Staff.Role.ADMIN)
+        resp = self.client.post(
+            "/api/staff/create/",
+            {
+                "username": "secondAdminApi",
+                "password": "pw-second-admin-1",
+                "staff_id": "STF-S921",
+                "full_name": "Second Admin",
+                "role": Staff.Role.ADMIN,
+            },
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_security_officer_can_create_admin(self):
+        _officer, token = self._login("secOfficerApi1", "pw-staff-api-20", "STF-S922", Staff.Role.SECURITY_OFFICER)
+        resp = self.client.post(
+            "/api/staff/create/",
+            {
+                "username": "adminFromSecurityApi",
+                "password": "pw-admin-from-sec-1",
+                "staff_id": "STF-S923",
+                "full_name": "Admin From Security",
+                "role": Staff.Role.ADMIN,
+            },
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+
+    def test_security_officer_cannot_create_non_admin_role(self):
+        _officer, token = self._login("secOfficerApi2", "pw-staff-api-21", "STF-S924", Staff.Role.SECURITY_OFFICER)
+        resp = self.client.post(
+            "/api/staff/create/",
+            {
+                "username": "nurseFromSecurityApi",
+                "password": "pw-nurse-from-sec-1",
+                "staff_id": "STF-S925",
+                "full_name": "Blocked Nurse",
+                "role": Staff.Role.NURSE,
+            },
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_clinical_staff_cannot_create_staff(self):
+        _doctor, token = self._login("docCreateDeniedApi", "pw-staff-api-22", "STF-S926", Staff.Role.DOCTOR)
+        resp = self.client.post(
+            "/api/staff/create/",
+            {
+                "username": "blockedCreateApi",
+                "password": "pw-blocked-create-1",
+                "staff_id": "STF-S927",
+                "full_name": "Blocked",
+                "role": Staff.Role.CLERK,
+            },
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_ward_duty_call_forced_blank_for_admin_and_security_officer(self):
+        _admin, token = self._login("adminApi10", "pw-staff-api-23", "STF-S928", Staff.Role.ADMIN)
+        resp = self.client.post(
+            "/api/staff/create/",
+            {
+                "username": "secWithWardApi",
+                "password": "pw-sec-ward-1",
+                "staff_id": "STF-S929",
+                "full_name": "Security With Attempted Ward",
+                "role": Staff.Role.SECURITY_OFFICER,
+                "ward": Ward.EMERGENCY,
+                "on_duty": True,
+                "on_call": True,
+            },
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        created = Staff.objects.get(staff_id="STF-S929")
+        self.assertEqual(created.ward, "")
+        self.assertFalse(created.on_duty)
+        self.assertFalse(created.on_call)
+
+    def test_duty_ward_update_rejected_for_admin_and_security_officer(self):
+        _admin, admin_token = self._login("adminApi11", "pw-staff-api-24", "STF-S930", Staff.Role.ADMIN)
+        officer, _t = self._login("secOfficerApi3", "pw-staff-api-25", "STF-S931", Staff.Role.SECURITY_OFFICER)
+        resp = self.client.patch(
+            f"/api/staff/{officer.id}/duty/",
+            {"on_duty": True},
+            format="json",
+            **self._auth(admin_token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)

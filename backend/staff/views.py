@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Staff
-from .permissions import IsAdmin
+from .permissions import IsAdmin, IsAdminOrSecurityOfficer
 from .serializers import StaffCreateSerializer, StaffDutyWardUpdateSerializer, StaffSummarySerializer
 
 
@@ -47,15 +47,36 @@ class StaffSummaryView(APIView):
 
 
 class StaffCreateView(APIView):
-    """POST /api/staff/create/ -- creates the auth.User + Staff row together."""
+    """POST /api/staff/create/ -- creates the auth.User + Staff row together.
 
-    permission_classes = [IsAdmin]
+    Both Admin and Security Officer can reach this endpoint, but only for
+    different target roles (added 2026-08-30, per the user): an Admin can create
+    any role except another admin account; a Security Officer can *only* create
+    admin accounts. Shared-account roles (admin/security officer) never get a
+    ward/on-duty/on-call value, regardless of what's submitted -- those fields
+    aren't meaningful for a shared account (see Staff.NO_WARD_DUTY_ROLES)."""
+
+    permission_classes = [IsAdminOrSecurityOfficer]
 
     def post(self, request):
         serializer = StaffCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        requester_role = request.auth.staff.role
+        target_role = data["role"]
+        if requester_role == Staff.Role.ADMIN and target_role == Staff.Role.ADMIN:
+            return Response(
+                {"detail": "Admins cannot create other admin accounts. Use the Security dashboard."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if requester_role == Staff.Role.SECURITY_OFFICER and target_role != Staff.Role.ADMIN:
+            return Response(
+                {"detail": "Security officers can only create admin accounts."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        no_ward_duty = target_role in Staff.NO_WARD_DUTY_ROLES
         User = get_user_model()
         with transaction.atomic():
             user = User.objects.create_user(username=data["username"], password=data["password"])
@@ -63,10 +84,10 @@ class StaffCreateView(APIView):
                 user=user,
                 staff_id=data["staff_id"],
                 full_name=data["full_name"],
-                role=data["role"],
-                ward=data.get("ward", ""),
-                on_duty=data.get("on_duty", False),
-                on_call=data.get("on_call", False),
+                role=target_role,
+                ward="" if no_ward_duty else data.get("ward", ""),
+                on_duty=False if no_ward_duty else data.get("on_duty", False),
+                on_call=False if no_ward_duty else data.get("on_call", False),
             )
 
         return Response(StaffSummarySerializer(staff).data, status=status.HTTP_201_CREATED)
@@ -74,12 +95,19 @@ class StaffCreateView(APIView):
 
 class StaffDutyWardUpdateView(APIView):
     """PATCH /api/staff/<id>/duty/ -- the manual population path CLAUDE.md requires
-    for ward/on_duty (never computed by a scheduler)."""
+    for ward/on_duty (never computed by a scheduler). Rejected outright for admin/
+    security officer accounts (added 2026-08-30) -- shared accounts with no ward/
+    on-duty/on-call concept, see Staff.NO_WARD_DUTY_ROLES."""
 
     permission_classes = [IsAdmin]
 
     def patch(self, request, staff_id):
         staff = get_object_or_404(Staff, pk=staff_id)
+        if staff.role in Staff.NO_WARD_DUTY_ROLES:
+            return Response(
+                {"detail": "Ward/on-duty/on-call don't apply to this role's shared account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         serializer = StaffDutyWardUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 

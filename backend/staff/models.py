@@ -38,6 +38,13 @@ class Staff(models.Model):
     # ones -- they never call /api/scoring/decide/.
     CLINICAL_ROLES = {Role.DOCTOR, Role.NURSE, Role.PHARMACIST, Role.LAB_TECHNICIAN, Role.CLERK}
 
+    # System roles (added 2026-08-30): shared accounts with no ward/on-duty/on-call
+    # concept -- neither field is ever meaningfully checked for these roles (the
+    # Doctor/Nurse rules that read ward/on_duty/on_call only apply to those two
+    # roles), so staff/views.py forces them blank/false on create and rejects
+    # attempts to set them via the duty/ward update endpoint.
+    NO_WARD_DUTY_ROLES = {Role.ADMIN, Role.SECURITY_OFFICER}
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

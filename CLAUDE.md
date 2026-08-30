@@ -52,6 +52,18 @@ security officer reads the Security Ledger (`staff.permissions.IsSecurityOfficer
 log in through the same shared login page/session mechanism as the five clinical roles
 above — see step 4.
 
+**Who can create which role (added 2026-08-30):** `staff.permissions.IsAdminOrSecurityOfficer`
+gates `POST /api/staff/create/`, but which target role each side may actually create is
+further restricted inside the view — an Admin can create any role *except* another admin
+account; a Security Officer can *only* create admin accounts (self-attested, not
+system-verified, same trust model as the rest of this project's manual-entry fields).
+This is why admin-account creation lives on the Security dashboard's own "Admins" page,
+not the Admin dashboard's "Add Staff" form (which no longer offers the admin role at
+all). Both `admin` and `security_officer` are shared accounts with no ward/on-duty/
+on-call concept — `Staff.NO_WARD_DUTY_ROLES` — so `StaffCreateView` forces those three
+fields blank/false for them regardless of what's submitted, and `StaffDutyWardUpdateView`
+rejects any attempt to set them for an existing admin/security-officer row (400).
+
 **Nurse rule (specific override — implement exactly this logic, it does not follow the generic role-ceiling pattern above):**
 1. Nurse is specifically assigned to this patient → full access (1–13) granted normally, processed through the standard score-band system like any other access.
 2. Nurse is **not** specifically assigned to this patient, but is on the **same ward** as the patient → full access (1–13) is still granted, but this access is **always** logged as `AUDITED_DEVIATION`, regardless of what the aggregate score would otherwise indicate.
@@ -199,6 +211,14 @@ A monitoring screen showing a live feed of `AUDITED_DEVIATION`, `REDUCED_ACCESS`
    before this taxonomy existed. They'll need their ward re-saved via the Admin UI's
    new ward dropdown for ward-matching to work correctly for them; not fixed
    automatically since that's real user-entered data, not a fixture.
+
+   **Amended (2026-08-30):** admin-account creation moved off the Admin dashboard
+   entirely (see Role → category access above) -- `AdminDashboard.jsx`'s "Add Staff"
+   role dropdown no longer offers `admin`, and a new "Admins" page on
+   `SecurityDashboard.jsx` is the only place one can be created. Both `admin` and
+   `security_officer` creation forms (and the existing-staff "Manage" edit panel)
+   now hide ward/on-duty/on-call entirely for those two roles, matching the new
+   backend enforcement (`Staff.NO_WARD_DUTY_ROLES`). 139/139 backend tests passing.
 5. ✅ **Done (2026-08-28).** Emergency Override ("Break the Glass" / BTG in the UI — see the Emergency Override section above for naming and scope decisions). New `POST /api/scoring/emergency-override/` (`scoring.views.EmergencyOverrideView`, `IsClinicalStaff`-gated): takes `{patient_id, reason}` (reason min 10 chars), grants the caller's full role ceiling (`ROLE_CEILINGS[staff.role]`) regardless of the hard gate/score band/Nurse rule, writes an `AccessDecision` row (`decision_type=EMERGENCY_OVERRIDE`; `gate_passed`/`score`/`score_band` now nullable on that model — an override never ran the scoring pipeline, so "not applicable" is more honest than a sentinel score) and an `EMERGENCY_OVERRIDE` Ledger entry (`reason` in `details`). Does not check `contextual.target_patient_id` the way `DecideView` does (must still work if capture/contextual state is missing or itself the reason normal access failed) and does not reinforce the behavioral baseline (an override is by definition an abnormal session). `scoring.views.PatientRecordView` needed no changes — it already treats any non-`ACCESS_DENIED` decision type the same way. Frontend: `ClinicalDashboard.jsx` gained a "Break the Glass" button in the patient-view section (always visible once a patient is selected, not gated behind a denial) that reveals an inline reason textarea before submitting — no native `confirm()` dialog. `SecurityDashboard.jsx` needed no changes (its event-type filter/severity coloring/drill-down already handled `EMERGENCY_OVERRIDE` rows from step 4). 105/105 backend tests passing (8 new); verified end-to-end via direct API calls against the real dev database using the real Admin and doctor accounts (Chrome browser extension wasn't connected for a live UI click-through) — confirmed the full round trip (override → granted all 13 categories → records endpoint returns content → a correctly hash-chained `EMERGENCY_OVERRIDE` Ledger entry with the reason). The temporary QA patient and sessions were deleted afterward; the Ledger entry itself was left in place since it's append-only by design.
 
    **Amended 2026-08-29** (after a live demo surfaced a real gap): added the Doctor rule (see Role → category access above) and BTG's own availability gate (see Emergency Override above). `AccessDecision.nurse_path` renamed to `role_rule_path` (now used by both roles' rule paths; migration `scoring/0003_rename_nurse_path_to_role_rule_path.py`). New `captures/services.py` (`compute_patient_assignment_status`) extracted from `captures.views.TargetPatientView` so both the normal capture flow and BTG's fresh gate check share one implementation instead of two.

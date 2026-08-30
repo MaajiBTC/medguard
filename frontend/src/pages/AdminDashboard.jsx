@@ -29,6 +29,11 @@ import { WARDS } from '../wards';
 import DashboardShell, { DisasterIcon, OverviewIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
 
 const STAFF_ROLES = ['doctor', 'nurse', 'pharmacist', 'lab_technician', 'clerk', 'admin', 'security_officer'];
+// Admins cannot create other admin accounts -- that moved to the Security
+// dashboard (only a Security Officer can create an admin account).
+const ADMIN_CREATABLE_ROLES = STAFF_ROLES.filter((r) => r !== 'admin');
+// Shared accounts (admin/security officer) have no ward/on-duty/on-call concept.
+const NO_WARD_DUTY_ROLES = new Set(['admin', 'security_officer']);
 const ASSIGNMENT_ROLES = ['doctor', 'nurse'];
 
 function errorMessage(err) {
@@ -249,23 +254,31 @@ function StaffPanel() {
       {selected && (
         <div className="panel-card">
           <h3>{selected.full_name} ({selected.staff_id})</h3>
-          <label className="form-label">
-            Ward
-            <select className="form-input" value={ward} onChange={(e) => setWard(e.target.value)}>
-              <option value="">— None —</option>
-              {WARDS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
-            </select>
-          </label>
-          <label className="form-checkbox">
-            <input type="checkbox" checked={onDuty} onChange={(e) => setOnDuty(e.target.checked)} />
-            On duty
-          </label>
-          <label className="form-checkbox">
-            <input type="checkbox" checked={onCall} onChange={(e) => setOnCall(e.target.checked)} />
-            On call
-          </label>
+          {NO_WARD_DUTY_ROLES.has(selected.role) ? (
+            <p className="meta-line">Shared account — no ward, on-duty, or on-call status.</p>
+          ) : (
+            <>
+              <label className="form-label">
+                Ward
+                <select className="form-input" value={ward} onChange={(e) => setWard(e.target.value)}>
+                  <option value="">— None —</option>
+                  {WARDS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+                </select>
+              </label>
+              <label className="form-checkbox">
+                <input type="checkbox" checked={onDuty} onChange={(e) => setOnDuty(e.target.checked)} />
+                On duty
+              </label>
+              <label className="form-checkbox">
+                <input type="checkbox" checked={onCall} onChange={(e) => setOnCall(e.target.checked)} />
+                On call
+              </label>
+            </>
+          )}
           <div className="button-row">
-            <button type="button" className="btn-primary" onClick={saveDuty}>Save ward/duty</button>
+            {!NO_WARD_DUTY_ROLES.has(selected.role) && (
+              <button type="button" className="btn-primary" onClick={saveDuty}>Save ward/duty</button>
+            )}
             <button type="button" className="btn-secondary" onClick={toggleActive}>
               {selected.account_active ? 'Deactivate account' : 'Reactivate account'}
             </button>
@@ -295,24 +308,28 @@ function StaffPanel() {
             <label className="form-label">
               Role
               <select className="form-input" value={newStaff.role} onChange={(e) => setNewStaff({ ...newStaff, role: e.target.value })}>
-                {STAFF_ROLES.map((r) => <option key={r} value={r}>{formatRole(r)}</option>)}
+                {ADMIN_CREATABLE_ROLES.map((r) => <option key={r} value={r}>{formatRole(r)}</option>)}
               </select>
             </label>
-            <label className="form-label">
-              Ward
-              <select className="form-input" value={newStaff.ward} onChange={(e) => setNewStaff({ ...newStaff, ward: e.target.value })}>
-                <option value="">— None —</option>
-                {WARDS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
-              </select>
-            </label>
-            <label className="form-checkbox">
-              <input type="checkbox" checked={newStaff.on_duty} onChange={(e) => setNewStaff({ ...newStaff, on_duty: e.target.checked })} />
-              On duty
-            </label>
-            <label className="form-checkbox">
-              <input type="checkbox" checked={newStaff.on_call} onChange={(e) => setNewStaff({ ...newStaff, on_call: e.target.checked })} />
-              On call
-            </label>
+            {!NO_WARD_DUTY_ROLES.has(newStaff.role) && (
+              <>
+                <label className="form-label">
+                  Ward
+                  <select className="form-input" value={newStaff.ward} onChange={(e) => setNewStaff({ ...newStaff, ward: e.target.value })}>
+                    <option value="">— None —</option>
+                    {WARDS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+                  </select>
+                </label>
+                <label className="form-checkbox">
+                  <input type="checkbox" checked={newStaff.on_duty} onChange={(e) => setNewStaff({ ...newStaff, on_duty: e.target.checked })} />
+                  On duty
+                </label>
+                <label className="form-checkbox">
+                  <input type="checkbox" checked={newStaff.on_call} onChange={(e) => setNewStaff({ ...newStaff, on_call: e.target.checked })} />
+                  On call
+                </label>
+              </>
+            )}
             {error && <p role="alert" className="dev-error">{error}</p>}
             <div className="button-row">
               <button type="button" className="btn-secondary" onClick={() => setCreateOpen(false)}>Cancel</button>

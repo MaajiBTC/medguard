@@ -26,6 +26,19 @@ class IsSecurityOfficer(_HasRole):
     role = Staff.Role.SECURITY_OFFICER
 
 
+class IsAdminOrSecurityOfficer(BasePermission):
+    """Gate for StaffCreateView: both roles can reach the endpoint, but which
+    target role each may actually create is enforced inside the view (admin
+    cannot create another admin; security officer can only create admins)."""
+
+    def has_permission(self, request, view):
+        session = request.auth
+        return isinstance(session, AccessSession) and session.staff.role in (
+            Staff.Role.ADMIN,
+            Staff.Role.SECURITY_OFFICER,
+        )
+
+
 class IsClinicalStaff(BasePermission):
     """Doctor/nurse/pharmacist/lab technician/clerk -- roles the Scoring Engine
     actually grants patient-record categories to."""
