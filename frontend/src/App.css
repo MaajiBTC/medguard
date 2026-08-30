@@ -905,11 +905,13 @@ button {
   padding: 14px 22px 18px;
   border-radius: 12px;
   background: linear-gradient(160deg, var(--lavender) 0%, var(--off-white) 100%);
+  border: 1px solid var(--plum);
   color: var(--plum-deep);
 }
 
 .stat-card-bottom-alert {
   background: linear-gradient(160deg, #a21caf 0%, #4a044e 100%);
+  border-color: transparent;
 }
 
 .stat-sublist {
