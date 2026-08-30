@@ -169,9 +169,17 @@ class StaffApiTests(APITestCase):
         self.assertEqual(deactivate_resp.status_code, status.HTTP_200_OK)
         self.assertFalse(deactivate_resp.data["account_active"])
 
+        # Same device_id _login() used above (f"device-{staff_id}") -- this test is
+        # about deactivation/reactivation, not the one-device-per-account rule, so
+        # both attempts here reuse the clerk's already-primary device.
         login_resp = self.client.post(
             "/api/access/login/",
-            {"username": "clerkDeactApi", "password": "pw-staff-api-6", "device_id": "device-x", "device_type": "desktop"},
+            {
+                "username": "clerkDeactApi",
+                "password": "pw-staff-api-6",
+                "device_id": "device-STF-S906",
+                "device_type": "desktop",
+            },
             format="json",
         )
         self.assertEqual(login_resp.status_code, status.HTTP_401_UNAUTHORIZED)
@@ -183,7 +191,12 @@ class StaffApiTests(APITestCase):
 
         login_again_resp = self.client.post(
             "/api/access/login/",
-            {"username": "clerkDeactApi", "password": "pw-staff-api-6", "device_id": "device-x", "device_type": "desktop"},
+            {
+                "username": "clerkDeactApi",
+                "password": "pw-staff-api-6",
+                "device_id": "device-STF-S906",
+                "device_type": "desktop",
+            },
             format="json",
         )
         self.assertEqual(login_again_resp.status_code, status.HTTP_201_CREATED)

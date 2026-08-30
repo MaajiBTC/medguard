@@ -1,6 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import { changePassword } from '../api/auth';
+import {
+  approveDevice,
+  changePassword,
+  getPendingDeviceCount,
+  listDevices,
+  rejectDevice,
+  removeDevice,
+} from '../api/auth';
+import { CLINICAL_ROLES } from '../roles';
+
+const PENDING_DEVICE_POLL_MS = 25000;
 
 // Small hand-rolled icon set (no icon library dependency) -- just enough to match
 // the sidebar/search affordances the reference design uses.
@@ -116,7 +126,134 @@ function errorMessage(err) {
   return (err.data && (err.data.detail || JSON.stringify(err.data))) || err.message;
 }
 
+function timeAgo(isoString) {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(isoString).getTime()) / 60000));
+  if (minutes < 1) return 'just now';
+  if (minutes === 1) return '1 minute ago';
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.round(minutes / 60);
+  return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+}
+
 const PASSWORD_INITIAL = { current: '', next: '', confirm: '' };
+
+/** Collapsible "Devices" section on the Profile page (clinical roles only -- see
+ * CLINICAL_ROLES) -- one device per account (added 2026-08-30): pending requests
+ * from unapproved devices can be accepted or declined here, and any non-primary
+ * approved device can be removed (the primary device never gets a Remove button;
+ * the backend enforces that too, see access.views.DeviceRemoveView). Starts
+ * collapsed, per the user, and only fetches once first expanded. */
+function DevicesPanel() {
+  const [devices, setDevices] = useState(null);
+  const [pendingRequests, setPendingRequests] = useState(null);
+  const [error, setError] = useState(null);
+  const [actioningId, setActioningId] = useState(null);
+
+  const fetchDevices = async () => {
+    setError(null);
+    try {
+      const data = await listDevices();
+      setDevices(data.devices);
+      setPendingRequests(data.pending_requests);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const handleToggle = (event) => {
+    if (event.target.open && devices === null) {
+      fetchDevices();
+    }
+  };
+
+  const runAction = async (id, action) => {
+    setActioningId(id);
+    try {
+      await action(id);
+      await fetchDevices();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  return (
+    <details className="detail-block" onToggle={handleToggle}>
+      <summary>Devices</summary>
+
+      {error && <p role="alert" className="dev-error">{error}</p>}
+      {devices === null && !error && <p className="meta-line">Loading…</p>}
+
+      {pendingRequests && pendingRequests.length > 0 && (
+        <div>
+          <h4>Pending requests</h4>
+          {pendingRequests.map((req) => (
+            <div className="card-row" key={req.id}>
+              <div className="card-row-main">
+                <span className="name-line">{req.device_type || 'Unknown device'}</span>
+                <span className="meta-line">
+                  {req.user_agent || 'No device details'} · requested {timeAgo(req.requested_at)}
+                </span>
+              </div>
+              <div className="card-row-actions">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={actioningId === req.id}
+                  onClick={() => runAction(req.id, approveDevice)}
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={actioningId === req.id}
+                  onClick={() => runAction(req.id, rejectDevice)}
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {devices && devices.length > 0 && (
+        <div>
+          <h4>Approved devices</h4>
+          {devices.map((device) => (
+            <div className="card-row" key={device.id}>
+              <div className="card-row-main">
+                <span className="name-line">
+                  {device.device_type || 'Unknown device'}
+                  {device.is_primary && <span className="badge badge-active">Primary</span>}
+                </span>
+                <span className="meta-line">{device.user_agent || 'No device details'}</span>
+              </div>
+              {!device.is_primary && (
+                <div className="card-row-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={actioningId === device.id}
+                    onClick={() => runAction(device.id, removeDevice)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {devices && devices.length === 0 && pendingRequests && pendingRequests.length === 0 && (
+        <p className="meta-line">No devices on this account yet.</p>
+      )}
+    </details>
+  );
+}
 
 /** The page a click on the header's profile icon opens, from any dashboard: the
  * caller's own read-only details plus a change-password form (password only --
@@ -203,6 +340,8 @@ function ProfilePanel({ staff, onBack }) {
           </div>
         </form>
       </div>
+
+      {CLINICAL_ROLES.has(staff.role) && <DevicesPanel />}
     </div>
   );
 }
@@ -220,6 +359,30 @@ function ProfilePanel({ staff, onBack }) {
 function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, title, children }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [hasPendingDevices, setHasPendingDevices] = useState(false);
+
+  // Pending-device badge (added 2026-08-30) -- polled only for clinical roles,
+  // since admin/security_officer are shared accounts that never get Device rows
+  // at all (see Staff.NO_WARD_DUTY_ROLES) and so can never have a pending request.
+  useEffect(() => {
+    if (!staff || !CLINICAL_ROLES.has(staff.role)) return undefined;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const data = await getPendingDeviceCount();
+        if (!cancelled) setHasPendingDevices(data.count > 0);
+      } catch {
+        // Best-effort badge -- a failed poll just leaves the last known state.
+      }
+    };
+    poll();
+    const intervalId = setInterval(poll, PENDING_DEVICE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [staff]);
 
   const selectNav = (key) => {
     onNavChange(key);
@@ -282,6 +445,7 @@ function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, ti
               aria-label="View profile"
             >
               <ProfileIcon />
+              {hasPendingDevices && <span className="profile-badge-dot" aria-hidden="true" />}
             </button>
           )}
         </header>

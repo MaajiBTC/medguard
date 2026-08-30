@@ -8,8 +8,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import ClinicalDashboard from './pages/ClinicalDashboard';
 import LoginPage from './pages/LoginPage';
 import SecurityDashboard from './pages/SecurityDashboard';
-
-const CLINICAL_ROLES = new Set(['doctor', 'nurse', 'pharmacist', 'lab_technician', 'clerk']);
+import { CLINICAL_ROLES } from './roles';
 
 /**
  * The authenticated app shell. useBehavioralCapture is mounted HERE, and only

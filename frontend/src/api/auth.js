@@ -1,7 +1,11 @@
 import { detectDeviceType, getOrCreateDeviceId } from '../capture/contextual/deviceInfo';
 import { request, setToken } from './client';
 
-/** POST /api/access/login/ — authenticates and stores the returned session token.
+/** POST /api/access/login/ — authenticates and, for the normal case, stores the
+ * returned session token. Clinical-role accounts logging in from a device that
+ * isn't their approved one instead get back `{status: 'pending_approval',
+ * poll_token}` with no token — see pollDeviceRequest() below. Only the success
+ * case stores a token; the caller (LoginPage) branches on `data.status`.
  * @param {object} [keystrokeFeatures] - derived, anonymized keystroke-dynamics
  *   features computed client-side from the login form (see keystrokeFeatures.js) —
  *   never raw key identity. */
@@ -21,8 +25,17 @@ async function login(username, password, keystrokeFeatures) {
     },
   });
 
-  setToken(data.token);
+  if (data.token) {
+    setToken(data.token);
+  }
   return data;
+}
+
+/** GET /api/access/device-requests/<pollToken>/poll/ — unauthenticated; the device
+ * waiting on approval has no token yet. Returns {status: 'pending'|'rejected'} or,
+ * once approved, {status: 'approved', token, staff} exactly once. */
+function pollDeviceRequest(pollToken) {
+  return request(`/access/device-requests/${pollToken}/poll/`, { auth: false });
 }
 
 /** POST /api/access/logout/ — ends the current session, then clears the local token
@@ -49,4 +62,44 @@ function changePassword(currentPassword, newPassword) {
   });
 }
 
-export { login, logout, getCurrentSession, changePassword };
+/** GET /api/access/devices/ — the caller's own approved devices + pending requests
+ * (Profile > Devices panel). */
+function listDevices() {
+  return request('/access/devices/');
+}
+
+/** GET /api/access/devices/pending-count/ — cheap poll target for the header's
+ * profile-icon badge. */
+function getPendingDeviceCount() {
+  return request('/access/devices/pending-count/');
+}
+
+/** POST /api/access/device-requests/<id>/approve/ */
+function approveDevice(requestId) {
+  return request(`/access/device-requests/${requestId}/approve/`, { method: 'POST' });
+}
+
+/** POST /api/access/device-requests/<id>/reject/ */
+function rejectDevice(requestId) {
+  return request(`/access/device-requests/${requestId}/reject/`, { method: 'POST' });
+}
+
+/** POST /api/access/devices/<id>/remove/ — 400s if the target is the primary
+ * device (the backend enforces this; the UI just doesn't offer a Remove button
+ * for it in the first place). */
+function removeDevice(deviceId) {
+  return request(`/access/devices/${deviceId}/remove/`, { method: 'POST' });
+}
+
+export {
+  login,
+  pollDeviceRequest,
+  logout,
+  getCurrentSession,
+  changePassword,
+  listDevices,
+  getPendingDeviceCount,
+  approveDevice,
+  rejectDevice,
+  removeDevice,
+};

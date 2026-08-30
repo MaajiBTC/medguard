@@ -8,7 +8,7 @@ from rest_framework.test import APITestCase
 
 from staff.models import Staff
 
-from .models import AccessSession
+from .models import AccessSession, Device, PendingDeviceRequest
 
 
 class AccessSessionModelTests(APITestCase):
@@ -273,9 +273,13 @@ class ChangePasswordViewTests(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
+        # Same device_id as setUp's original login -- this pharmacist's primary
+        # device, not a second device, so it must still log in directly (a
+        # different device_id here would hit the one-device pending-approval path
+        # tested separately in DeviceBindingTests and isn't what this test is about).
         login_resp = self.client.post(
             "/api/access/login/",
-            {"username": "pharmC", "password": "old-pass-123", "device_id": "device-pw-2", "device_type": "desktop"},
+            {"username": "pharmC", "password": "old-pass-123", "device_id": "device-pw-1", "device_type": "desktop"},
             format="json",
         )
         self.assertEqual(login_resp.status_code, status.HTTP_201_CREATED)
@@ -298,16 +302,19 @@ class ChangePasswordViewTests(APITestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
+        # Same device_id as setUp's original login throughout -- this is about
+        # password correctness, not device binding (see the note in
+        # test_wrong_current_password_rejected_and_password_unchanged above).
         old_login_resp = self.client.post(
             "/api/access/login/",
-            {"username": "pharmC", "password": "old-pass-123", "device_id": "device-pw-3", "device_type": "desktop"},
+            {"username": "pharmC", "password": "old-pass-123", "device_id": "device-pw-1", "device_type": "desktop"},
             format="json",
         )
         self.assertEqual(old_login_resp.status_code, status.HTTP_401_UNAUTHORIZED)
 
         new_login_resp = self.client.post(
             "/api/access/login/",
-            {"username": "pharmC", "password": "brand-new-pass-1", "device_id": "device-pw-4", "device_type": "desktop"},
+            {"username": "pharmC", "password": "brand-new-pass-1", "device_id": "device-pw-1", "device_type": "desktop"},
             format="json",
         )
         self.assertEqual(new_login_resp.status_code, status.HTTP_201_CREATED)
@@ -319,3 +326,257 @@ class ChangePasswordViewTests(APITestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class DeviceBindingLoginTests(APITestCase):
+    """One device per (clinical) account, added 2026-08-30. See access/models.py's
+    Device/PendingDeviceRequest docstrings and CLAUDE.md."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="drDevice", password="pw-device-123")
+        self.staff = Staff.objects.create(
+            user=self.user, staff_id="STF-500", full_name="Dr Device", role=Staff.Role.DOCTOR
+        )
+
+    def _login(self, device_id, device_type="desktop", password="pw-device-123"):
+        return self.client.post(
+            "/api/access/login/",
+            {"username": "drDevice", "password": password, "device_id": device_id, "device_type": device_type},
+            format="json",
+        )
+
+    def test_first_clinical_login_becomes_primary_device(self):
+        resp = self._login("device-1")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertIn("token", resp.data)
+
+        device = Device.objects.get(staff=self.staff)
+        self.assertEqual(device.device_id, "device-1")
+        self.assertTrue(device.is_primary)
+
+    def test_same_device_repeated_login_succeeds_normally(self):
+        self._login("device-1")
+        resp = self._login("device-1")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertIn("token", resp.data)
+        self.assertEqual(Device.objects.filter(staff=self.staff).count(), 1)
+
+    def test_different_device_creates_pending_request_not_session(self):
+        self._login("device-1")
+        sessions_before = AccessSession.objects.filter(staff=self.staff).count()
+
+        resp = self._login("device-2")
+        self.assertEqual(resp.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(resp.data["status"], "pending_approval")
+        self.assertIn("poll_token", resp.data)
+
+        self.assertEqual(AccessSession.objects.filter(staff=self.staff).count(), sessions_before)
+        pending = PendingDeviceRequest.objects.get(staff=self.staff, device_id="device-2")
+        self.assertEqual(pending.status, PendingDeviceRequest.Status.PENDING)
+        self.assertEqual(pending.poll_token, resp.data["poll_token"])
+
+    def test_repeated_attempt_from_same_new_device_reuses_pending_request(self):
+        self._login("device-1")
+        first = self._login("device-2")
+        second = self._login("device-2")
+        self.assertEqual(first.data["poll_token"], second.data["poll_token"])
+        self.assertEqual(
+            PendingDeviceRequest.objects.filter(staff=self.staff, device_id="device-2").count(), 1
+        )
+
+    def test_admin_role_unaffected_by_device_binding(self):
+        admin_user = User.objects.create_user(username="adminD", password="pw-admin-123")
+        Staff.objects.create(user=admin_user, staff_id="STF-501", full_name="Admin D", role=Staff.Role.ADMIN)
+
+        for device_id in ("dev-a", "dev-b", "dev-c"):
+            resp = self.client.post(
+                "/api/access/login/",
+                {"username": "adminD", "password": "pw-admin-123", "device_id": device_id, "device_type": "desktop"},
+                format="json",
+            )
+            self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        self.assertEqual(Device.objects.count(), 0)
+        self.assertEqual(PendingDeviceRequest.objects.count(), 0)
+
+    def test_security_officer_role_unaffected_by_device_binding(self):
+        sec_user = User.objects.create_user(username="secD", password="pw-sec-123")
+        Staff.objects.create(user=sec_user, staff_id="STF-502", full_name="Sec D", role=Staff.Role.SECURITY_OFFICER)
+
+        for device_id in ("dev-x", "dev-y"):
+            resp = self.client.post(
+                "/api/access/login/",
+                {"username": "secD", "password": "pw-sec-123", "device_id": device_id, "device_type": "desktop"},
+                format="json",
+            )
+            self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        self.assertEqual(Device.objects.count(), 0)
+
+
+class DeviceRequestPollViewTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="drPoll", password="pw-poll-123")
+        self.staff = Staff.objects.create(
+            user=self.user, staff_id="STF-510", full_name="Dr Poll", role=Staff.Role.NURSE
+        )
+        self.client.post(
+            "/api/access/login/",
+            {"username": "drPoll", "password": "pw-poll-123", "device_id": "primary-dev", "device_type": "desktop"},
+            format="json",
+        )
+        pending_resp = self.client.post(
+            "/api/access/login/",
+            {"username": "drPoll", "password": "pw-poll-123", "device_id": "second-dev", "device_type": "mobile"},
+            format="json",
+        )
+        self.poll_token = pending_resp.data["poll_token"]
+
+    def test_poll_unknown_token_404(self):
+        resp = self.client.get("/api/access/device-requests/not-a-real-token/poll/")
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_poll_pending(self):
+        resp = self.client.get(f"/api/access/device-requests/{self.poll_token}/poll/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["status"], "pending")
+
+    def test_poll_rejected(self):
+        pending = PendingDeviceRequest.objects.get(poll_token=self.poll_token)
+        pending.status = PendingDeviceRequest.Status.REJECTED
+        pending.save(update_fields=["status"])
+
+        resp = self.client.get(f"/api/access/device-requests/{self.poll_token}/poll/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["status"], "rejected")
+
+    def test_poll_approved_returns_token_once_then_clears_it(self):
+        pending = PendingDeviceRequest.objects.get(poll_token=self.poll_token)
+        pending.status = PendingDeviceRequest.Status.APPROVED
+        pending.session_token = "a" * 64
+        pending.save(update_fields=["status", "session_token"])
+
+        first = self.client.get(f"/api/access/device-requests/{self.poll_token}/poll/")
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data["status"], "approved")
+        self.assertEqual(first.data["token"], "a" * 64)
+
+        second = self.client.get(f"/api/access/device-requests/{self.poll_token}/poll/")
+        self.assertEqual(second.data["status"], "approved")
+        self.assertIsNone(second.data["token"])
+
+
+class DeviceManagementViewTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="drManage", password="pw-manage-123")
+        self.staff = Staff.objects.create(
+            user=self.user, staff_id="STF-520", full_name="Dr Manage", role=Staff.Role.DOCTOR
+        )
+        login = self.client.post(
+            "/api/access/login/",
+            {"username": "drManage", "password": "pw-manage-123", "device_id": "primary-dev", "device_type": "desktop"},
+            format="json",
+        )
+        self.token = login.data["token"]
+        self.primary_device = Device.objects.get(staff=self.staff)
+
+        self.client.post(
+            "/api/access/login/",
+            {"username": "drManage", "password": "pw-manage-123", "device_id": "second-dev", "device_type": "mobile"},
+            format="json",
+        )
+        self.pending = PendingDeviceRequest.objects.get(staff=self.staff, device_id="second-dev")
+
+        other_user = User.objects.create_user(username="drOther", password="pw-other-123")
+        self.other_staff = Staff.objects.create(
+            user=other_user, staff_id="STF-521", full_name="Dr Other", role=Staff.Role.DOCTOR
+        )
+
+    def _auth_header(self, token=None):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token or self.token}"}
+
+    def test_device_list_returns_own_devices_and_pending(self):
+        resp = self.client.get("/api/access/devices/", **self._auth_header())
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp.data["devices"]), 1)
+        self.assertTrue(resp.data["devices"][0]["is_primary"])
+        self.assertEqual(len(resp.data["pending_requests"]), 1)
+        self.assertEqual(resp.data["pending_requests"][0]["device_type"], "mobile")
+
+    def test_pending_count(self):
+        resp = self.client.get("/api/access/devices/pending-count/", **self._auth_header())
+        self.assertEqual(resp.data["count"], 1)
+
+    def test_approve_creates_device_and_working_session(self):
+        resp = self.client.post(
+            f"/api/access/device-requests/{self.pending.id}/approve/", **self._auth_header()
+        )
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.pending.refresh_from_db()
+        self.assertEqual(self.pending.status, PendingDeviceRequest.Status.APPROVED)
+        self.assertTrue(Device.objects.filter(staff=self.staff, device_id="second-dev", is_primary=False).exists())
+
+        poll = self.client.get(f"/api/access/device-requests/{self.pending.poll_token}/poll/")
+        self.assertEqual(poll.data["status"], "approved")
+        self.assertIsNotNone(poll.data["token"])
+
+    def test_reject_leaves_no_session(self):
+        resp = self.client.post(
+            f"/api/access/device-requests/{self.pending.id}/reject/", **self._auth_header()
+        )
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        self.pending.refresh_from_db()
+        self.assertEqual(self.pending.status, PendingDeviceRequest.Status.REJECTED)
+        self.assertFalse(Device.objects.filter(staff=self.staff, device_id="second-dev").exists())
+
+    def test_acting_twice_on_resolved_request_404s(self):
+        self.client.post(f"/api/access/device-requests/{self.pending.id}/reject/", **self._auth_header())
+        resp = self.client.post(f"/api/access/device-requests/{self.pending.id}/approve/", **self._auth_header())
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_cannot_approve_another_staffs_pending_request(self):
+        other_login = self.client.post(
+            "/api/access/login/",
+            {"username": "drOther", "password": "pw-other-123", "device_id": "other-primary", "device_type": "desktop"},
+            format="json",
+        )
+        resp = self.client.post(
+            f"/api/access/device-requests/{self.pending.id}/approve/",
+            **self._auth_header(other_login.data["token"]),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_cannot_remove_primary_device(self):
+        resp = self.client.post(
+            f"/api/access/devices/{self.primary_device.id}/remove/", **self._auth_header()
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(Device.objects.filter(pk=self.primary_device.id).exists())
+
+    def test_remove_non_primary_device_ends_its_active_session(self):
+        self.client.post(f"/api/access/device-requests/{self.pending.id}/approve/", **self._auth_header())
+        second_device = Device.objects.get(staff=self.staff, device_id="second-dev")
+        second_session = AccessSession.objects.get(staff=self.staff, device_id="second-dev")
+        self.assertTrue(second_session.is_active)
+
+        resp = self.client.post(f"/api/access/devices/{second_device.id}/remove/", **self._auth_header())
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Device.objects.filter(pk=second_device.id).exists())
+
+        second_session.refresh_from_db()
+        self.assertFalse(second_session.is_active)
+        self.assertIsNotNone(second_session.ended_at)
+
+    def test_cannot_remove_another_staffs_device(self):
+        self.client.post(
+            "/api/access/login/",
+            {"username": "drOther", "password": "pw-other-123", "device_id": "other-primary", "device_type": "desktop"},
+            format="json",
+        )
+        other_device = Device.objects.get(staff=self.other_staff, device_id="other-primary")
+
+        resp = self.client.post(
+            f"/api/access/devices/{other_device.id}/remove/", **self._auth_header()
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)

@@ -141,6 +141,22 @@
   font-size: 14px;
 }
 
+.login-pending-spinner {
+  width: 28px;
+  height: 28px;
+  margin: 4px 0 20px;
+  border: 3px solid #ede4fc;
+  border-top-color: var(--plum, #6528d9);
+  border-radius: 50%;
+  animation: login-pending-spin 0.8s linear infinite;
+}
+
+@keyframes login-pending-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 button {
   font: inherit;
 }
@@ -474,6 +490,7 @@ button {
 }
 
 .profile-button {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -489,6 +506,20 @@ button {
 
 .profile-button:hover {
   background: rgba(255, 255, 255, 0.28);
+}
+
+/* Pending device-request indicator (added 2026-08-30) -- a small dot rather than
+   the pill-shaped .badge/.badge-active/.badge-inactive used elsewhere, since this
+   sits in the corner of a circular icon button, not inline with text. */
+.profile-badge-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e11d48;
+  border: 2px solid var(--plum-deep);
 }
 
 @media (max-width: 720px) {
@@ -781,6 +812,12 @@ button {
 .detail-block summary {
   cursor: pointer;
   font-weight: 600;
+}
+
+.detail-block h4 {
+  margin: 12px 0 8px;
+  color: var(--plum-deep);
+  font-size: 13px;
 }
 
 /* Back link (category detail -> categories) */

@@ -263,6 +263,41 @@ A monitoring screen showing a live feed of `AUDITED_DEVIATION`, `REDUCED_ACCESS`
    `auto-fill`/`minmax` to a fixed `repeat(4, 1fr)` (2 cols under 900px, 1
    under 480px) — the old rule reserved an empty 5th column track on wide
    screens, leaving a gap instead of the 4 real cards filling the row.
+
+   **Amended (2026-08-30, one device per clinical account):** each of the 5
+   clinical roles (`Staff.CLINICAL_ROLES`) is now bound to a single primary
+   device — whichever device first logs into that account. Admin/security
+   officer are exempt (documented shared accounts, see `Staff.NO_WARD_DUTY_ROLES`
+   above) and log in exactly as before regardless of device. New
+   `access.Device` (one row per approved device, `is_primary` on exactly one)
+   and `access.PendingDeviceRequest` (`pending`/`approved`/`rejected`) models,
+   both scoped to `access` — not routed through the Security Ledger, same
+   reasoning as `scoring.DisasterModeEvent` (the Ledger's `event_type` is
+   pinned to 5 fixed values, none of which fit "a device was approved").
+   `access.services.create_session()` extracted from `LoginView` so both a
+   normal login and an approved device grant a session through the same path.
+   A login from an unrecognized device no longer gets a token: it returns
+   `202 {"status": "pending_approval", "poll_token": ...}` instead, and
+   `LoginPage.jsx` shows a live waiting screen that polls
+   `GET /api/access/device-requests/<poll_token>/poll/` (unauthenticated —
+   the waiting device has no token yet) every 5s until the account's primary
+   device owner approves or declines it, capped at ~10 minutes before showing
+   "request expired." New self-service endpoints under `/api/access/devices/`
+   (list own devices + pending requests, pending count for the header badge,
+   approve/reject/remove — all scoped to `request.auth.staff`, the same
+   any-logged-in-staff-member-acting-on-themselves pattern as
+   `ChangePasswordView`). The primary device can never be removed (backend
+   400s it); removing any other device also ends its still-active session.
+   Frontend: `DashboardShell.jsx`'s `ProfilePanel` gained a collapsible
+   "Devices" `<details>` section (clinical roles only) with Approve/Decline
+   rows for pending requests and a Remove button on non-primary approved
+   devices; the header's profile icon gets a small red dot
+   (`.profile-badge-dot`) whenever a pending request exists, polled every 25s.
+   `device_id` itself is unchanged — still the client-generated UUID persisted
+   in `localStorage` by `deviceInfo.js`'s `getOrCreateDeviceId()` (added in
+   step 1), reused here rather than adding new fingerprinting; it remains a
+   self-reported value with no cryptographic binding, consistent with this
+   project's existing trust model for manually-entered fields.
 5. ✅ **Done (2026-08-28).** Emergency Override ("Break the Glass" / BTG in the UI — see the Emergency Override section above for naming and scope decisions). New `POST /api/scoring/emergency-override/` (`scoring.views.EmergencyOverrideView`, `IsClinicalStaff`-gated): takes `{patient_id, reason}` (reason min 10 chars), grants the caller's full role ceiling (`ROLE_CEILINGS[staff.role]`) regardless of the hard gate/score band/Nurse rule, writes an `AccessDecision` row (`decision_type=EMERGENCY_OVERRIDE`; `gate_passed`/`score`/`score_band` now nullable on that model — an override never ran the scoring pipeline, so "not applicable" is more honest than a sentinel score) and an `EMERGENCY_OVERRIDE` Ledger entry (`reason` in `details`). Does not check `contextual.target_patient_id` the way `DecideView` does (must still work if capture/contextual state is missing or itself the reason normal access failed) and does not reinforce the behavioral baseline (an override is by definition an abnormal session). `scoring.views.PatientRecordView` needed no changes — it already treats any non-`ACCESS_DENIED` decision type the same way. Frontend: `ClinicalDashboard.jsx` gained a "Break the Glass" button in the patient-view section (always visible once a patient is selected, not gated behind a denial) that reveals an inline reason textarea before submitting — no native `confirm()` dialog. `SecurityDashboard.jsx` needed no changes (its event-type filter/severity coloring/drill-down already handled `EMERGENCY_OVERRIDE` rows from step 4). 105/105 backend tests passing (8 new); verified end-to-end via direct API calls against the real dev database using the real Admin and doctor accounts (Chrome browser extension wasn't connected for a live UI click-through) — confirmed the full round trip (override → granted all 13 categories → records endpoint returns content → a correctly hash-chained `EMERGENCY_OVERRIDE` Ledger entry with the reason). The temporary QA patient and sessions were deleted afterward; the Ledger entry itself was left in place since it's append-only by design.
 
    **Amended 2026-08-29** (after a live demo surfaced a real gap): added the Doctor rule (see Role → category access above) and BTG's own availability gate (see Emergency Override above). `AccessDecision.nurse_path` renamed to `role_rule_path` (now used by both roles' rule paths; migration `scoring/0003_rename_nurse_path_to_role_rule_path.py`). New `captures/services.py` (`compute_patient_assignment_status`) extracted from `captures.views.TargetPatientView` so both the normal capture flow and BTG's fresh gate check share one implementation instead of two.
