@@ -244,6 +244,25 @@ A monitoring screen showing a live feed of `AUDITED_DEVIATION`, `REDUCED_ACCESS`
    `IsAuthenticated` — any logged-in staff member changes their own password, no
    role restriction) verifies the current password via `user.check_password()`
    before calling `set_password()`. 143/143 backend tests passing (4 new).
+
+   **Amended (2026-08-30, Staff-browsing scope + Overview breakdowns):** the
+   Admin dashboard's Staff page (category tiles and global search alike) is now
+   scoped to the 5 clinical roles only (`STAFF_BROWSE_ROLES` in
+   `AdminDashboard.jsx`) — an admin manages only its own account (via the
+   Profile page above), and shouldn't browse/manage other admin or
+   security_officer accounts from here either, even though it can still
+   *create* a security_officer account (`ADMIN_CREATABLE_ROLES` unchanged).
+   `OverviewPanel`'s four stat cards each gained a second layer of real
+   sub-counts instead of just one number: Total Patients breaks down by ward
+   (reusing `by_ward` from the summary endpoint), Total Staff shows on-duty/
+   on-call, Staff On Duty breaks down by role, Disaster Mode shows its last
+   event (who, when — already available from `DisasterModeView`). New
+   `on_call` total and `on_duty_by_role` (scoped to `Staff.CLINICAL_ROLES`,
+   same reasoning as the Staff-browsing scoping above) added to
+   `GET /api/staff/summary/`. `.overview-grid` also switched from
+   `auto-fill`/`minmax` to a fixed `repeat(4, 1fr)` (2 cols under 900px, 1
+   under 480px) — the old rule reserved an empty 5th column track on wide
+   screens, leaving a gap instead of the 4 real cards filling the row.
 5. ✅ **Done (2026-08-28).** Emergency Override ("Break the Glass" / BTG in the UI — see the Emergency Override section above for naming and scope decisions). New `POST /api/scoring/emergency-override/` (`scoring.views.EmergencyOverrideView`, `IsClinicalStaff`-gated): takes `{patient_id, reason}` (reason min 10 chars), grants the caller's full role ceiling (`ROLE_CEILINGS[staff.role]`) regardless of the hard gate/score band/Nurse rule, writes an `AccessDecision` row (`decision_type=EMERGENCY_OVERRIDE`; `gate_passed`/`score`/`score_band` now nullable on that model — an override never ran the scoring pipeline, so "not applicable" is more honest than a sentinel score) and an `EMERGENCY_OVERRIDE` Ledger entry (`reason` in `details`). Does not check `contextual.target_patient_id` the way `DecideView` does (must still work if capture/contextual state is missing or itself the reason normal access failed) and does not reinforce the behavioral baseline (an override is by definition an abnormal session). `scoring.views.PatientRecordView` needed no changes — it already treats any non-`ACCESS_DENIED` decision type the same way. Frontend: `ClinicalDashboard.jsx` gained a "Break the Glass" button in the patient-view section (always visible once a patient is selected, not gated behind a denial) that reveals an inline reason textarea before submitting — no native `confirm()` dialog. `SecurityDashboard.jsx` needed no changes (its event-type filter/severity coloring/drill-down already handled `EMERGENCY_OVERRIDE` rows from step 4). 105/105 backend tests passing (8 new); verified end-to-end via direct API calls against the real dev database using the real Admin and doctor accounts (Chrome browser extension wasn't connected for a live UI click-through) — confirmed the full round trip (override → granted all 13 categories → records endpoint returns content → a correctly hash-chained `EMERGENCY_OVERRIDE` Ledger entry with the reason). The temporary QA patient and sessions were deleted afterward; the Ledger entry itself was left in place since it's append-only by design.
 
    **Amended 2026-08-29** (after a live demo surfaced a real gap): added the Doctor rule (see Role → category access above) and BTG's own availability gate (see Emergency Override above). `AccessDecision.nurse_path` renamed to `role_rule_path` (now used by both roles' rule paths; migration `scoring/0003_rename_nurse_path_to_role_rule_path.py`). New `captures/services.py` (`compute_patient_assignment_status`) extracted from `captures.views.TargetPatientView` so both the normal capture flow and BTG's fresh gate check share one implementation instead of two.

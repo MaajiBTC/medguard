@@ -31,7 +31,10 @@ class StaffSearchView(APIView):
 
 class StaffSummaryView(APIView):
     """GET /api/staff/summary/ -- real counts for the Admin dashboard's overview
-    page and role-category tiles (not the 50-row search cap)."""
+    page and role-category tiles (not the 50-row search cap). on_duty_by_role is
+    scoped to Staff.CLINICAL_ROLES -- admin/security_officer are
+    NO_WARD_DUTY_ROLES and excluded from Staff browsing entirely, so an on-duty
+    breakdown for them wouldn't mean anything here."""
 
     permission_classes = [IsAdmin]
 
@@ -39,10 +42,18 @@ class StaffSummaryView(APIView):
         by_role = {role: 0 for role, _ in Staff.Role.choices}
         for row in Staff.objects.values("role").annotate(count=Count("id")):
             by_role[row["role"]] = row["count"]
+
+        on_duty_by_role = {role.value: 0 for role in Staff.CLINICAL_ROLES}
+        on_duty_rows = Staff.objects.filter(on_duty=True, role__in=Staff.CLINICAL_ROLES)
+        for row in on_duty_rows.values("role").annotate(count=Count("id")):
+            on_duty_by_role[row["role"]] = row["count"]
+
         return Response({
             "total": Staff.objects.count(),
             "on_duty": Staff.objects.filter(on_duty=True).count(),
+            "on_call": Staff.objects.filter(on_call=True).count(),
             "by_role": by_role,
+            "on_duty_by_role": on_duty_by_role,
         })
 
 

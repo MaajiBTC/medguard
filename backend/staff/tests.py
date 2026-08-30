@@ -229,15 +229,23 @@ class StaffApiTests(APITestCase):
 
     def test_summary_counts(self):
         _admin, token = self._login("adminApi8", "pw-staff-api-15", "STF-S916", Staff.Role.ADMIN)
-        self._login("doctorSummaryApi1", "pw-staff-api-16", "STF-S917", Staff.Role.DOCTOR, on_duty=True)
+        doctor1, _t = self._login("doctorSummaryApi1", "pw-staff-api-16", "STF-S917", Staff.Role.DOCTOR, on_duty=True)
         self._login("doctorSummaryApi2", "pw-staff-api-17", "STF-S918", Staff.Role.DOCTOR, on_duty=False)
+        self._login("nurseSummaryApi1", "pw-staff-api-19", "STF-S920", Staff.Role.NURSE, on_duty=True)
+        doctor1.on_call = True
+        doctor1.save(update_fields=["on_call"])
 
         resp = self.client.get("/api/staff/summary/", **self._auth(token))
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(resp.data["total"], 3)  # admin + 2 doctors
-        self.assertEqual(resp.data["on_duty"], 2)  # admin logged in with on_duty=True default + 1 doctor
+        self.assertEqual(resp.data["total"], 4)  # admin + 2 doctors + 1 nurse
+        self.assertEqual(resp.data["on_duty"], 3)  # admin (default True) + doctor1 + nurse1
+        self.assertEqual(resp.data["on_call"], 1)  # doctor1
         self.assertEqual(resp.data["by_role"]["doctor"], 2)
-        self.assertEqual(resp.data["by_role"]["nurse"], 0)
+        self.assertEqual(resp.data["by_role"]["nurse"], 1)
+        self.assertEqual(resp.data["on_duty_by_role"]["doctor"], 1)
+        self.assertEqual(resp.data["on_duty_by_role"]["nurse"], 1)
+        self.assertEqual(resp.data["on_duty_by_role"]["pharmacist"], 0)
+        self.assertNotIn("admin", resp.data["on_duty_by_role"])
 
     def test_non_admin_cannot_read_summary(self):
         _staff, token = self._login("docSummaryDeniedApi", "pw-staff-api-18", "STF-S919", Staff.Role.DOCTOR)

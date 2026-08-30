@@ -80,18 +80,70 @@ function OverviewPanel() {
       <div className="stat-card">
         <span className="stat-label">Total Patients</span>
         <span className="stat-value">{patientSummary.total}</span>
+        <div className="stat-sublist">
+          {WARDS.map((w) => (
+            <div className="stat-subrow" key={w.value}>
+              <span>{w.label}</span>
+              <span>{patientSummary.by_ward[w.value] ?? 0}</span>
+            </div>
+          ))}
+          <div className="stat-subrow">
+            <span>Unassigned</span>
+            <span>{patientSummary.by_ward.unassigned ?? 0}</span>
+          </div>
+        </div>
       </div>
+
       <div className="stat-card">
         <span className="stat-label">Total Staff</span>
         <span className="stat-value">{staffSummary.total}</span>
+        <div className="stat-sublist">
+          <div className="stat-subrow">
+            <span>On duty</span>
+            <span>{staffSummary.on_duty}</span>
+          </div>
+          <div className="stat-subrow">
+            <span>On call</span>
+            <span>{staffSummary.on_call}</span>
+          </div>
+        </div>
       </div>
+
       <div className="stat-card">
         <span className="stat-label">Staff On Duty</span>
         <span className="stat-value">{staffSummary.on_duty}</span>
+        <div className="stat-sublist">
+          {Object.entries(staffSummary.on_duty_by_role).map(([role, count]) => (
+            <div className="stat-subrow" key={role}>
+              <span>{formatRole(role)}</span>
+              <span>{count}</span>
+            </div>
+          ))}
+        </div>
       </div>
+
       <div className={`stat-card${disasterStatus.active ? ' stat-card-alert' : ''}`}>
         <span className="stat-label">Disaster Mode</span>
         <span className="stat-value">{disasterStatus.active ? 'ACTIVE' : 'Inactive'}</span>
+        <div className="stat-sublist">
+          {disasterStatus.last_event ? (
+            <>
+              <div className="stat-subrow">
+                <span>Last {disasterStatus.last_event.event_type}</span>
+                <span>{new Date(disasterStatus.last_event.occurred_at).toLocaleDateString()}</span>
+              </div>
+              <div className="stat-subrow">
+                <span>By</span>
+                <span>{disasterStatus.last_event.staff_full_name}</span>
+              </div>
+            </>
+          ) : (
+            <div className="stat-subrow">
+              <span>No activity yet</span>
+              <span></span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
