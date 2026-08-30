@@ -422,7 +422,7 @@ button {
   align-items: center;
   gap: 20px;
   padding: 12px 32px;
-  background: var(--plum-deep);
+  background: var(--plum);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -814,9 +814,8 @@ button {
   gap: 14px;
 }
 
-/* All three brand colors in one gradient (not the header's --plum-deep) --
-   plum at the top where the label/count sit, fading through lavender to
-   off-white toward the bottom. */
+/* No sub-breakdown here (just a label + count), so it stays a single solid
+   card -- lavender, same as the two-card stat groups' top/headline card. */
 .category-tile {
   display: flex;
   flex-direction: column;
@@ -825,73 +824,100 @@ button {
   padding: 20px;
   border: none;
   border-radius: 12px;
-  background: linear-gradient(180deg, var(--plum) 0%, var(--lavender) 85%, var(--off-white) 100%);
-  color: var(--off-white);
+  background: var(--lavender);
+  color: var(--plum-deep);
   cursor: pointer;
   text-align: left;
 }
 
 .category-tile:hover {
-  filter: brightness(1.08);
+  filter: brightness(0.97);
 }
 
 .category-tile-label {
   font-weight: 600;
-  color: var(--off-white);
+  color: var(--plum-deep);
 }
 
 .category-tile-count {
   font-size: 28px;
   font-weight: 700;
-  color: var(--off-white);
+  color: var(--plum-deep);
 }
 
-/* Overview stat cards -- same auto-fit reasoning as .category-grid above. */
+/* Overview stat cards -- same auto-fit reasoning as .category-grid above.
+   No align-items override -- default `stretch` makes every .stat-card-group
+   in a row the same overall height, which .stat-card-bottom below then
+   absorbs (flex: 1) so all the breakdown cards in a row line up, however
+   many rows of sub-data each one has. */
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 14px;
 }
 
-/* All three brand colors in one gradient (not the header's --plum-deep):
-   plum behind the label/value at the top, fading through lavender to
-   off-white behind the sub-breakdown rows at the bottom. Text color follows
-   the gradient -- off-white over the dark plum top, plum-deep over the light
-   off-white bottom -- rather than one fixed color that would lose contrast
-   at one end. */
-.stat-card {
+/* Each stat is two separate stacked cards with a gap between them, not one
+   tall card -- a solid-lavender "headline" card (label + main number) sitting
+   above an off-white, plum-bordered "breakdown" card (the sub-rows). */
+.stat-card-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 22px;
-  border: none;
+  gap: 10px;
+}
+
+.stat-card-top {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 20px 22px;
   border-radius: 12px;
-  background: linear-gradient(180deg, var(--plum) 0%, var(--lavender) 45%, var(--off-white) 100%);
-  color: var(--off-white);
+  background: var(--lavender);
+  color: var(--plum-deep);
 }
 
 .stat-label {
   font-size: 13px;
-  color: rgba(250, 247, 255, 0.85);
+  color: rgba(42, 15, 92, 0.7);
 }
 
 .stat-value {
   font-size: 32px;
   font-weight: 700;
-  color: var(--off-white);
+  color: var(--plum-deep);
 }
 
-.stat-card-alert {
-  background: linear-gradient(135deg, #a21caf 0%, #e879f9 100%);
+.stat-card-top-alert {
+  background: #e879f9;
+  color: #4a044e;
+}
+
+.stat-card-top-alert .stat-label {
+  color: rgba(74, 4, 78, 0.75);
+}
+
+.stat-card-top-alert .stat-value {
+  color: #4a044e;
+}
+
+.stat-card-bottom {
+  flex: 1 1 auto;
+  padding: 14px 22px 18px;
+  border-radius: 12px;
+  background: var(--off-white);
+  border: 1px solid var(--plum);
+  color: var(--plum-deep);
+}
+
+.stat-card-bottom-alert {
+  background: linear-gradient(160deg, #a21caf 0%, #4a044e 100%);
+  border-color: transparent;
 }
 
 .stat-sublist {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 8px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(101, 40, 217, 0.2);
+  gap: 6px;
 }
 
 .stat-subrow {
@@ -908,11 +934,7 @@ button {
   color: var(--plum-deep);
 }
 
-.stat-card-alert .stat-sublist {
-  border-top-color: rgba(255, 255, 255, 0.3);
-}
-
-.stat-card-alert .stat-subrow,
-.stat-card-alert .stat-subrow span:last-child {
+.stat-card-bottom-alert .stat-subrow,
+.stat-card-bottom-alert .stat-subrow span:last-child {
   color: var(--off-white);
 }
