@@ -803,9 +803,14 @@ button {
 
 /* Category tiles (Staff by role, Patients by ward) */
 
+/* auto-fit, not auto-fill: empty tracks collapse to zero width and the 1fr
+   cards stretch to take the freed space, so a row always fills edge-to-edge
+   regardless of how many cards it holds (3, 4, 5, whatever) -- auto-fill would
+   reserve an extra empty column once the container is wide enough for one
+   more min-width card than actually exist, leaving a gap instead. */
 .category-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px;
 }
 
@@ -815,50 +820,34 @@ button {
   align-items: flex-start;
   gap: 8px;
   padding: 20px;
-  border: 1px solid #ece5fa;
+  border: none;
   border-radius: 12px;
-  background: #fff;
+  background: linear-gradient(135deg, var(--plum) 0%, var(--lavender) 100%);
+  color: var(--off-white);
   cursor: pointer;
   text-align: left;
 }
 
 .category-tile:hover {
-  border-color: var(--plum);
-  background: #f8f5fd;
+  filter: brightness(1.08);
 }
 
 .category-tile-label {
   font-weight: 600;
-  color: var(--plum-deep);
+  color: var(--off-white);
 }
 
 .category-tile-count {
   font-size: 28px;
   font-weight: 700;
-  color: var(--plum);
+  color: var(--off-white);
 }
 
-/* Overview stat cards */
-
-/* Exactly 4 equal columns spanning the full row -- auto-fill left a gap on the
-   right on wide screens (it reserves an extra empty track once the container
-   is wide enough for a 5th 200px card that doesn't exist). */
+/* Overview stat cards -- same auto-fit reasoning as .category-grid above. */
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 14px;
-}
-
-@media (max-width: 900px) {
-  .overview-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 480px) {
-  .overview-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .stat-card {
@@ -866,25 +855,25 @@ button {
   flex-direction: column;
   gap: 6px;
   padding: 22px;
-  border: 1px solid #ece5fa;
+  border: none;
   border-radius: 12px;
-  background: #fff;
+  background: linear-gradient(135deg, var(--plum) 0%, var(--lavender) 100%);
+  color: var(--off-white);
 }
 
 .stat-label {
   font-size: 13px;
-  color: #7a6f96;
+  color: rgba(250, 247, 255, 0.85);
 }
 
 .stat-value {
   font-size: 32px;
   font-weight: 700;
-  color: var(--plum-deep);
+  color: var(--off-white);
 }
 
 .stat-card-alert {
-  border-color: #e879f9;
-  background: #fdf4ff;
+  background: linear-gradient(135deg, #a21caf 0%, #e879f9 100%);
 }
 
 .stat-sublist {
@@ -893,7 +882,7 @@ button {
   gap: 4px;
   margin-top: 8px;
   padding-top: 10px;
-  border-top: 1px solid #ece5fa;
+  border-top: 1px solid rgba(250, 247, 255, 0.3);
 }
 
 .stat-subrow {
@@ -902,14 +891,10 @@ button {
   justify-content: space-between;
   gap: 8px;
   font-size: 12px;
-  color: #7a6f96;
+  color: rgba(250, 247, 255, 0.75);
 }
 
 .stat-subrow span:last-child {
   font-weight: 600;
-  color: var(--plum-deep);
-}
-
-.stat-card-alert .stat-value {
-  color: #a21caf;
+  color: var(--off-white);
 }
