@@ -161,6 +161,26 @@ Always available regardless of score or role match. One action grants immediate 
 
 A monitoring screen showing a live feed of `AUDITED_DEVIATION`, `REDUCED_ACCESS`, `ACCESS_DENIED`, and `EMERGENCY_OVERRIDE` events, filterable by staff member/patient/date, with drill-down into which specific factor(s) caused a deviation.
 
+**Amended (2026-08-30, sidebar restructure):** the Ledger live feed's old
+inline staff-ID/patient-hospital-number text filters moved out into two new
+sidebar destinations, **Staff** and **Patients** (`SecurityDashboard.jsx`'s
+`navItems` becomes Ledger / Staff / Patients / Admins). Both are search-only,
+not a role/ward category-tile breakdown like the Admin dashboard's equivalent
+pages — search, pick a result, see their "activity": the same
+`GET /api/ledger/entries/` feed the old filters produced, filtered to that one
+staff member or patient and rendered through a shared `LedgerEntriesFeed`
+component (also reused by the Ledger page itself). A patient's "activity" is
+really the staff-access events that targeted them, since patients don't log
+events of their own — kept as its own page anyway, per the user.
+`staff.views.StaffSearchView` widened from `IsAdmin` to
+`IsAdminOrSecurityOfficer` so the new Staff page can reuse it directly.
+`LedgerVisualization.jsx`'s 3D panel also moved from placing markers by their
+index in the entries array to a real-time-based spiral/helix — a marker's
+angle, radius, and height are all now driven by how long ago
+`entry.occurred_at` actually was (normalized against the oldest entry
+currently on screen), so recency reads as physical distance along the spiral
+instead of just color brightness.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.
@@ -298,6 +318,28 @@ A monitoring screen showing a live feed of `AUDITED_DEVIATION`, `REDUCED_ACCESS`
    step 1), reused here rather than adding new fingerprinting; it remains a
    self-reported value with no cryptographic binding, consistent with this
    project's existing trust model for manually-entered fields.
+
+   **Amended (2026-08-30, real staff delete):** the Admin dashboard's Staff
+   panel gained a genuine, permanent **Delete account**
+   (`staff.views.StaffDeleteView`, `POST /api/staff/<id>/delete/`,
+   `IsAdmin`-gated) next to the existing Deactivate/Reactivate toggle — a
+   deliberate, explicit exception to this file's usual "deactivate, never a
+   hard delete" rule (see step 4's original entry above, which still describes
+   Deactivate/Reactivate accurately; that path stays available for the
+   reversible case). Rejects admin/security_officer targets with 400
+   (`Staff.NO_WARD_DUTY_ROLES`) as defense in depth, even though the Staff
+   panel this button lives on already can't reach those rows. Deletes
+   `staff.user` (the linked `auth.User`) rather than the `Staff` row directly
+   — `Staff.user` is `on_delete=CASCADE`, so removing the `User` cascades to
+   the `Staff` row and everything FK'd to it (`AccessSession`, `Device`,
+   `PendingDeviceRequest`, patient assignments, behavioral baselines) through
+   existing relationships, no new FK behavior needed. `ledger.LedgerEntry`
+   rows are untouched — that app denormalizes staff identity (a plain
+   `staff_id` `CharField`, not a foreign key) rather than referencing `Staff`,
+   so a deleted staff member's historical audit trail survives intact.
+   Frontend reveals an inline warning + a second "Yes, permanently delete"
+   button before acting (same pattern as BTG's reason textarea — no native
+   `confirm()` dialog).
 5. ✅ **Done (2026-08-28).** Emergency Override ("Break the Glass" / BTG in the UI — see the Emergency Override section above for naming and scope decisions). New `POST /api/scoring/emergency-override/` (`scoring.views.EmergencyOverrideView`, `IsClinicalStaff`-gated): takes `{patient_id, reason}` (reason min 10 chars), grants the caller's full role ceiling (`ROLE_CEILINGS[staff.role]`) regardless of the hard gate/score band/Nurse rule, writes an `AccessDecision` row (`decision_type=EMERGENCY_OVERRIDE`; `gate_passed`/`score`/`score_band` now nullable on that model — an override never ran the scoring pipeline, so "not applicable" is more honest than a sentinel score) and an `EMERGENCY_OVERRIDE` Ledger entry (`reason` in `details`). Does not check `contextual.target_patient_id` the way `DecideView` does (must still work if capture/contextual state is missing or itself the reason normal access failed) and does not reinforce the behavioral baseline (an override is by definition an abnormal session). `scoring.views.PatientRecordView` needed no changes — it already treats any non-`ACCESS_DENIED` decision type the same way. Frontend: `ClinicalDashboard.jsx` gained a "Break the Glass" button in the patient-view section (always visible once a patient is selected, not gated behind a denial) that reveals an inline reason textarea before submitting — no native `confirm()` dialog. `SecurityDashboard.jsx` needed no changes (its event-type filter/severity coloring/drill-down already handled `EMERGENCY_OVERRIDE` rows from step 4). 105/105 backend tests passing (8 new); verified end-to-end via direct API calls against the real dev database using the real Admin and doctor accounts (Chrome browser extension wasn't connected for a live UI click-through) — confirmed the full round trip (override → granted all 13 categories → records endpoint returns content → a correctly hash-chained `EMERGENCY_OVERRIDE` Ledger entry with the reason). The temporary QA patient and sessions were deleted afterward; the Ledger entry itself was left in place since it's append-only by design.
 
    **Amended 2026-08-29** (after a live demo surfaced a real gap): added the Doctor rule (see Role → category access above) and BTG's own availability gate (see Emergency Override above). `AccessDecision.nurse_path` renamed to `role_rule_path` (now used by both roles' rule paths; migration `scoring/0003_rename_nurse_path_to_role_rule_path.py`). New `captures/services.py` (`compute_patient_assignment_status`) extracted from `captures.views.TargetPatientView` so both the normal capture flow and BTG's fresh gate check share one implementation instead of two.

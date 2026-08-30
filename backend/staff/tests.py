@@ -362,3 +362,96 @@ class StaffApiTests(APITestCase):
             **self._auth(admin_token),
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_security_officer_can_search_staff(self):
+        """Added 2026-08-30: StaffSearchView widened to IsAdminOrSecurityOfficer
+        so the Security dashboard's Staff activity page can reuse it."""
+        _officer, officer_token = self._login(
+            "secOfficerApi4", "pw-staff-api-26", "STF-S932", Staff.Role.SECURITY_OFFICER
+        )
+        self._login("docStaffApi2", "pw-staff-api-27", "STF-S933", Staff.Role.DOCTOR)
+
+        resp = self.client.get("/api/staff/?q=STF-S933", **self._auth(officer_token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp.data), 1)
+        self.assertEqual(resp.data[0]["staff_id"], "STF-S933")
+
+    def test_clerk_still_cannot_search_staff(self):
+        _clerk, token = self._login("clerkSearchApi", "pw-staff-api-28", "STF-S934", Staff.Role.CLERK)
+        resp = self.client.get("/api/staff/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class StaffDeleteViewTests(APITestCase):
+    """POST /api/staff/<id>/delete/ -- a real, permanent delete (added
+    2026-08-30), distinct from StaffDeactivateView's reversible block."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role, ward="", on_duty=True):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(
+            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward, on_duty=on_duty
+        )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_non_admin_cannot_delete_staff(self):
+        _doc, doc_token = self._login("docDelApi1", "pw-del-1", "STF-D900", Staff.Role.DOCTOR)
+        target, _t = self._login("nurseDelApi1", "pw-del-2", "STF-D901", Staff.Role.NURSE)
+        resp = self.client.post(f"/api/staff/{target.id}/delete/", **self._auth(doc_token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(Staff.objects.filter(pk=target.id).exists())
+
+    def test_admin_can_permanently_delete_clinical_staff(self):
+        _admin, admin_token = self._login("adminDelApi1", "pw-del-3", "STF-D902", Staff.Role.ADMIN)
+        target, target_token = self._login("clerkDelApi1", "pw-del-4", "STF-D903", Staff.Role.CLERK)
+        target_user_id = target.user_id
+
+        resp = self.client.post(f"/api/staff/{target.id}/delete/", **self._auth(admin_token))
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertFalse(Staff.objects.filter(pk=target.id).exists())
+        self.assertFalse(User.objects.filter(pk=target_user_id).exists())
+        # The deleted staff member's own session token is gone with them.
+        resp2 = self.client.get("/api/access/session/current/", **self._auth(target_token))
+        self.assertEqual(resp2.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_delete_rejected_for_admin_and_security_officer_targets(self):
+        _admin, admin_token = self._login("adminDelApi2", "pw-del-5", "STF-D904", Staff.Role.ADMIN)
+        other_admin, _t = self._login("adminDelApi3", "pw-del-6", "STF-D905", Staff.Role.ADMIN)
+        officer, _t2 = self._login("secDelApi1", "pw-del-7", "STF-D906", Staff.Role.SECURITY_OFFICER)
+
+        resp1 = self.client.post(f"/api/staff/{other_admin.id}/delete/", **self._auth(admin_token))
+        self.assertEqual(resp1.status_code, status.HTTP_400_BAD_REQUEST)
+        resp2 = self.client.post(f"/api/staff/{officer.id}/delete/", **self._auth(admin_token))
+        self.assertEqual(resp2.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(Staff.objects.filter(pk=other_admin.id).exists())
+        self.assertTrue(Staff.objects.filter(pk=officer.id).exists())
+
+    def test_delete_does_not_touch_ledger_history(self):
+        from ledger.models import LedgerEntry
+        from ledger.services import record_event
+
+        _admin, admin_token = self._login("adminDelApi4", "pw-del-8", "STF-D907", Staff.Role.ADMIN)
+        target, _t = self._login("nurseDelApi2", "pw-del-9", "STF-D908", Staff.Role.NURSE)
+
+        record_event(
+            event_type=LedgerEntry.EventType.STANDARD_ACCESS,
+            staff=target,
+            details={"note": "pre-deletion entry"},
+        )
+        self.assertEqual(LedgerEntry.objects.filter(staff_id=target.staff_id).count(), 1)
+
+        resp = self.client.post(f"/api/staff/{target.id}/delete/", **self._auth(admin_token))
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertEqual(LedgerEntry.objects.filter(staff_id=target.staff_id).count(), 1)

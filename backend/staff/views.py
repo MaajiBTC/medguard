@@ -14,9 +14,14 @@ from .serializers import StaffCreateSerializer, StaffDutyWardUpdateSerializer, S
 class StaffSearchView(APIView):
     """GET /api/staff/?q=...&role=... -- q matches staff_id or full_name; role is an
     exact match against Staff.Role, used by the Admin dashboard's role-category
-    drill-down so results aren't limited by the 50-row search cap below."""
+    drill-down so results aren't limited by the 50-row search cap below.
 
-    permission_classes = [IsAdmin]
+    Opened to IsAdminOrSecurityOfficer (added 2026-08-30) -- the Security
+    dashboard's Staff activity page (search a staff member, then view their
+    Ledger history) reuses this same endpoint rather than duplicating search
+    logic; it never needed Admin-only management data, just lookup."""
+
+    permission_classes = [IsAdminOrSecurityOfficer]
 
     def get(self, request):
         q = request.query_params.get("q", "").strip()
@@ -160,3 +165,34 @@ class StaffReactivateView(APIView):
         staff.user.is_active = True
         staff.user.save(update_fields=["is_active"])
         return Response(StaffSummarySerializer(staff).data)
+
+
+class StaffDeleteView(APIView):
+    """POST /api/staff/<id>/delete/ -- a real, permanent delete (added
+    2026-08-30, per the user, a deliberate exception to this project's usual
+    "deactivate, never delete" rule -- see StaffDeactivateView above, which
+    stays available for the reversible case). 400s for admin/security_officer
+    targets -- defense in depth, since the Admin dashboard's Staff panel this
+    button lives on already can't reach those rows, but the endpoint itself
+    shouldn't rely on that.
+
+    Deletes staff.user (auth.User) rather than the Staff row directly --
+    Staff.user is a OneToOneField(..., on_delete=CASCADE), so removing the
+    User cascades to the Staff row and everything else that FKs to it
+    (AccessSession, Device, PendingDeviceRequest, patient assignments,
+    behavioral baselines) through their existing cascade relationships.
+    ledger.LedgerEntry rows are untouched -- that app denormalizes staff
+    identity instead of holding a foreign key (see ledger/models.py), so a
+    deleted staff member's historical audit trail survives intact."""
+
+    permission_classes = [IsAdmin]
+
+    def post(self, request, staff_id):
+        staff = get_object_or_404(Staff, pk=staff_id)
+        if staff.role in Staff.NO_WARD_DUTY_ROLES:
+            return Response(
+                {"detail": "Admin/security officer accounts can't be deleted from here."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        staff.user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

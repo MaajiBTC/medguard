@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 
 import { getLedgerEntries } from '../api/ledger';
-import { createStaff } from '../api/staff';
+import { searchPatients } from '../api/patients';
+import { createStaff, searchStaff } from '../api/staff';
 import Modal from '../components/Modal';
-import DashboardShell, { LedgerIcon, StaffIcon } from './DashboardShell';
+import DashboardShell, { LedgerIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
 import LedgerVisualization from './LedgerVisualization';
 
 const POLL_INTERVAL_MS = 5000;
@@ -21,30 +22,77 @@ function errorMessage(err) {
   return (err.data && (err.data.detail || JSON.stringify(err.data))) || err.message;
 }
 
+function formatRole(role) {
+  return role.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+
+/** The entries table + row drilldown, shared by the live Ledger feed and the
+ * Staff/Patient activity pages below -- same markup, just fed a different
+ * (already-filtered) `entries` array. */
+function LedgerEntriesFeed({ entries, error }) {
+  const [expandedSequence, setExpandedSequence] = useState(null);
+
+  return (
+    <>
+      {error && <p role="alert" className="dev-error">{error}</p>}
+
+      <table className="ledger-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>When</th>
+            <th>Event</th>
+            <th>Staff</th>
+            <th>Patient</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry) => (
+            <Fragment key={entry.sequence}>
+              <tr
+                className={`ledger-row severity-${entry.event_type}`}
+                onClick={() => setExpandedSequence(expandedSequence === entry.sequence ? null : entry.sequence)}
+              >
+                <td>{entry.sequence}</td>
+                <td>{new Date(entry.occurred_at).toLocaleString()}</td>
+                <td>{entry.event_type}</td>
+                <td>{entry.staff_full_name} ({entry.staff_id})</td>
+                <td>{entry.patient_hospital_number || '—'}</td>
+              </tr>
+              {expandedSequence === entry.sequence && (
+                <tr className="ledger-drilldown">
+                  <td colSpan={5}>
+                    <pre>{JSON.stringify(entry.details, null, 2)}</pre>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
 /** Ledger page: live, filterable feed of AUDITED_DEVIATION/REDUCED_ACCESS/
  * ACCESS_DENIED/EMERGENCY_OVERRIDE events with drill-down, plus the three.js
- * visualization scoped to this screen (per CLAUDE.md). */
+ * visualization scoped to this screen (per CLAUDE.md). Staff/patient lookup
+ * moved out to their own sidebar pages below (added 2026-08-30) -- this page
+ * keeps only the event-type filter, which is a property of the feed itself. */
 function LedgerPanel() {
   const [eventType, setEventType] = useState('');
-  const [staffIdFilter, setStaffIdFilter] = useState('');
-  const [patientFilter, setPatientFilter] = useState('');
   const [entries, setEntries] = useState([]);
   const [error, setError] = useState(null);
-  const [expandedSequence, setExpandedSequence] = useState(null);
 
   const fetchEntries = useCallback(async () => {
     try {
-      const data = await getLedgerEntries({
-        event_type: eventType || undefined,
-        staff_id: staffIdFilter || undefined,
-        patient_hospital_number: patientFilter || undefined,
-      });
+      const data = await getLedgerEntries({ event_type: eventType || undefined });
       setEntries(eventType ? data : data.filter((e) => e.event_type !== 'STANDARD_ACCESS'));
       setError(null);
     } catch (err) {
       setError(err.message);
     }
-  }, [eventType, staffIdFilter, patientFilter]);
+  }, [eventType]);
 
   useEffect(() => {
     fetchEntries();
@@ -64,58 +112,126 @@ function LedgerPanel() {
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-          <input
-            className="form-input"
-            placeholder="Staff ID"
-            value={staffIdFilter}
-            onChange={(e) => setStaffIdFilter(e.target.value)}
-          />
-          <input
-            className="form-input"
-            placeholder="Patient hospital number"
-            value={patientFilter}
-            onChange={(e) => setPatientFilter(e.target.value)}
-          />
         </form>
 
-        {error && <p role="alert" className="dev-error">{error}</p>}
-
-        <table className="ledger-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>When</th>
-              <th>Event</th>
-              <th>Staff</th>
-              <th>Patient</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <Fragment key={entry.sequence}>
-                <tr
-                  className={`ledger-row severity-${entry.event_type}`}
-                  onClick={() => setExpandedSequence(expandedSequence === entry.sequence ? null : entry.sequence)}
-                >
-                  <td>{entry.sequence}</td>
-                  <td>{new Date(entry.occurred_at).toLocaleString()}</td>
-                  <td>{entry.event_type}</td>
-                  <td>{entry.staff_full_name} ({entry.staff_id})</td>
-                  <td>{entry.patient_hospital_number || '—'}</td>
-                </tr>
-                {expandedSequence === entry.sequence && (
-                  <tr className="ledger-drilldown">
-                    <td colSpan={5}>
-                      <pre>{JSON.stringify(entry.details, null, 2)}</pre>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+        <LedgerEntriesFeed entries={entries} error={error} />
       </section>
     </>
+  );
+}
+
+/** Shared shape for the Staff/Patient activity pages: search, pick a result,
+ * see their filtered Ledger history. Deliberately search-only, not a role/
+ * ward category-tile breakdown (per the user) -- this is a lookup tool, not a
+ * management screen. `search(query)` resolves to a result list; `resultKey`/
+ * `renderResult`/`describeSelected` customize per-entity display;
+ * `buildFilter(selected)` produces the getLedgerEntries() filter object. */
+function ActivityLookupPanel({ label, search, resultKey, renderResult, describeSelected, buildFilter }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [entries, setEntries] = useState([]);
+  const [error, setError] = useState(null);
+
+  const runSearch = async (event) => {
+    event.preventDefault();
+    setError(null);
+    try {
+      setResults(await search(query));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const fetchEntries = useCallback(async () => {
+    if (!selected) return;
+    try {
+      setEntries(await getLedgerEntries(buildFilter(selected)));
+      setError(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, [selected, buildFilter]);
+
+  useEffect(() => {
+    if (!selected) return undefined;
+    fetchEntries();
+    const intervalId = setInterval(fetchEntries, POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [selected, fetchEntries]);
+
+  if (selected) {
+    return (
+      <div>
+        <button type="button" className="back-link" onClick={() => setSelected(null)}>
+          ← Back to search
+        </button>
+        <section className="panel-card">
+          <h2>{describeSelected(selected)}</h2>
+          <LedgerEntriesFeed entries={entries} error={error} />
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="search-row">
+        <form className="search-bar" onSubmit={runSearch} role="search">
+          <SearchIcon />
+          <input placeholder={label} value={query} onChange={(e) => setQuery(e.target.value)} />
+        </form>
+      </div>
+
+      {error && <p role="alert" className="dev-error">{error}</p>}
+
+      {results.map((r) => (
+        <div className="card-row" key={r[resultKey]}>
+          {renderResult(r)}
+          <div className="card-row-actions">
+            <button type="button" className="btn-secondary" onClick={() => setSelected(r)}>
+              View activity
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StaffActivityPanel() {
+  return (
+    <ActivityLookupPanel
+      label="Staff ID or name"
+      search={(q) => searchStaff(q)}
+      resultKey="id"
+      renderResult={(s) => (
+        <div className="card-row-main">
+          <div className="name-line">{s.full_name}</div>
+          <div className="meta-line">{s.staff_id} · {formatRole(s.role)}</div>
+        </div>
+      )}
+      describeSelected={(s) => `${s.full_name} (${s.staff_id})`}
+      buildFilter={(s) => ({ staff_id: s.staff_id })}
+    />
+  );
+}
+
+function PatientActivityPanel() {
+  return (
+    <ActivityLookupPanel
+      label="Hospital number or name"
+      search={(q) => searchPatients(q)}
+      resultKey="id"
+      renderResult={(p) => (
+        <div className="card-row-main">
+          <div className="name-line">{p.full_name}</div>
+          <div className="meta-line">{p.hospital_number}</div>
+        </div>
+      )}
+      describeSelected={(p) => `${p.full_name} (${p.hospital_number})`}
+      buildFilter={(p) => ({ patient_hospital_number: p.hospital_number })}
+    />
   );
 }
 
@@ -188,17 +304,22 @@ function AdminsPanel() {
 
 const PAGE_TITLES = {
   ledger: 'Security Ledger',
+  staff: 'Staff Activity',
+  patients: 'Patient Activity',
   admins: 'Admins',
 };
 
 /** CLAUDE.md's Security Dashboard: the Ledger live feed (its documented core
- * responsibility) plus, added 2026-08-30, sole ownership of admin-account
+ * responsibility), staff/patient activity lookup (added 2026-08-30, split out
+ * of the live feed's old inline filters), plus sole ownership of admin-account
  * creation (Admin dashboard's own staff creation excludes the admin role). */
 function SecurityDashboard({ staff, onLogout }) {
   const [activePage, setActivePage] = useState('ledger');
 
   const navItems = [
     { key: 'ledger', label: 'Ledger', icon: <LedgerIcon /> },
+    { key: 'staff', label: 'Staff', icon: <StaffIcon /> },
+    { key: 'patients', label: 'Patients', icon: <PatientsIcon /> },
     { key: 'admins', label: 'Admins', icon: <StaffIcon /> },
   ];
 
@@ -212,6 +333,8 @@ function SecurityDashboard({ staff, onLogout }) {
       title={PAGE_TITLES[activePage]}
     >
       {activePage === 'ledger' && <LedgerPanel />}
+      {activePage === 'staff' && <StaffActivityPanel />}
+      {activePage === 'patients' && <PatientActivityPanel />}
       {activePage === 'admins' && <AdminsPanel />}
     </DashboardShell>
   );

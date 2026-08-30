@@ -695,6 +695,38 @@ button {
   cursor: default;
 }
 
+.btn-danger {
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: 1px solid #f3d9dc;
+  background: #fff;
+  color: #9d2f3d;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #fbe9eb;
+}
+
+/* Reveal-before-acting confirmation block (delete account, etc.) -- same
+   pattern as Break the Glass's inline reason textarea, never a native
+   confirm() dialog. */
+.danger-confirm {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid #f3d9dc;
+  border-radius: 10px;
+  background: #fdf2f3;
+}
+
+.danger-confirm p {
+  margin: 0 0 12px;
+  color: #9d2f3d;
+  font-size: 14px;
+}
+
 /* Modal */
 
 .modal-overlay {

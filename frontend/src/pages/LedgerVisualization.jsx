@@ -16,9 +16,20 @@ const SEVERITY_COLOR = {
 
 const RING_RADIUS = 3.2;
 const MAX_MARKERS = 30;
+// Time-based spiral (added 2026-08-30, per the user): a marker's position used
+// to be driven purely by its index in the entries array (an even slot per
+// position, nothing to do with when it actually happened). Now it descends a
+// conical helix -- angle, radius, and height are all driven by how long ago
+// entry.occurred_at really was, normalized against the oldest entry currently
+// on screen -- so recency reads as physical distance along the spiral, not
+// just marker brightness.
+const SPIRAL_TURNS = 2.5;
+const SPIRAL_HEIGHT = 2.6;
+const SPIRAL_INNER_RADIUS_FACTOR = 0.65;
 
-/** Recent ledger entries as color-coded markers orbiting a ring, newest brightest.
- * Purely a visualization -- entries prop drives what's shown, no data fetching here. */
+/** Recent ledger entries as color-coded markers descending a time-based spiral,
+ * newest at the top/outer edge, brightest. Purely a visualization -- entries
+ * prop drives what's shown, no data fetching here. */
 function LedgerVisualization({ entries }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
@@ -52,7 +63,10 @@ function LedgerVisualization({ entries }) {
 
     let frameId;
     const animate = () => {
-      markerGroup.rotation.y += 0.0025;
+      // Slower than the old flat-ring rotation (0.0025) -- the spiral has more
+      // going on visually (height + varying radius), so a slower spin keeps it
+      // legible as a timeline instead of a blur.
+      markerGroup.rotation.y += 0.0015;
       renderer.render(scene, camera);
       frameId = requestAnimationFrame(animate);
     };
@@ -96,10 +110,21 @@ function LedgerVisualization({ entries }) {
     markerGroup.clear();
 
     const recent = entries.slice(0, MAX_MARKERS);
+    const now = Date.now();
+    const ages = recent.map((entry) => Math.max(0, now - new Date(entry.occurred_at).getTime()));
+    const maxAge = Math.max(...ages, 1); // avoid divide-by-zero when every entry is brand new
+
     recent.forEach((entry, index) => {
-      const angle = (index / MAX_MARKERS) * Math.PI * 2;
-      const recency = 1 - index / Math.max(recent.length, 1);
+      // t = 0 for the newest entry on screen, 1 for the oldest -- real elapsed
+      // time, not list position, so two entries seconds apart sit close
+      // together while a gap of hours visibly stretches the spiral out.
+      const t = ages[index] / maxAge;
+      const recency = 1 - t;
       const color = SEVERITY_COLOR[entry.event_type] ?? 0x8888aa;
+
+      const angle = t * SPIRAL_TURNS * Math.PI * 2;
+      const radius = RING_RADIUS * (SPIRAL_INNER_RADIUS_FACTOR + (1 - SPIRAL_INNER_RADIUS_FACTOR) * recency);
+      const height = SPIRAL_HEIGHT * (recency - 0.5);
 
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(0.09 + recency * 0.09, 16, 16),
@@ -109,7 +134,7 @@ function LedgerVisualization({ entries }) {
           emissiveIntensity: 0.3 + recency * 0.7,
         })
       );
-      mesh.position.set(Math.cos(angle) * RING_RADIUS, 0, Math.sin(angle) * RING_RADIUS);
+      mesh.position.set(Math.cos(angle) * radius, height, Math.sin(angle) * radius);
       markerGroup.add(mesh);
     });
 

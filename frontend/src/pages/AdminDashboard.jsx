@@ -19,6 +19,7 @@ import {
 import {
   createStaff,
   deactivateStaff,
+  deleteStaff,
   getStaffSummary,
   reactivateStaff,
   searchStaff,
@@ -177,6 +178,7 @@ function StaffPanel() {
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteConfirming, setDeleteConfirming] = useState(false);
 
   const [newStaff, setNewStaff] = useState({
     username: '', password: '', staff_id: '', full_name: '', role: 'doctor', ward: '', on_duty: false, on_call: false,
@@ -230,6 +232,7 @@ function StaffPanel() {
     setOnCall(s.on_call);
     setNotice(null);
     setError(null);
+    setDeleteConfirming(false);
   };
 
   const saveDuty = async () => {
@@ -264,6 +267,20 @@ function StaffPanel() {
       setNotice(`Staff account "${newStaff.staff_id}" created.`);
       setNewStaff({ username: '', password: '', staff_id: '', full_name: '', role: 'doctor', ward: '', on_duty: false, on_call: false });
       setCreateOpen(false);
+      refreshCounts();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const handleDelete = async () => {
+    setError(null);
+    try {
+      await deleteStaff(selected.id);
+      setResults((prev) => prev.filter((s) => s.id !== selected.id));
+      setSelected(null);
+      setDeleteConfirming(false);
+      setNotice(`"${selected.full_name}" was permanently deleted.`);
       refreshCounts();
     } catch (err) {
       setError(errorMessage(err));
@@ -361,7 +378,30 @@ function StaffPanel() {
             <button type="button" className="btn-secondary" onClick={toggleActive}>
               {selected.account_active ? 'Deactivate account' : 'Reactivate account'}
             </button>
+            {!deleteConfirming && (
+              <button type="button" className="btn-danger" onClick={() => setDeleteConfirming(true)}>
+                Delete account
+              </button>
+            )}
           </div>
+
+          {deleteConfirming && (
+            <div className="danger-confirm">
+              <p role="alert">
+                This permanently deletes {selected.full_name}'s account and login — this cannot be
+                undone. Their past Security Ledger history is kept (the Ledger doesn't reference
+                staff accounts directly), but everything else about this account is gone for good.
+              </p>
+              <div className="button-row">
+                <button type="button" className="btn-secondary" onClick={() => setDeleteConfirming(false)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn-danger" onClick={handleDelete}>
+                  Yes, permanently delete
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

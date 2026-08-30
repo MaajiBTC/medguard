@@ -1,8 +1,9 @@
 import { request } from './client';
 
-/** GET /api/staff/?q=...&role=... — admin-only staff search by staff_id or
- * full_name, optionally filtered to an exact role (Admin dashboard's role-category
- * drill-down). */
+/** GET /api/staff/?q=...&role=... — Admin or Security Officer, staff search by
+ * staff_id or full_name, optionally filtered to an exact role (Admin dashboard's
+ * role-category drill-down; the Security dashboard's Staff activity page reuses
+ * this same search without the role filter). */
 function searchStaff(q, role) {
   const params = new URLSearchParams();
   if (q) params.set('q', q);
@@ -37,4 +38,19 @@ function reactivateStaff(staffId) {
   return request(`/staff/${staffId}/reactivate/`, { method: 'POST' });
 }
 
-export { searchStaff, getStaffSummary, createStaff, updateStaffDuty, deactivateStaff, reactivateStaff };
+/** POST /api/staff/<id>/delete/ — admin-only. A real, permanent delete
+ * (distinct from deactivate/reactivate above) — 400s for admin/security
+ * officer targets. */
+function deleteStaff(staffId) {
+  return request(`/staff/${staffId}/delete/`, { method: 'POST' });
+}
+
+export {
+  searchStaff,
+  getStaffSummary,
+  createStaff,
+  updateStaffDuty,
+  deactivateStaff,
+  reactivateStaff,
+  deleteStaff,
+};
