@@ -40,7 +40,7 @@ function LedgerEntriesFeed({ entries, error }) {
         <thead>
           <tr>
             <th>#</th>
-            <th>When</th>
+            <th>Date/Time</th>
             <th>Event</th>
             <th>Staff</th>
             <th>Patient</th>
