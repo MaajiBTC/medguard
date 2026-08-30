@@ -241,3 +241,81 @@ class AuthenticationTests(APITestCase):
 
         resp2 = self.client.get("/api/access/session/current/", **self._auth_header(self.token))
         self.assertEqual(resp2.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class ChangePasswordViewTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="pharmC", password="old-pass-123")
+        self.staff = Staff.objects.create(
+            user=self.user, staff_id="STF-400", full_name="Pharm C", role=Staff.Role.PHARMACIST
+        )
+        login = self.client.post(
+            "/api/access/login/",
+            {
+                "username": "pharmC",
+                "password": "old-pass-123",
+                "device_id": "device-pw-1",
+                "device_type": "desktop",
+            },
+            format="json",
+        )
+        self.token = login.data["token"]
+
+    def _auth_header(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_wrong_current_password_rejected_and_password_unchanged(self):
+        resp = self.client.post(
+            "/api/access/change-password/",
+            {"current_password": "not-the-real-password", "new_password": "brand-new-pass-1"},
+            format="json",
+            **self._auth_header(self.token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+        login_resp = self.client.post(
+            "/api/access/login/",
+            {"username": "pharmC", "password": "old-pass-123", "device_id": "device-pw-2", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(login_resp.status_code, status.HTTP_201_CREATED)
+
+    def test_new_password_too_short_rejected(self):
+        resp = self.client.post(
+            "/api/access/change-password/",
+            {"current_password": "old-pass-123", "new_password": "short"},
+            format="json",
+            **self._auth_header(self.token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_correct_current_password_changes_it(self):
+        resp = self.client.post(
+            "/api/access/change-password/",
+            {"current_password": "old-pass-123", "new_password": "brand-new-pass-1"},
+            format="json",
+            **self._auth_header(self.token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        old_login_resp = self.client.post(
+            "/api/access/login/",
+            {"username": "pharmC", "password": "old-pass-123", "device_id": "device-pw-3", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(old_login_resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        new_login_resp = self.client.post(
+            "/api/access/login/",
+            {"username": "pharmC", "password": "brand-new-pass-1", "device_id": "device-pw-4", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(new_login_resp.status_code, status.HTTP_201_CREATED)
+
+    def test_unauthenticated_cannot_change_password(self):
+        resp = self.client.post(
+            "/api/access/change-password/",
+            {"current_password": "old-pass-123", "new_password": "brand-new-pass-1"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)

@@ -101,10 +101,6 @@ function ClinicalDashboard({ staff, onLogout }) {
     }
   };
 
-  const dutySubtitle = session
-    ? `${session.on_duty ? 'On duty' : 'Off duty'}${session.ward ? ` · ${session.ward}` : ''}`
-    : 'Search patients and review what you can access.';
-
   return (
     <DashboardShell
       navItems={[{ key: 'patients', label: 'Patients', icon: <PatientsIcon /> }]}
@@ -113,8 +109,14 @@ function ClinicalDashboard({ staff, onLogout }) {
       staff={staff}
       onLogout={onLogout}
       title="Patients"
-      subtitle={dutySubtitle}
     >
+      {session && (
+        <p className="meta-line">
+          {session.on_duty ? 'On duty' : 'Off duty'}
+          {session.ward ? ` · ${session.ward}` : ''}
+        </p>
+      )}
+
       {assignedPatients.length > 0 && (
         <section>
           <h2>Assigned to you</h2>

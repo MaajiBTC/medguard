@@ -40,4 +40,13 @@ function getCurrentSession() {
   return request('/access/session/current/');
 }
 
-export { login, logout, getCurrentSession };
+/** POST /api/access/change-password/ — the caller changes their own password.
+ * No role restriction; any logged-in staff member can call this on themselves. */
+function changePassword(currentPassword, newPassword) {
+  return request('/access/change-password/', {
+    method: 'POST',
+    body: { current_password: currentPassword, new_password: newPassword },
+  });
+}
+
+export { login, logout, getCurrentSession, changePassword };

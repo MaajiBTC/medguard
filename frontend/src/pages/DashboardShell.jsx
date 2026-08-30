@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { changePassword } from '../api/auth';
+
 // Small hand-rolled icon set (no icon library dependency) -- just enough to match
 // the sidebar/search affordances the reference design uses.
 function SearchIcon() {
@@ -85,12 +87,12 @@ function MenuIcon() {
 // just the login page and the Security Dashboard visualization).
 function BrandLogoIcon() {
   return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
       <path
         d="M12 2c2.2 1.6 4.6 2.4 7 2.4V11c0 5.2-3 8.8-7 10.6C8 19.8 5 16.2 5 11V4.4c2.4 0 4.8-.8 7-2.4Z"
-        fill="var(--plum)"
+        fill="#fff"
       />
-      <path d="M12 7.5v9M7.5 12h9" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M12 7.5v9M7.5 12h9" stroke="var(--plum-deep)" strokeWidth="2.2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -106,15 +108,118 @@ function ProfileIcon() {
 
 export { SearchIcon, StaffIcon, PatientsIcon, LedgerIcon, OverviewIcon, DisasterIcon };
 
+function formatRole(role) {
+  return role.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+
+function errorMessage(err) {
+  return (err.data && (err.data.detail || JSON.stringify(err.data))) || err.message;
+}
+
+const PASSWORD_INITIAL = { current: '', next: '', confirm: '' };
+
+/** The page a click on the header's profile icon opens, from any dashboard: the
+ * caller's own read-only details plus a change-password form (password only --
+ * nothing else here is editable). */
+function ProfilePanel({ staff, onBack }) {
+  const [password, setPassword] = useState(PASSWORD_INITIAL);
+  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setError(null);
+    setNotice(null);
+    if (password.next !== password.confirm) {
+      setError('New password and confirmation do not match.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await changePassword(password.current, password.next);
+      setNotice('Password updated.');
+      setPassword(PASSWORD_INITIAL);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div>
+      <button type="button" className="back-link" onClick={onBack}>
+        ← Back
+      </button>
+
+      <div className="panel-card">
+        <h2>My profile</h2>
+        <p className="meta-line">{staff.full_name}</p>
+        <p className="meta-line">{staff.staff_id} · {formatRole(staff.role)}</p>
+      </div>
+
+      <div className="panel-card">
+        <h3>Change password</h3>
+        <form onSubmit={handleSubmit}>
+          <label className="form-label">
+            Current password
+            <input
+              className="form-input"
+              type="password"
+              value={password.current}
+              onChange={(e) => setPassword({ ...password, current: e.target.value })}
+              required
+            />
+          </label>
+          <label className="form-label">
+            New password
+            <input
+              className="form-input"
+              type="password"
+              value={password.next}
+              onChange={(e) => setPassword({ ...password, next: e.target.value })}
+              required
+              minLength={8}
+            />
+          </label>
+          <label className="form-label">
+            Confirm new password
+            <input
+              className="form-input"
+              type="password"
+              value={password.confirm}
+              onChange={(e) => setPassword({ ...password, confirm: e.target.value })}
+              required
+              minLength={8}
+            />
+          </label>
+          {error && <p role="alert" className="dev-error">{error}</p>}
+          {notice && <p className="notice">{notice}</p>}
+          <div className="button-row">
+            <button type="submit" className="btn-primary" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Save password'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /** Shared layout for the three authenticated dashboards (every page except the
- * login page): a sticky top header (hamburger menu, MedGuard brand mark, page
- * title/subtitle, profile icon + staff identity) plus a plum-deep off-canvas nav
- * drawer (wordmark, role-scoped nav, logout) toggled by the header's hamburger
- * button, closed by default -- the dashboard's own content is what you see first,
- * not the menu. Uses the fixed light brand palette (--plum/--plum-deep/
- * --lavender/--off-white), same as the login page. */
-function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, title, subtitle, children }) {
+ * login page): a sticky top header (hamburger menu + page label on the left,
+ * enlarged MedGuard brand mark centered, profile icon on the right) plus a
+ * plum-deep off-canvas nav drawer (wordmark, role-scoped nav, logout) toggled by
+ * the header's hamburger button, closed by default -- the dashboard's own
+ * content is what you see first, not the menu. The profile icon opens
+ * ProfilePanel in place of `children`, independent of whatever page the calling
+ * dashboard has active, so it works the same from all three. Uses the fixed
+ * light brand palette (--plum/--plum-deep/--lavender/--off-white), same as the
+ * login page. */
+function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, title, children }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const selectNav = (key) => {
     onNavChange(key);
@@ -152,7 +257,7 @@ function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, ti
 
       <div className="dashboard-main">
         <header className="shell-header">
-          <div className="shell-header-brand">
+          <div className="shell-header-page">
             <button
               type="button"
               className="menu-button"
@@ -161,31 +266,29 @@ function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, ti
             >
               <MenuIcon />
             </button>
-            <div className="brand-mark">
-              <BrandLogoIcon />
-              <span>MedGuard</span>
-            </div>
+            <h1 className="shell-header-page-label">{title}</h1>
           </div>
 
-          <div className="shell-header-page">
-            <h1>{title}</h1>
-            {subtitle && <p className="shell-subtitle">{subtitle}</p>}
+          <div className="brand-mark">
+            <BrandLogoIcon />
+            <span>MedGuard</span>
           </div>
 
           {staff && (
-            <div className="shell-identity">
-              <div className="profile-avatar">
-                <ProfileIcon />
-              </div>
-              <div className="shell-identity-text">
-                <strong>{staff.full_name}</strong>
-                <span>{staff.staff_id}</span>
-              </div>
-            </div>
+            <button
+              type="button"
+              className="profile-button"
+              onClick={() => setProfileOpen(true)}
+              aria-label="View profile"
+            >
+              <ProfileIcon />
+            </button>
           )}
         </header>
 
-        <div className="shell-content">{children}</div>
+        <div className="shell-content">
+          {profileOpen ? <ProfilePanel staff={staff} onBack={() => setProfileOpen(false)} /> : children}
+        </div>
       </div>
     </div>
   );

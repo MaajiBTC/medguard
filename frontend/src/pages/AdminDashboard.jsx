@@ -699,11 +699,11 @@ function DisasterModePanel() {
   );
 }
 
-const PAGE_META = {
-  overview: { title: 'Overview', subtitle: "A snapshot of the hospital's patients and staff." },
-  staff: { title: 'Staff Management', subtitle: 'Monitor and manage staff accounts across roles.' },
-  patients: { title: 'Patient Records', subtitle: 'Search, view, and manage patient records by ward.' },
-  disaster: { title: 'Disaster / Mass Casualty Mode', subtitle: 'Hospital-wide override for the Doctor and Break the Glass gates.' },
+const PAGE_TITLES = {
+  overview: 'Overview',
+  staff: 'Staff',
+  patients: 'Patients',
+  disaster: 'Disaster Mode',
 };
 
 function AdminDashboard({ staff, onLogout }) {
@@ -723,8 +723,7 @@ function AdminDashboard({ staff, onLogout }) {
       onNavChange={setActivePage}
       staff={staff}
       onLogout={onLogout}
-      title={PAGE_META[activePage].title}
-      subtitle={PAGE_META[activePage].subtitle}
+      title={PAGE_TITLES[activePage]}
     >
       {activePage === 'overview' && <OverviewPanel />}
       {activePage === 'staff' && <StaffPanel />}

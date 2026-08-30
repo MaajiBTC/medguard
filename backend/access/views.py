@@ -11,6 +11,7 @@ from captures.models import BehavioralCapture, ContextualCapture
 from captures.serializers import KeystrokeFeaturesSerializer
 
 from .models import AccessSession
+from .serializers import ChangePasswordSerializer
 
 
 class LoginView(APIView):
@@ -112,6 +113,26 @@ class LogoutView(APIView):
         session.ended_at = timezone.now()
         session.save(update_fields=["is_active", "ended_at"])
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ChangePasswordView(APIView):
+    """POST /api/access/change-password/ -- any logged-in staff member changes
+    their own password (self-service, from the frontend's Profile page). Default
+    IsAuthenticated is the only gate needed; there's no role restriction since
+    this only ever acts on the caller's own account."""
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = request.auth.staff.user
+        if not user.check_password(serializer.validated_data["current_password"]):
+            return Response(
+                {"detail": "Current password is incorrect."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user.set_password(serializer.validated_data["new_password"])
+        user.save()
+        return Response({"detail": "Password updated."})
 
 
 class CurrentSessionView(APIView):

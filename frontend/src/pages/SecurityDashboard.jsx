@@ -186,9 +186,9 @@ function AdminsPanel() {
   );
 }
 
-const PAGE_META = {
-  ledger: { title: 'Security Ledger', subtitle: 'Live feed of audited deviations, reduced access, denials, and emergency overrides.' },
-  admins: { title: 'Admins', subtitle: 'Create admin accounts — the only role that manages this.' },
+const PAGE_TITLES = {
+  ledger: 'Security Ledger',
+  admins: 'Admins',
 };
 
 /** CLAUDE.md's Security Dashboard: the Ledger live feed (its documented core
@@ -209,8 +209,7 @@ function SecurityDashboard({ staff, onLogout }) {
       onNavChange={setActivePage}
       staff={staff}
       onLogout={onLogout}
-      title={PAGE_META[activePage].title}
-      subtitle={PAGE_META[activePage].subtitle}
+      title={PAGE_TITLES[activePage]}
     >
       {activePage === 'ledger' && <LedgerPanel />}
       {activePage === 'admins' && <AdminsPanel />}

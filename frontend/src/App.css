@@ -411,33 +411,36 @@ button {
   flex-direction: column;
 }
 
+/* Grid, not flex: a true-centered middle column regardless of how wide the
+   left (page label) or right (profile button) content is. */
 .shell-header {
   position: sticky;
   top: 0;
   z-index: 30;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   gap: 20px;
-  padding: 14px 32px;
-  background: var(--off-white);
-  border-bottom: 1px solid #e6def6;
+  padding: 12px 32px;
+  background: var(--plum-deep);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.shell-header-brand {
+.shell-header-page {
   display: flex;
   align-items: center;
-  gap: 16px;
-  flex: 0 0 auto;
+  gap: 14px;
+  justify-self: start;
+  min-width: 0;
 }
 
-.brand-mark {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--plum-deep);
+.shell-header-page-label {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--lavender);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -448,7 +451,7 @@ button {
   width: 40px;
   height: 40px;
   flex: 0 0 auto;
-  border: 1px solid #ece5fa;
+  border: none;
   border-radius: 10px;
   background: #fff;
   color: var(--plum-deep);
@@ -456,67 +459,40 @@ button {
 }
 
 .menu-button:hover {
-  background: #f6f1fd;
+  background: var(--lavender);
 }
 
-.shell-header-page {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.shell-header-page h1 {
-  margin: 0;
-  font-size: 20px;
-  color: var(--plum-deep);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shell-subtitle {
-  margin: 2px 0 0;
-  color: #7a6f96;
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shell-identity {
+.brand-mark {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 0 0 auto;
+  justify-self: center;
+  font-size: 24px;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
 }
 
-.profile-avatar {
+.profile-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  justify-self: end;
+  border: none;
   border-radius: 50%;
-  background: #ede4fc;
-  color: var(--plum);
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
 }
 
-.shell-identity-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 14px;
-  color: var(--plum-deep);
-}
-
-.shell-identity-text span {
-  color: #7a6f96;
-  font-size: 12px;
+.profile-button:hover {
+  background: rgba(255, 255, 255, 0.28);
 }
 
 @media (max-width: 720px) {
-  .brand-mark span,
-  .shell-identity-text {
+  .brand-mark span {
     display: none;
   }
 
