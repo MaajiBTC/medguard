@@ -503,6 +503,36 @@ same local-HTML-preview workflow before porting in; verified live
 in-browser against both the real `282828` doctor and `ADMIN-1` admin
 accounts — full bleed, no seam, no console errors.
 
+**Amended an eighteenth time (2026-08-31, labeled detail fields + list
+shown by default):** same day, per the user, confirmed via
+`AskUserQuestion`. Two changes to the Staff/Patients/Admins pages:
+
+1. Every field on the three detail cards (`StaffDetailsCard`,
+   `PatientDetailsCard`, `AdminDetailsCard`) now gets its own "Label:
+   value" line via a new shared `DetailField({ label, value })` component
+   — previously some fields (name, staff ID + role combined) had no label
+   at all. `.detail-label` in `App.css` bolds the label in `--plum-deep`.
+2. All three pages now show their full list the moment the page loads —
+   previously you had to search first (an empty `results` state) before
+   anything appeared, same problem on all three. `ActivityLookupPanel`
+   (Staff/Patients) and `AdminsPanel` both gained a `fetchResults`
+   function called from a `useEffect` on mount/whenever `selected` clears,
+   not just on explicit form submit. Both also gained a **list filter**
+   dropdown rendered below the search bar (`.list-filter-select`) that
+   re-triggers `fetchResults` the moment it changes, no search-submit
+   needed — role for Staff (`ROLES`), ward for Patients (`WARDS`, imported
+   from `wards.js`), matching the exact "select doctor, only see doctors,
+   no searching" behavior the user asked for. Admins gets the
+   show-by-default behavior too but no dropdown (confirmed out of scope —
+   admin accounts are already all one role, a role filter there would be
+   trivial). Both `searchStaff(q, role)` and `searchPatients(q, ward)`
+   already supported the second filter param server-side from earlier
+   work, so no backend changes were needed. Verified live in-browser
+   (Claude-in-Chrome) against the real `282828` doctor and `ADMIN-1` admin
+   accounts: both pages list everyone on load, the Staff role dropdown
+   narrows the list instantly without pressing Enter, and the labeled
+   detail card renders correctly. No console errors.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.

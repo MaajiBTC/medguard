@@ -4,6 +4,7 @@ import { getLedgerEntries } from '../api/ledger';
 import { searchPatients } from '../api/patients';
 import { createStaff, getAdminActions, searchStaff } from '../api/staff';
 import Modal from '../components/Modal';
+import { WARDS } from '../wards';
 import DashboardShell, { LedgerIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
 import { EventTypeBarChart, LedgerDonutChart3D, LedgerRoleBarChart, ROLES } from './LedgerCharts3D';
 import RoleAvatar from './RoleAvatar';
@@ -196,17 +197,29 @@ function LedgerPanel() {
  * selected on the Staff activity page, the left card switches from the
  * system-wide role breakdown to this. Only shows fields the search result
  * actually carries (StaffSummarySerializer) -- no new backend data needed. */
+/** One labeled field on a detail card (added 2026-08-31, per the user --
+ * every field on the Staff/Patients/Admins detail cards gets its own
+ * "Label: value" line, rather than some fields being unlabeled). */
+function DetailField({ label, value }) {
+  return (
+    <p className="meta-line">
+      <span className="detail-label">{label}:</span> {value}
+    </p>
+  );
+}
+
 function StaffDetailsCard({ staff }) {
   return (
     <div>
-      <p className="meta-line">{staff.full_name}</p>
-      <p className="meta-line">{staff.staff_id} · {formatRole(staff.role)}</p>
-      {staff.ward && <p className="meta-line">Ward: {staff.ward}</p>}
+      <DetailField label="Name" value={staff.full_name} />
+      <DetailField label="Staff ID" value={staff.staff_id} />
+      <DetailField label="Role" value={formatRole(staff.role)} />
+      {staff.ward && <DetailField label="Ward" value={staff.ward} />}
       {(staff.on_duty !== undefined || staff.on_call !== undefined) && (
-        <p className="meta-line">
-          {staff.on_duty ? 'On duty' : 'Off duty'}
-          {staff.on_call ? ' · On call' : ''}
-        </p>
+        <DetailField
+          label="Duty status"
+          value={`${staff.on_duty ? 'On duty' : 'Off duty'}${staff.on_call ? ' · On call' : ''}`}
+        />
       )}
     </div>
   );
@@ -226,10 +239,10 @@ function PatientDetailsCard({ patient, entries }) {
   const count = new Set(entries.map((e) => e.staff_id)).size;
   return (
     <div>
-      <p className="meta-line">{patient.full_name}</p>
-      <p className="meta-line">{patient.hospital_number}</p>
-      {patient.ward && <p className="meta-line">Ward: {patient.ward}</p>}
-      <p className="meta-line">{count} staff member{count === 1 ? '' : 's'} accessed this record</p>
+      <DetailField label="Name" value={patient.full_name} />
+      <DetailField label="Hospital number" value={patient.hospital_number} />
+      {patient.ward && <DetailField label="Ward" value={patient.ward} />}
+      <DetailField label="Staff access" value={`${count} staff member${count === 1 ? '' : 's'} accessed this record`} />
     </div>
   );
 }
@@ -259,26 +272,57 @@ function PatientDetailsCard({ patient, entries }) {
  * `filterEntriesByDuty` cross-referencing each entry's `staff_id` against a
  * live `searchStaff()` lookup -- current status, not status at the time of
  * that historical event. */
-function ActivityLookupPanel({ label, search, resultKey, renderResult, describeSelected, buildFilter, cardOne, activityFilters }) {
+function ActivityLookupPanel({
+  label,
+  search,
+  resultKey,
+  renderResult,
+  describeSelected,
+  buildFilter,
+  cardOne,
+  activityFilters,
+  listFilterOptions,
+  listFilterPlaceholder,
+}) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
   const [entries, setEntries] = useState([]);
   const [error, setError] = useState(null);
+  const [listFilter, setListFilter] = useState('');
 
   const [roleFilter, setRoleFilter] = useState('');
   const [dutyFilter, setDutyFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  const runSearch = async (event) => {
+  const fetchResults = useCallback(
+    async (q) => {
+      try {
+        setResults(await search(q, listFilter || undefined));
+        setError(null);
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
+    [search, listFilter],
+  );
+
+  // Shows everyone by default, the moment the page loads or the list
+  // filter changes -- no search required first, same as the Ledger page's
+  // data being visible before touching any slicer (added 2026-08-31, per
+  // the user). Deliberately excludes `query` from the deps: typing still
+  // requires Enter/submit via runSearch below, so this doesn't re-fetch on
+  // every keystroke.
+  useEffect(() => {
+    if (selected) return;
+    fetchResults(query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, listFilter]);
+
+  const runSearch = (event) => {
     event.preventDefault();
-    setError(null);
-    try {
-      setResults(await search(query));
-    } catch (err) {
-      setError(errorMessage(err));
-    }
+    fetchResults(query);
   };
 
   const fetchEntries = useCallback(async () => {
@@ -387,6 +431,19 @@ function ActivityLookupPanel({ label, search, resultKey, renderResult, describeS
               <SearchIcon />
               <input placeholder={label} value={query} onChange={(e) => setQuery(e.target.value)} />
             </form>
+            {listFilterOptions && (
+              <select
+                className="form-input list-filter-select"
+                value={listFilter}
+                onChange={(e) => setListFilter(e.target.value)}
+                aria-label={listFilterPlaceholder}
+              >
+                <option value="">{listFilterPlaceholder}</option>
+                {listFilterOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           {error && <p role="alert" className="dev-error">{error}</p>}
@@ -411,7 +468,9 @@ function StaffActivityPanel() {
   return (
     <ActivityLookupPanel
       label="Staff ID or name"
-      search={(q) => searchStaff(q)}
+      search={(q, role) => searchStaff(q, role)}
+      listFilterOptions={ROLES.map((r) => ({ value: r, label: formatRole(r) }))}
+      listFilterPlaceholder="All roles"
       resultKey="id"
       renderResult={(s) => (
         <div className="card-row-main">
@@ -434,7 +493,9 @@ function PatientActivityPanel() {
   return (
     <ActivityLookupPanel
       label="Hospital number or name"
-      search={(q) => searchPatients(q)}
+      search={(q, ward) => searchPatients(q, ward)}
+      listFilterOptions={WARDS}
+      listFilterPlaceholder="All wards"
       resultKey="id"
       renderResult={(p) => (
         <div className="card-row-main">
@@ -460,8 +521,9 @@ function PatientActivityPanel() {
 function AdminDetailsCard({ admin }) {
   return (
     <div>
-      <p className="meta-line">{admin.full_name}</p>
-      <p className="meta-line">{admin.staff_id} · Admin</p>
+      <DetailField label="Name" value={admin.full_name} />
+      <DetailField label="Staff ID" value={admin.staff_id} />
+      <DetailField label="Role" value="Admin" />
     </div>
   );
 }
@@ -534,14 +596,26 @@ function AdminsPanel() {
   const [roleFilter, setRoleFilter] = useState('');
   const [dutyFilter, setDutyFilter] = useState('');
 
-  const runSearch = async (event) => {
-    event.preventDefault();
-    setError(null);
+  const fetchResults = useCallback(async (q) => {
     try {
-      setResults(await searchStaff(query, 'admin'));
+      setResults(await searchStaff(q, 'admin'));
+      setError(null);
     } catch (err) {
       setError(errorMessage(err));
     }
+  }, []);
+
+  // Shows every admin by default, the moment the page loads -- no search
+  // required first (added 2026-08-31, per the user, same as Staff/Patients).
+  useEffect(() => {
+    if (selected) return;
+    fetchResults(query);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
+  const runSearch = (event) => {
+    event.preventDefault();
+    fetchResults(query);
   };
 
   const fetchActions = useCallback(async () => {

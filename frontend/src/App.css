@@ -835,6 +835,21 @@ button {
   margin-bottom: 16px;
 }
 
+/* Quick role/ward filter under the Staff/Patients/Admins search bar (added
+   2026-08-31, per the user) -- narrows the results list live, no search
+   submit needed. */
+.list-filter-select {
+  width: auto;
+  padding: 10px 14px;
+}
+
+/* A labeled "Label: value" line on the Staff/Patients/Admins detail cards
+   (added 2026-08-31, per the user -- every field gets its own label). */
+.detail-label {
+  font-weight: 600;
+  color: var(--plum-deep);
+}
+
 /* Role/section tabs */
 
 .role-tabs {
