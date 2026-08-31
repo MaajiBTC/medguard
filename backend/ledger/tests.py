@@ -235,3 +235,18 @@ class LedgerFeedViewTests(APITestCase):
         )
         self.assertEqual(len(filtered_resp.data), 1)
         self.assertEqual(filtered_resp.data[0]["event_type"], "ACCESS_DENIED")
+
+    def test_staff_role_filter(self):
+        """staff_role query param, added 2026-08-31 for the Ledger page's role
+        "slicer" -- filters on the denormalized staff_role field."""
+        officer, token = self._login("secOfficerApi2", "pw-ledger-feed-4", "STF-LF903", Staff.Role.SECURITY_OFFICER)
+        doctor = self._login("docLedgerFeedApi2", "pw-ledger-feed-5", "STF-LF904", Staff.Role.DOCTOR)[0]
+        nurse = self._login("nurseLedgerFeedApi", "pw-ledger-feed-6", "STF-LF905", Staff.Role.NURSE)[0]
+
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=doctor)
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=nurse)
+
+        resp = self.client.get("/api/ledger/entries/?staff_role=nurse", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp.data), 1)
+        self.assertEqual(resp.data[0]["staff_role"], "nurse")

@@ -294,6 +294,32 @@ button {
   color: var(--off-white);
 }
 
+/* Puts the title chip and its "slicers" (added 2026-08-31, per the user) on
+   one row -- title left, filter controls top-right of the card. */
+.ledger-chart-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ledger-slicers {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.slicer-input {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--plum);
+  background: #fff;
+  color: var(--plum-deep);
+}
+
 .ledger-chart-mount {
   width: 100%;
   height: 220px;
@@ -408,6 +434,44 @@ button {
   margin-top: 6px;
   font-size: 13px;
   color: rgba(42, 15, 92, 0.7);
+}
+
+/* The Admins page's "Activity" card -- a list of discrete admin actions
+   (added 2026-08-31, per the user), not count data, so a scrollable list
+   reads better than a chart. */
+.admin-action-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.admin-action-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid #ece5fa;
+  font-size: 13px;
+}
+
+.admin-action-row:last-child {
+  border-bottom: none;
+}
+
+.admin-action-label {
+  font-weight: 600;
+  color: var(--plum-deep);
+}
+
+.admin-action-target {
+  color: var(--plum-deep);
+}
+
+.admin-action-time {
+  font-size: 12px;
+  color: rgba(42, 15, 92, 0.6);
 }
 
 /* Live feed: a tinted "tray" holding one white row-card per entry (added

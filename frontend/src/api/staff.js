@@ -45,6 +45,14 @@ function deleteStaff(staffId) {
   return request(`/staff/${staffId}/delete/`, { method: 'POST' });
 }
 
+/** GET /api/staff/admin-actions/?actor_staff_id=... — Admin or Security
+ * Officer. That admin's own logged actions (create/deactivate/reactivate/
+ * delete a staff account), newest first — the Security dashboard's Admins
+ * page "Activity" card. */
+function getAdminActions(actorStaffId) {
+  return request(`/staff/admin-actions/?actor_staff_id=${encodeURIComponent(actorStaffId)}`);
+}
+
 export {
   searchStaff,
   getStaffSummary,
@@ -53,4 +61,5 @@ export {
   deactivateStaff,
   reactivateStaff,
   deleteStaff,
+  getAdminActions,
 };

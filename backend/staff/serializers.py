@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import Staff, Ward
+from .models import AdminActionLog, Staff, Ward
 
 
 class StaffSummarySerializer(serializers.ModelSerializer):
@@ -48,3 +48,10 @@ class StaffDutyWardUpdateSerializer(serializers.Serializer):
         if not attrs:
             raise serializers.ValidationError("Provide at least one of: ward, on_duty, on_call.")
         return attrs
+
+
+class AdminActionLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AdminActionLog
+        fields = ["id", "action", "target_staff_id", "target_full_name", "target_role", "occurred_at"]
+        read_only_fields = fields

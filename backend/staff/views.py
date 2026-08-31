@@ -6,9 +6,15 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Staff
+from .models import AdminActionLog, Staff
 from .permissions import IsAdmin, IsAdminOrSecurityOfficer
-from .serializers import StaffCreateSerializer, StaffDutyWardUpdateSerializer, StaffSummarySerializer
+from .serializers import (
+    AdminActionLogSerializer,
+    StaffCreateSerializer,
+    StaffDutyWardUpdateSerializer,
+    StaffSummarySerializer,
+)
+from .services import record_admin_action
 
 
 class StaffSearchView(APIView):
@@ -105,6 +111,9 @@ class StaffCreateView(APIView):
                 on_duty=False if no_ward_duty else data.get("on_duty", False),
                 on_call=False if no_ward_duty else data.get("on_call", False),
             )
+            record_admin_action(
+                actor=request.auth.staff, action=AdminActionLog.Action.STAFF_CREATED, target=staff
+            )
 
         return Response(StaffSummarySerializer(staff).data, status=status.HTTP_201_CREATED)
 
@@ -152,6 +161,9 @@ class StaffDeactivateView(APIView):
         staff = get_object_or_404(Staff, pk=staff_id)
         staff.user.is_active = False
         staff.user.save(update_fields=["is_active"])
+        record_admin_action(
+            actor=request.auth.staff, action=AdminActionLog.Action.STAFF_DEACTIVATED, target=staff
+        )
         return Response(StaffSummarySerializer(staff).data)
 
 
@@ -164,6 +176,9 @@ class StaffReactivateView(APIView):
         staff = get_object_or_404(Staff, pk=staff_id)
         staff.user.is_active = True
         staff.user.save(update_fields=["is_active"])
+        record_admin_action(
+            actor=request.auth.staff, action=AdminActionLog.Action.STAFF_REACTIVATED, target=staff
+        )
         return Response(StaffSummarySerializer(staff).data)
 
 
@@ -195,4 +210,26 @@ class StaffDeleteView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         staff.user.delete()
+        # staff.staff_id/full_name/role stay readable on the in-memory Python
+        # object after delete() -- only pk/id get cleared -- so this still
+        # captures the right target identity even though the row is gone.
+        record_admin_action(
+            actor=request.auth.staff, action=AdminActionLog.Action.STAFF_DELETED, target=staff
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AdminActionListView(APIView):
+    """GET /api/staff/admin-actions/?actor_staff_id=... -- an admin's own
+    logged actions (added 2026-08-31, per the user, for the Security
+    dashboard's Admins page). Same permission reasoning as StaffSearchView --
+    this is a lookup, not account management."""
+
+    permission_classes = [IsAdminOrSecurityOfficer]
+
+    def get(self, request):
+        actor_staff_id = request.query_params.get("actor_staff_id", "").strip()
+        actions = AdminActionLog.objects.all()
+        if actor_staff_id:
+            actions = actions.filter(actor_staff_id=actor_staff_id)
+        return Response(AdminActionLogSerializer(actions[:50], many=True).data)

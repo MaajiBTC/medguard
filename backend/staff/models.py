@@ -81,3 +81,44 @@ class Staff(models.Model):
 
     def __str__(self):
         return f"{self.full_name} ({self.staff_id}, {self.role})"
+
+
+class AdminActionLog(models.Model):
+    """Audit trail of admin actions on staff accounts (added 2026-08-31, per
+    the user) -- scoped to staff account lifecycle only (create/deactivate/
+    reactivate/delete). Nothing before this model shipped is recoverable;
+    this only starts logging from here on.
+
+    Actor/target are denormalized (staff_id/full_name/role copied in, no
+    ForeignKey) rather than referencing Staff directly -- same reasoning
+    ledger.LedgerEntry already established: a target row can be deleted
+    (that's literally one of the four actions logged here) without losing
+    the audit record, and an actor shouldn't be able to erase evidence of
+    their own action by later being deleted themselves. Lives on the default
+    database (unlike the Ledger, this doesn't need cross-database isolation
+    -- it's a staff-management record, not the security-critical access
+    trail) and is a plain model rather than hash-chained/append-only --
+    matches scoring.DisasterModeEvent's precedent (a small, purpose-built
+    audit table, lighter-weight than the Ledger, registered read-only in
+    admin) for this narrower scope.
+    """
+
+    class Action(models.TextChoices):
+        STAFF_CREATED = "staff_created", "Created"
+        STAFF_DEACTIVATED = "staff_deactivated", "Deactivated"
+        STAFF_REACTIVATED = "staff_reactivated", "Reactivated"
+        STAFF_DELETED = "staff_deleted", "Deleted"
+
+    actor_staff_id = models.CharField(max_length=64)
+    actor_full_name = models.CharField(max_length=255)
+    action = models.CharField(max_length=32, choices=Action.choices)
+    target_staff_id = models.CharField(max_length=64)
+    target_full_name = models.CharField(max_length=255)
+    target_role = models.CharField(max_length=32, blank=True, default="")
+    occurred_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-occurred_at"]
+
+    def __str__(self):
+        return f"AdminActionLog({self.actor_staff_id} {self.action} {self.target_staff_id})"

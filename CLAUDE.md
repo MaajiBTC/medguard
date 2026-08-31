@@ -287,6 +287,39 @@ backend changes): "Patients" (total + `by_ward`) and "Staff" (total, on-duty/
 on-call, `by_role` excluding admin/security_officer). New small
 `SummaryCard`/`big-stat` presentational pattern shared by both.
 
+**Amended a ninth time (2026-08-31, admin activity audit trail + Ledger page
+slicers):** two changes, confirmed via `AskUserQuestion`. First, a new
+`staff.AdminActionLog` model (denormalized actor/target fields, no FK — same
+reasoning as `ledger.LedgerEntry` and `scoring.DisasterModeEvent`: a target
+row can be deleted, one of the four actions being logged, without losing the
+record, and an actor can't erase evidence of their own action by later being
+deleted) records **staff account lifecycle only** — create, deactivate,
+reactivate, delete — via a single writer, `staff.services.record_admin_action()`,
+called from `StaffCreateView`/`StaffDeactivateView`/`StaffReactivateView`/
+`StaffDeleteView`. Lives on the default database, not the Ledger's separate
+one — this is staff-management audit, not the security-critical access-decision
+trail, so it doesn't need the Ledger's hash-chain/append-only machinery.
+Logging starts from when this shipped; past actions aren't recoverable. New
+`GET /api/staff/admin-actions/?actor_staff_id=` (`IsAdminOrSecurityOfficer`).
+The **Admins** page (`AdminsPanel`, replacing the eighth amendment's
+Patient/Staff-summary-reuse version above, since the user actually wanted to
+see individual admin accounts, not aggregate counts) now works like the
+Staff/Patients pages: search (`searchStaff(q, 'admin')`) → select → two cards
+— `AdminDetailsCard` (name/staff_id, no ward/duty, admins are
+`NO_WARD_DUTY_ROLES`) and `AdminActivityCard` (that admin's own
+`AdminActionLog` entries as actor, newest first, a plain list not a
+chart — discrete events, not count data). Second, the **Ledger** page's two
+cards gained three filter "slicers" forming **one shared filter set**
+(confirmed) that narrows the same `entries` feeding both cards *and* the live
+feed table below: a role `<select>` (`ROLES`, now exported from
+`LedgerCharts3D.jsx`) plus the pre-existing event-type `<select>` moved into
+the "Staff Role" card's header, and two `<input type="date">` (from/to) in
+the "Event breakdown" card's header. Backend: `ledger.views.LedgerFeedView`
+gained a `staff_role` query param filter (mirrors the existing `staff_id`
+filter pattern); `since`/`until` already existed. 46/46 new/scoped backend
+tests passing, full suite green; migration applied to the real dev database
+(default connection this time, not `ledger` — no `--database=ledger` needed).
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.

@@ -1,12 +1,11 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 
 import { getLedgerEntries } from '../api/ledger';
-import { getPatientSummary, searchPatients } from '../api/patients';
-import { createStaff, getStaffSummary, searchStaff } from '../api/staff';
+import { searchPatients } from '../api/patients';
+import { createStaff, getAdminActions, searchStaff } from '../api/staff';
 import Modal from '../components/Modal';
-import { WARDS } from '../wards';
 import DashboardShell, { LedgerIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
-import { EventTypeBarChart, LedgerDonutChart3D, LedgerRoleBarChart } from './LedgerCharts3D';
+import { EventTypeBarChart, LedgerDonutChart3D, LedgerRoleBarChart, ROLES } from './LedgerCharts3D';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -77,21 +76,34 @@ function LedgerEntriesFeed({ entries, error }) {
  * drill-down, plus the three.js visualization scoped to this screen (per
  * CLAUDE.md). Staff/patient lookup moved out to their own sidebar pages below
  * (added 2026-08-30) -- this page keeps only the event-type filter, which is
- * a property of the feed itself. */
+ * a property of the feed itself.
+ *
+ * Gained 3 "slicers" 2026-08-31, per the user -- role + event type (left
+ * card) and a date range (right card) -- one shared filter set that narrows
+ * `entries`, which already feeds both cards and the live-feed table below,
+ * so no other wiring changes were needed. */
 function LedgerPanel() {
   const [eventType, setEventType] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [entries, setEntries] = useState([]);
   const [error, setError] = useState(null);
 
   const fetchEntries = useCallback(async () => {
     try {
-      const data = await getLedgerEntries({ event_type: eventType || undefined });
+      const data = await getLedgerEntries({
+        event_type: eventType || undefined,
+        staff_role: roleFilter || undefined,
+        since: dateFrom ? `${dateFrom}T00:00:00` : undefined,
+        until: dateTo ? `${dateTo}T23:59:59` : undefined,
+      });
       setEntries(data);
       setError(null);
     } catch (err) {
       setError(err.message);
     }
-  }, [eventType]);
+  }, [eventType, roleFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchEntries();
@@ -103,25 +115,50 @@ function LedgerPanel() {
     <>
       <div className="ledger-chart-row">
         <div className="ledger-chart-card">
-          <h3>Staff Role</h3>
+          <div className="ledger-chart-card-header">
+            <h3>Staff Role</h3>
+            <div className="ledger-slicers">
+              <select className="slicer-input" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+                <option value="">All roles</option>
+                {ROLES.map((role) => (
+                  <option key={role} value={role}>{formatRole(role)}</option>
+                ))}
+              </select>
+              <select className="slicer-input" value={eventType} onChange={(e) => setEventType(e.target.value)}>
+                {EVENT_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
           <LedgerRoleBarChart entries={entries} />
         </div>
         <div className="ledger-chart-card">
-          <h3>Event breakdown</h3>
+          <div className="ledger-chart-card-header">
+            <h3>Event breakdown</h3>
+            <div className="ledger-slicers">
+              <input
+                type="date"
+                className="slicer-input"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                aria-label="From date"
+              />
+              <input
+                type="date"
+                className="slicer-input"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                aria-label="To date"
+              />
+            </div>
+          </div>
           <LedgerDonutChart3D entries={entries} />
         </div>
       </div>
 
       <section className="panel-card">
         <h2>Live feed</h2>
-        <form className="ledger-filters" onSubmit={(e) => e.preventDefault()}>
-          <select className="form-input" value={eventType} onChange={(e) => setEventType(e.target.value)}>
-            {EVENT_TYPE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </form>
-
         <LedgerEntriesFeed entries={entries} error={error} />
       </section>
     </>
@@ -298,54 +335,96 @@ function PatientActivityPanel() {
   );
 }
 
-function wardLabel(value) {
-  return WARDS.find((w) => w.value === value)?.label || value;
-}
-
-/** Big total + label:value breakdown rows -- used for the Admins page's two
- * summary cards (added 2026-08-31, per the user). Reuses the exact summary
- * data the Admin dashboard's own Overview page already shows
- * (getPatientSummary()/getStaffSummary()) since admin accounts don't
- * generate scoring-pipeline Ledger events for a role/event-type breakdown to
- * mean anything here -- see CLAUDE.md's Security Dashboard section. */
-function SummaryCard({ total, totalLabel, breakdown }) {
+/** Read-only admin details -- no ward/duty/on-call, admins are
+ * Staff.NO_WARD_DUTY_ROLES (shared accounts), so there's nothing beyond
+ * identity to show. */
+function AdminDetailsCard({ admin }) {
   return (
     <div>
-      <div className="big-stat">
-        <div className="big-stat-number">{total}</div>
-        <div className="big-stat-label">{totalLabel}</div>
-      </div>
-      <div className="ledger-chart-legend">
-        {breakdown.map(([label, value]) => (
-          <span className="ledger-chart-legend-item" key={label}>
-            {label}: {value}
+      <p className="meta-line">{admin.full_name}</p>
+      <p className="meta-line">{admin.staff_id} · Admin</p>
+    </div>
+  );
+}
+
+const ADMIN_ACTION_LABEL = {
+  staff_created: 'Created',
+  staff_deactivated: 'Deactivated',
+  staff_reactivated: 'Reactivated',
+  staff_deleted: 'Deleted',
+};
+
+/** That admin's own logged actions (AdminActionLog, added 2026-08-31, per
+ * the user) -- a simple list of discrete events (who/what/when), not count
+ * data, so a list reads better here than a chart. */
+function AdminActivityCard({ actions }) {
+  if (actions === null) return <p className="meta-line">Loading…</p>;
+  if (actions.length === 0) return <p className="meta-line">No actions logged yet.</p>;
+  return (
+    <div className="admin-action-list">
+      {actions.map((a) => (
+        <div className="admin-action-row" key={a.id}>
+          <span className="admin-action-label">{ADMIN_ACTION_LABEL[a.action] || a.action}</span>
+          <span className="admin-action-target">
+            {a.target_full_name} ({a.target_staff_id}{a.target_role ? ` · ${formatRole(a.target_role)}` : ''})
           </span>
-        ))}
-      </div>
+          <span className="admin-action-time">{new Date(a.occurred_at).toLocaleString()}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
 const NEW_ADMIN_INITIAL = { username: '', password: '', staff_id: '', full_name: '' };
 
-/** Admins page: the only place an admin account can be created (added
- * 2026-08-30, per the user) -- Admin dashboard's own "Add Staff" no longer
- * offers the admin role, so this is the sole path. Admin accounts are shared
- * (no ward/on-duty/on-call), so the form only asks for login + identity.
- * Gained two summary cards at the top 2026-08-31, per the user -- see
- * SummaryCard above. */
+/** Admins page: search/list admin accounts, select one, see their details +
+ * activity (added 2026-08-31, per the user, replacing the previous
+ * Patients/Staff summary-only version -- there was no way to actually see
+ * existing admins before this). Also the only place an admin account can be
+ * created (added 2026-08-30) -- Admin dashboard's own "Add Staff" no longer
+ * offers the admin role, so this is the sole path. Same search -> select ->
+ * two-cards shape as StaffActivityPanel/PatientActivityPanel above, but not
+ * built on ActivityLookupPanel -- the data source (AdminActionLog via
+ * getAdminActions) is different enough from Ledger entries that reusing it
+ * would need more indirection than it'd save. */
 function AdminsPanel() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newAdmin, setNewAdmin] = useState(NEW_ADMIN_INITIAL);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
-  const [patientSummary, setPatientSummary] = useState(null);
-  const [staffSummary, setStaffSummary] = useState(null);
+
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [actions, setActions] = useState(null);
+
+  const runSearch = async (event) => {
+    event.preventDefault();
+    setError(null);
+    try {
+      setResults(await searchStaff(query, 'admin'));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const fetchActions = useCallback(async () => {
+    if (!selected) return;
+    try {
+      setActions(await getAdminActions(selected.staff_id));
+      setError(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, [selected]);
 
   useEffect(() => {
-    getPatientSummary().then(setPatientSummary).catch((err) => setError(errorMessage(err)));
-    getStaffSummary().then(setStaffSummary).catch((err) => setError(errorMessage(err)));
-  }, []);
+    if (!selected) return undefined;
+    setActions(null);
+    fetchActions();
+    const intervalId = setInterval(fetchActions, POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [selected, fetchActions]);
 
   const handleCreate = async (event) => {
     event.preventDefault();
@@ -364,43 +443,57 @@ function AdminsPanel() {
     <div>
       <div className="ledger-chart-row">
         <div className="ledger-chart-card">
-          <h3>Patients</h3>
-          {patientSummary && (
-            <SummaryCard
-              total={patientSummary.total}
-              totalLabel="total patients"
-              breakdown={Object.entries(patientSummary.by_ward).map(
-                ([ward, count]) => [ward === 'unassigned' ? 'Unassigned' : wardLabel(ward), count]
-              )}
-            />
+          <h3>{selected ? 'Admin Details' : 'Admins'}</h3>
+          {selected ? (
+            <AdminDetailsCard admin={selected} />
+          ) : (
+            <p className="meta-line">Search below to see an admin's details and activity.</p>
           )}
         </div>
         <div className="ledger-chart-card">
-          <h3>Staff</h3>
-          {staffSummary && (
-            <SummaryCard
-              total={staffSummary.total}
-              totalLabel="total staff"
-              breakdown={[
-                ['On duty', staffSummary.on_duty],
-                ['On call', staffSummary.on_call],
-                ...Object.entries(staffSummary.by_role)
-                  .filter(([role]) => role !== 'admin' && role !== 'security_officer')
-                  .map(([role, count]) => [formatRole(role), count]),
-              ]}
-            />
+          <h3>Activity</h3>
+          {selected ? (
+            <AdminActivityCard actions={actions} />
+          ) : (
+            <p className="meta-line">Select an admin to see their account actions.</p>
           )}
         </div>
       </div>
 
+      {selected ? (
+        <button type="button" className="back-link" onClick={() => setSelected(null)}>
+          ← Back to search
+        </button>
+      ) : (
+        <div>
+          <p className="meta-line">Security officers are the only role that can create admin accounts.</p>
+          <div className="search-row">
+            <form className="search-bar" onSubmit={runSearch} role="search">
+              <SearchIcon />
+              <input placeholder="Admin ID or name" value={query} onChange={(e) => setQuery(e.target.value)} />
+            </form>
+            <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>
+              + Create Admin
+            </button>
+          </div>
+        </div>
+      )}
+
       {error && <p role="alert" className="dev-error">{error}</p>}
 
-      <div className="search-row">
-        <p className="meta-line">Security officers are the only role that can create admin accounts.</p>
-        <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>
-          + Create Admin
-        </button>
-      </div>
+      {!selected && results.map((a) => (
+        <div className="card-row" key={a.id}>
+          <div className="card-row-main">
+            <div className="name-line">{a.full_name}</div>
+            <div className="meta-line">{a.staff_id} · Admin</div>
+          </div>
+          <div className="card-row-actions">
+            <button type="button" className="btn-secondary" onClick={() => setSelected(a)}>
+              View activity
+            </button>
+          </div>
+        </div>
+      ))}
 
       {notice && <p className="notice">{notice}</p>}
 

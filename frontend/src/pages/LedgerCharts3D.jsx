@@ -351,4 +351,4 @@ function LedgerDonutChart3D({ entries }) {
   );
 }
 
-export { LedgerRoleBarChart, EventTypeBarChart, LedgerDonutChart3D };
+export { LedgerRoleBarChart, EventTypeBarChart, LedgerDonutChart3D, ROLES };

@@ -455,3 +455,96 @@ class StaffDeleteViewTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
 
         self.assertEqual(LedgerEntry.objects.filter(staff_id=target.staff_id).count(), 1)
+
+
+class AdminActionLogTests(APITestCase):
+    """Audit trail of admin actions on staff accounts (added 2026-08-31) --
+    create/deactivate/reactivate/delete, each written by
+    staff.services.record_admin_action() from the corresponding view."""
+
+    def _login(self, username, password, staff_id, role):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(user=user, staff_id=staff_id, full_name=username, role=role)
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_create_deactivate_reactivate_delete_are_each_logged(self):
+        from .models import AdminActionLog
+
+        admin, admin_token = self._login("adminLogApi1", "pw-log-1", "STF-AL900", Staff.Role.ADMIN)
+
+        create_resp = self.client.post(
+            "/api/staff/create/",
+            {
+                "username": "targetLogApi1",
+                "password": "pw-log-target-1",
+                "staff_id": "STF-AL901",
+                "full_name": "Target One",
+                "role": Staff.Role.NURSE,
+            },
+            format="json",
+            **self._auth(admin_token),
+        )
+        self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED, create_resp.data)
+        target_id = create_resp.data["id"]
+
+        self.client.post(f"/api/staff/{target_id}/deactivate/", **self._auth(admin_token))
+        self.client.post(f"/api/staff/{target_id}/reactivate/", **self._auth(admin_token))
+        self.client.post(f"/api/staff/{target_id}/delete/", **self._auth(admin_token))
+
+        logs = list(
+            AdminActionLog.objects.filter(actor_staff_id="STF-AL900", target_staff_id="STF-AL901")
+            .order_by("occurred_at")
+        )
+        self.assertEqual([entry.action for entry in logs], [
+            AdminActionLog.Action.STAFF_CREATED,
+            AdminActionLog.Action.STAFF_DEACTIVATED,
+            AdminActionLog.Action.STAFF_REACTIVATED,
+            AdminActionLog.Action.STAFF_DELETED,
+        ])
+        # The delete entry still carries the target's identity even though
+        # the Staff row itself is gone by the time it's written.
+        self.assertEqual(logs[-1].target_full_name, "Target One")
+        self.assertEqual(logs[-1].target_role, Staff.Role.NURSE)
+        for entry in logs:
+            self.assertEqual(entry.actor_full_name, "adminLogApi1")
+
+    def test_admin_action_list_scoped_to_requested_actor(self):
+        from .models import AdminActionLog
+
+        admin_one, admin_one_token = self._login("adminLogApi2", "pw-log-2", "STF-AL902", Staff.Role.ADMIN)
+        admin_two, _t = self._login("adminLogApi3", "pw-log-3", "STF-AL903", Staff.Role.ADMIN)
+        target, _t2 = self._login("targetLogApi2", "pw-log-4", "STF-AL904", Staff.Role.CLERK)
+
+        self.client.post(f"/api/staff/{target.id}/deactivate/", **self._auth(admin_one_token))
+
+        _officer, officer_token = self._login(
+            "secLogApi1", "pw-log-5", "STF-AL905", Staff.Role.SECURITY_OFFICER
+        )
+        # A second action by a different actor shouldn't leak into admin_one's list.
+        self.client.post(f"/api/staff/{target.id}/reactivate/", **self._auth(admin_one_token))
+
+        resp = self.client.get(
+            f"/api/staff/admin-actions/?actor_staff_id={admin_one.staff_id}", **self._auth(officer_token)
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp.data), 2)
+        self.assertTrue(all(row["target_staff_id"] == "STF-AL904" for row in resp.data))
+
+        resp_empty = self.client.get(
+            f"/api/staff/admin-actions/?actor_staff_id={admin_two.staff_id}", **self._auth(officer_token)
+        )
+        self.assertEqual(resp_empty.data, [])
+
+    def test_admin_action_list_requires_admin_or_security_officer(self):
+        _clerk, clerk_token = self._login("clerkLogApi1", "pw-log-6", "STF-AL906", Staff.Role.CLERK)
+        resp = self.client.get("/api/staff/admin-actions/", **self._auth(clerk_token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)

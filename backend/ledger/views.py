@@ -10,12 +10,14 @@ PAGE_SIZE = 50
 
 
 class LedgerFeedView(APIView):
-    """GET /api/ledger/entries/?event_type=&staff_id=&patient_hospital_number=&since=&until=&before=
+    """GET /api/ledger/entries/?event_type=&staff_id=&staff_role=&patient_hospital_number=&since=&until=&before=
 
     Security-officer-only read of the hash-chained ledger (CLAUDE.md Security
     Dashboard: "live feed... filterable by staff member/patient/date"). Newest first;
     `before` (a sequence number) pages further back. Read-only -- no write path lives
-    here, that's ledger.services.record_event().
+    here, that's ledger.services.record_event(). `staff_role` added 2026-08-31 for
+    the Ledger page's role "slicer" -- filters on the denormalized staff_role field
+    (see LedgerEntry.staff_role), same as the other exact-match filters above it.
     """
 
     permission_classes = [IsSecurityOfficer]
@@ -30,6 +32,10 @@ class LedgerFeedView(APIView):
         staff_id = request.query_params.get("staff_id")
         if staff_id:
             entries = entries.filter(staff_id=staff_id)
+
+        staff_role = request.query_params.get("staff_role")
+        if staff_role:
+            entries = entries.filter(staff_role=staff_role)
 
         patient_hospital_number = request.query_params.get("patient_hospital_number")
         if patient_hospital_number:
