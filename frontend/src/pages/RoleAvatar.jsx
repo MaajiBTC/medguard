@@ -1,25 +1,33 @@
 // One small flat-cartoon "mascot" avatar per role, hand-drawn as plain SVG
 // shapes (no icon library, no downloaded/generated images -- per the user,
-// 2026-08-31, after a stock-photo reference couldn't be reproduced due to
-// copyright). Shown as the left-hand avatar on the Staff/Patients/Admins
+// 2026-08-31, after two stock-photo references couldn't be reproduced due
+// to copyright). Shown as the left-hand avatar on the Staff/Patients/Admins
 // activity pages once a specific entity is selected. Each character shares
 // the same face/head shapes; only hair, outfit color, and a small
-// role-specific accessory differ.
+// role-specific accessory differ. Face redrawn bigger/more expressive
+// (larger eyes+highlight, visible eyebrows) the same day to get closer to
+// the reference images' style within hand-drawn-SVG limits.
 
 function Head({ skin, hair }) {
   return (
     <>
-      <circle cx="50" cy="42" r="22" fill={skin} />
-      <ellipse cx="42" cy="35" rx="7" ry="5" fill="#ffffff" opacity="0.35" />
+      <circle cx="50" cy="44" r="24" fill={skin} />
+      <ellipse cx="41" cy="36" rx="8" ry="6" fill="#ffffff" opacity="0.35" />
       <path
-        d="M28 38 C27 18 73 18 72 38 C70 26 60 22 50 22 C40 22 30 26 28 38 Z"
+        d="M25 40 C24 16 76 16 75 40 C75 26 64 20 50 20 C36 20 25 26 25 40 Z"
         fill={hair}
       />
-      <circle cx="42" cy="44" r="2.2" fill="#2a0f5c" />
-      <circle cx="58" cy="44" r="2.2" fill="#2a0f5c" />
-      <circle cx="40" cy="52" r="3.5" fill="#f28fa3" opacity="0.5" />
-      <circle cx="60" cy="52" r="3.5" fill="#f28fa3" opacity="0.5" />
-      <path d="M43 54 Q50 59 57 54" stroke="#8a4a2c" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      <path d="M35 40 Q39 36 44 40" stroke="#2a1810" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      <path d="M56 40 Q61 36 65 40" stroke="#2a1810" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      <ellipse cx="40" cy="46" rx="5" ry="6" fill="#ffffff" />
+      <ellipse cx="60" cy="46" rx="5" ry="6" fill="#ffffff" />
+      <circle cx="40.5" cy="47" r="3.4" fill="#4a2f18" />
+      <circle cx="60.5" cy="47" r="3.4" fill="#4a2f18" />
+      <circle cx="39.3" cy="45.6" r="1.1" fill="#ffffff" />
+      <circle cx="59.3" cy="45.6" r="1.1" fill="#ffffff" />
+      <circle cx="39" cy="55" r="3.8" fill="#f28fa3" opacity="0.45" />
+      <circle cx="61" cy="55" r="3.8" fill="#f28fa3" opacity="0.45" />
+      <path d="M42 58 Q50 63 58 58" stroke="#8a4a2c" strokeWidth="1.8" fill="none" strokeLinecap="round" />
     </>
   );
 }
@@ -27,13 +35,13 @@ function Head({ skin, hair }) {
 function DoctorIcon() {
   return (
     <svg viewBox="0 0 100 100">
-      <path d="M35 78 L50 90 L65 78 L65 100 L35 100 Z" fill="#e6e0fb" />
+      <path d="M35 80 L50 92 L65 80 L65 102 L35 102 Z" fill="#e6e0fb" />
       <Head skin="#f0b98d" hair="#3b2b20" />
-      <path d="M38 78 Q50 74 62 78 L62 70 Q50 66 38 70 Z" fill="#ffffff" />
-      <path d="M45 72 L50 80 L55 72 L52 70 L48 70 Z" fill="#2f5fa8" />
-      <circle cx="38" cy="86" r="4" fill="none" stroke="#8a97ab" strokeWidth="2.4" />
-      <path d="M38 82 L38 76 Q38 72 44 72" fill="none" stroke="#8a97ab" strokeWidth="2.4" />
-      <path d="M62 74 Q66 74 66 78" fill="none" stroke="#8a97ab" strokeWidth="2.4" />
+      <path d="M36 80 Q50 75 64 80 L64 71 Q50 66 36 71 Z" fill="#ffffff" />
+      <path d="M44 73 L50 82 L56 73 L53 71 L47 71 Z" fill="#2f5fa8" />
+      <circle cx="36" cy="88" r="4.5" fill="none" stroke="#8a97ab" strokeWidth="2.6" />
+      <path d="M36 83.5 L36 77 Q36 72 43 72" fill="none" stroke="#8a97ab" strokeWidth="2.6" />
+      <path d="M64 75 Q68 75 68 79" fill="none" stroke="#8a97ab" strokeWidth="2.6" />
     </svg>
   );
 }
@@ -41,12 +49,15 @@ function DoctorIcon() {
 function NurseIcon() {
   return (
     <svg viewBox="0 0 100 100">
-      <path d="M35 78 L50 90 L65 78 L65 100 L35 100 Z" fill="#ffd9e6" />
-      <Head skin="#f0b98d" hair="#5a3a24" />
-      <path d="M26 26 Q50 8 74 26 Q74 20 50 16 Q26 20 26 26 Z" fill="#ffffff" />
-      <rect x="45" y="14" width="10" height="10" fill="#ffffff" />
-      <rect x="47.5" y="11.5" width="5" height="15" fill="#e0435c" />
-      <rect x="42.5" y="16.5" width="15" height="5" fill="#e0435c" />
+      <path d="M35 80 L50 92 L65 80 L65 102 L35 102 Z" fill="#ffd9e6" />
+      <path d="M63 32 C82 36 84 60 70 76 C78 62 76 44 62 36 Z" fill="#6a3d28" />
+      <circle cx="66" cy="34" r="4" fill="#8a5a3a" />
+      <Head skin="#f0b98d" hair="#6a3d28" />
+      <path d="M36 80 Q50 75 64 80 L64 71 Q50 66 36 71 Z" fill="#ffffff" />
+      <path d="M42 74 Q50 78 58 74" fill="none" stroke="#3fb3a3" strokeWidth="2.5" />
+      <circle cx="36" cy="88" r="4.5" fill="none" stroke="#8a97ab" strokeWidth="2.6" />
+      <path d="M36 83.5 L36 77 Q36 72 43 72" fill="none" stroke="#8a97ab" strokeWidth="2.6" />
+      <path d="M64 75 Q68 75 68 79" fill="none" stroke="#8a97ab" strokeWidth="2.6" />
     </svg>
   );
 }
@@ -54,10 +65,10 @@ function NurseIcon() {
 function PharmacistIcon() {
   return (
     <svg viewBox="0 0 100 100">
-      <path d="M35 78 L50 90 L65 78 L65 100 L35 100 Z" fill="#dff5ea" />
+      <path d="M35 80 L50 92 L65 80 L65 102 L35 102 Z" fill="#dff5ea" />
       <Head skin="#e3a877" hair="#1f1a17" />
-      <path d="M38 78 Q50 74 62 78 L62 70 Q50 66 38 70 Z" fill="#ffffff" />
-      <g transform="translate(50 82) rotate(-40)">
+      <path d="M36 80 Q50 75 64 80 L64 71 Q50 66 36 71 Z" fill="#ffffff" />
+      <g transform="translate(50 84) rotate(-40)">
         <rect x="-9" y="-3" width="18" height="6" rx="3" fill="#3fb3a3" />
         <line x1="-6" y1="0" x2="6" y2="0" stroke="#ffffff" strokeWidth="1.3" />
       </g>
@@ -68,14 +79,14 @@ function PharmacistIcon() {
 function LabTechnicianIcon() {
   return (
     <svg viewBox="0 0 100 100">
-      <path d="M35 78 L50 90 L65 78 L65 100 L35 100 Z" fill="#ffffff" />
+      <path d="M35 80 L50 92 L65 80 L65 102 L35 102 Z" fill="#ffffff" />
       <Head skin="#f0b98d" hair="#6b4a2f" />
-      <rect x="33" y="41" width="14" height="9" rx="4" fill="none" stroke="#2a0f5c" strokeWidth="2" />
-      <rect x="53" y="41" width="14" height="9" rx="4" fill="none" stroke="#2a0f5c" strokeWidth="2" />
-      <line x1="47" y1="45.5" x2="53" y2="45.5" stroke="#2a0f5c" strokeWidth="2" />
-      <path d="M38 78 Q50 74 62 78 L62 70 Q50 66 38 70 Z" fill="#ffffff" />
-      <path d="M44 74 L38 80 L38 88 L44 84 Z" fill="#7ad1c4" />
-      <path d="M56 74 L62 80 L62 88 L56 84 Z" fill="#7ad1c4" />
+      <rect x="32" y="42" width="15" height="9" rx="4" fill="none" stroke="#2a0f5c" strokeWidth="2" />
+      <rect x="53" y="42" width="15" height="9" rx="4" fill="none" stroke="#2a0f5c" strokeWidth="2" />
+      <line x1="47" y1="46.5" x2="53" y2="46.5" stroke="#2a0f5c" strokeWidth="2" />
+      <path d="M36 80 Q50 75 64 80 L64 71 Q50 66 36 71 Z" fill="#ffffff" />
+      <path d="M43 74 L36 81 L36 90 L43 85 Z" fill="#7ad1c4" />
+      <path d="M57 74 L64 81 L64 90 L57 85 Z" fill="#7ad1c4" />
     </svg>
   );
 }
@@ -83,10 +94,10 @@ function LabTechnicianIcon() {
 function ClerkIcon() {
   return (
     <svg viewBox="0 0 100 100">
-      <path d="M35 78 L50 90 L65 78 L65 100 L35 100 Z" fill="#e6e0fb" />
+      <path d="M35 80 L50 92 L65 80 L65 102 L35 102 Z" fill="#e6e0fb" />
       <Head skin="#f0b98d" hair="#4a3223" />
-      <path d="M40 78 L50 86 L60 78 L60 70 L50 74 L40 70 Z" fill="#6528d9" />
-      <path d="M46 70 L50 82 L54 70 L52 68 L48 68 Z" fill="#ffffff" />
+      <path d="M39 80 L50 88 L61 80 L61 71 L50 76 L39 71 Z" fill="#6528d9" />
+      <path d="M46 71 L50 84 L54 71 L52 69 L48 69 Z" fill="#ffffff" />
     </svg>
   );
 }
@@ -94,11 +105,11 @@ function ClerkIcon() {
 function AdminIcon() {
   return (
     <svg viewBox="0 0 100 100">
-      <path d="M35 78 L50 90 L65 78 L65 100 L35 100 Z" fill="#2a0f5c" />
+      <path d="M35 80 L50 92 L65 80 L65 102 L35 102 Z" fill="#2a0f5c" />
       <Head skin="#e3a877" hair="#241a12" />
-      <path d="M38 78 Q50 74 62 78 L62 70 Q50 66 38 70 Z" fill="#2a0f5c" />
-      <path d="M50 72 L58 76 L58 84 Q50 90 42 84 L42 76 Z" fill="#c4b5fd" />
-      <path d="M50 74 L55 77 L55 82 Q50 87 45 82 L45 77 Z" fill="#6528d9" />
+      <path d="M36 80 Q50 75 64 80 L64 71 Q50 66 36 71 Z" fill="#2a0f5c" />
+      <path d="M50 73 L59 77 L59 86 Q50 92 41 86 L41 77 Z" fill="#c4b5fd" />
+      <path d="M50 75 L56 78 L56 84 Q50 89 44 84 L44 78 Z" fill="#6528d9" />
     </svg>
   );
 }
@@ -106,10 +117,10 @@ function AdminIcon() {
 function PatientIcon() {
   return (
     <svg viewBox="0 0 100 100">
-      <path d="M35 78 L50 90 L65 78 L65 100 L35 100 Z" fill="#bfe3f0" />
+      <path d="M35 80 L50 92 L65 80 L65 102 L35 102 Z" fill="#bfe3f0" />
       <Head skin="#f0b98d" hair="#7a5236" />
-      <path d="M38 78 Q50 74 62 78 L62 70 Q50 66 38 70 Z" fill="#eef7fb" />
-      <path d="M46 73 q4 3 8 0" stroke="#e0435c" strokeWidth="2" fill="none" strokeLinecap="round" />
+      <path d="M36 80 Q50 75 64 80 L64 71 Q50 66 36 71 Z" fill="#eef7fb" />
+      <path d="M45 74 q5 4 10 0" stroke="#e0435c" strokeWidth="2" fill="none" strokeLinecap="round" />
     </svg>
   );
 }

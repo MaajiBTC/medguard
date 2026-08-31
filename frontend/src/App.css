@@ -457,17 +457,19 @@ button {
 }
 
 /* Selected-entity detail layout (added 2026-08-31, per the user): the left
-   chart card's content swaps to a role avatar (~30% width) beside a
-   vertically-stacked details block, once a specific staff/patient/admin is
-   selected on the Staff/Patients/Admins activity pages. */
+   chart card's content swaps to a role avatar beside a vertically-stacked
+   details block, once a specific staff/patient/admin is selected on the
+   Staff/Patients/Admins activity pages. Avatar sized up (2026-08-31, per
+   the user -- "more than double" the original) with the details column
+   pushed further right to match. */
 .entity-detail-row {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
 }
 
 .entity-detail-avatar {
-  flex: 0 0 30%;
+  flex: 0 0 46%;
   display: flex;
   justify-content: center;
 }
@@ -479,7 +481,7 @@ button {
 
 .role-avatar {
   width: 100%;
-  max-width: 84px;
+  max-width: 190px;
   aspect-ratio: 1;
   border-radius: 50%;
   background: var(--lavender);

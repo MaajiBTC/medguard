@@ -438,6 +438,25 @@ correctly on the Staff page for the real `282828` account, and the admin
 mascot renders correctly on the Admins page for the real `ADMIN-1` account.
 No console errors.
 
+**Amended a fifteenth time (2026-08-31, avatar face v2 + bigger + resized
+layout):** same day, the user shared two more reference images (a 3D
+doctor and nurse) and asked for a closer match plus a much bigger avatar
+with the details column pushed further right. The two reference images are
+also watermarked stock illustrations (pngtree) — same copyright block as
+the fourteenth amendment — so `RoleAvatar.jsx`'s shared `Head` component
+was instead redrawn bigger/more expressive within the existing hand-drawn-
+SVG approach: larger two-tone eyes (white sclera + iris + highlight dot)
+and visible eyebrow arcs, applied to all 7 characters. The **nurse**
+specifically dropped her cap in favor of a side ponytail (a simple curved
+shape trailing from behind the head) plus a stethoscope like the doctor's,
+matching the reference's no-cap look. `App.css`: `.role-avatar`'s
+`max-width` raised from 84px to 190px (more than double, per the user) and
+`.entity-detail-avatar`'s flex-basis raised from 30% to 46% so the details
+column starts further right to match. Prototyped in the same local-HTML-
+preview workflow as the fourteenth amendment before porting in. Verified
+live in-browser against the real `282828` doctor account — bigger avatar,
+new face, details shifted right, no console errors.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.
