@@ -1,13 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 
 import { CLINICAL_ROLES } from '../roles';
 
 // CLAUDE.md scopes three.js to exactly two places: this panel (replacing the
-// earlier spiral) and the login page. Hand-rolled with three.js primitives
-// rather than a charting library -- this project has never pulled one in
-// (frontend/package.json has no d3/recharts/chart.js), matching how every
-// other visual here (icons, the login shield) is built from scratch.
+// earlier spiral) and the login page. LedgerDonutChart3D below is still
+// hand-rolled three.js (no charting library -- frontend/package.json has no
+// d3/recharts/chart.js -- matching how every other visual here is built from
+// scratch); LedgerRoleBarChart is plain 2D CSS, per the user (2026-08-31).
 
 // Same 4 severity colors already used elsewhere on this page (the live-feed
 // table's row coloring) -- STANDARD_ACCESS excluded, matching the page's own
@@ -31,7 +31,6 @@ const EVENT_TYPES = Object.keys(SEVERITY_COLOR);
 // Fixed row order for the role bar chart -- mirrors backend/staff/models.py's
 // Staff.CLINICAL_ROLES, same set already used elsewhere on the frontend.
 const ROLES = [...CLINICAL_ROLES];
-const PLUM = 0x6528d9;
 
 function formatRole(role) {
   return role.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
@@ -39,6 +38,29 @@ function formatRole(role) {
 
 function toHex(n) {
   return `#${n.toString(16).padStart(6, '0')}`;
+}
+
+// Heat scale for the role bar chart, per the user: green (least activity) ->
+// yellow -> orange -> red (most). t=0..1, where 1 is the busiest role in the
+// current feed.
+const HEAT_STOPS = [
+  [34, 197, 94], // green
+  [234, 179, 8], // yellow
+  [249, 115, 22], // orange
+  [239, 68, 68], // red
+];
+
+function heatColor(t) {
+  const clamped = Math.min(Math.max(t, 0), 1);
+  const scaled = clamped * (HEAT_STOPS.length - 1);
+  const i = Math.min(Math.floor(scaled), HEAT_STOPS.length - 2);
+  const localT = scaled - i;
+  const [r1, g1, b1] = HEAT_STOPS[i];
+  const [r2, g2, b2] = HEAT_STOPS[i + 1];
+  const r = Math.round(r1 + (r2 - r1) * localT);
+  const g = Math.round(g1 + (g2 - g1) * localT);
+  const b = Math.round(b1 + (b2 - b1) * localT);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 // Same easing already used for the login shield's entrance (LoginScene.jsx).
@@ -59,21 +81,6 @@ function Legend() {
         <span key={type} className="ledger-chart-legend-item">
           <span className="ledger-chart-legend-dot" style={{ background: toHex(SEVERITY_COLOR[type]) }} />
           {SEVERITY_LABEL[type]}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-// The bar chart's bars are all one color (role isn't a severity), so its
-// legend reads exact counts per role instead of explaining a color per item.
-function RoleCounts({ entries }) {
-  return (
-    <div className="ledger-chart-legend">
-      {ROLES.map((role) => (
-        <span key={role} className="ledger-chart-legend-item">
-          <span className="ledger-chart-legend-dot" style={{ background: toHex(PLUM) }} />
-          {formatRole(role)}: {entries.filter((e) => e.staff_role === role).length}
         </span>
       ))}
     </div>
@@ -153,98 +160,44 @@ function useThreeMount(mountRef, stateRef, onFrame) {
   }, []);
 }
 
-const BAR_ROW_SPACING = 0.55;
-const BAR_HEIGHT = 0.34;
-const BAR_MAX_LENGTH = 4;
+/** Left card: a plain 2D horizontal bar chart (per the user -- no three.js
+ * here, unlike the donut) -- one row per staff role (Doctor/Nurse/
+ * Pharmacist/Lab Technician/Clerk), bar length proportional to how many
+ * current Ledger entries involved that role. Bar color is a red/orange/
+ * yellow/green heat scale keyed to that role's count relative to the busiest
+ * role, not the severity palette -- role isn't a severity, so that scheme
+ * wouldn't mean anything here; severity stays where it still applies (the
+ * donut, the live-feed table rows). Bars animate in via a CSS width
+ * transition, growing from 0 a tick after mount/data changes rather than
+ * jumping straight to their final width. */
+function LedgerRoleBarChart({ entries }) {
+  const counts = ROLES.map((role) => entries.filter((e) => e.staff_role === role).length);
+  const maxCount = Math.max(...counts, 1);
+  const targetPercents = counts.map((c) => (c / maxCount) * 100);
+  const targetKey = targetPercents.join(',');
 
-/** Left card: a live 3D horizontal bar chart -- one extruded bar per staff
- * role (Doctor/Nurse/Pharmacist/Lab Technician/Clerk), length proportional to
- * how many current Ledger entries involved that role. Grows out from the
- * axis on first load / when new data arrives. Bars are a single on-brand
- * plum tone rather than the severity palette -- role isn't a severity, so
- * that color scheme wouldn't mean anything here; severity stays where it
- * still applies (the donut, the live-feed table rows). */
-function LedgerRoleBarChart3D({ entries }) {
-  const mountRef = useRef(null);
-  const stateRef = useRef(null);
-
-  const onFrame = (state) => {
-    if (!state) return;
-    const { group, entrance } = state;
-    const elapsed = performance.now() - entrance.start;
-
-    if (entrance.phase === 'in') {
-      const t = Math.min(elapsed / 700, 1);
-      group.scale.x = Math.max(easeOutBack(t), 0);
-      if (t >= 1) {
-        group.scale.x = 1;
-        entrance.phase = 'idle';
-      }
-    } else if (entrance.phase === 'pulse') {
-      const t = Math.min(elapsed / 380, 1);
-      group.scale.x = 1 - 0.15 * Math.sin(Math.PI * t);
-      if (t >= 1) {
-        group.scale.x = 1;
-        entrance.phase = 'idle';
-      }
-    }
-
-    group.rotation.y += 0.0015;
-  };
-
-  useThreeMount(mountRef, stateRef, onFrame);
+  const [percents, setPercents] = useState(() => ROLES.map(() => 0));
 
   useEffect(() => {
-    const state = stateRef.current;
-    if (!state) return;
-    const { group, camera } = state;
-
-    camera.position.set(3.5, 2, 6.5);
-    camera.lookAt(1.5, -(BAR_ROW_SPACING * (ROLES.length - 1)) / 2, 0);
-
-    group.children.forEach((mesh) => {
-      mesh.geometry.dispose();
-      mesh.material.dispose();
-    });
-    group.clear();
-
-    const counts = ROLES.map((role) => entries.filter((e) => e.staff_role === role).length);
-    const maxCount = Math.max(...counts, 1);
-
-    ROLES.forEach((role, index) => {
-      const length = Math.max((counts[index] / maxCount) * BAR_MAX_LENGTH, 0.06);
-      const shape = new THREE.Shape();
-      shape.moveTo(0, 0);
-      shape.lineTo(length, 0);
-      shape.lineTo(length, BAR_HEIGHT);
-      shape.lineTo(0, BAR_HEIGHT);
-      shape.closePath();
-
-      const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.34, bevelEnabled: false });
-      const material = new THREE.MeshStandardMaterial({
-        color: PLUM,
-        emissive: PLUM,
-        emissiveIntensity: 0.4,
-      });
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(0, -index * BAR_ROW_SPACING, 0);
-      group.add(mesh);
-    });
-
-    const signature = entriesSignature(entries);
-    if (!state.everLoaded) {
-      state.everLoaded = true;
-    } else if (signature !== state.lastSignature) {
-      state.entrance.phase = 'pulse';
-      state.entrance.start = performance.now();
-    }
-    state.lastSignature = signature;
-  }, [entries]);
+    const frameId = requestAnimationFrame(() => setPercents(targetPercents));
+    return () => cancelAnimationFrame(frameId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetKey]);
 
   return (
-    <div>
-      <div ref={mountRef} className="ledger-chart-mount" />
-      <RoleCounts entries={entries} />
+    <div className="role-bar-chart">
+      {ROLES.map((role, index) => (
+        <div className="role-bar-row" key={role}>
+          <span className="role-bar-label">{formatRole(role)}</span>
+          <div className="role-bar-track">
+            <div
+              className="role-bar-fill"
+              style={{ width: `${percents[index]}%`, background: heatColor(counts[index] / maxCount) }}
+            />
+          </div>
+          <span className="role-bar-count">{counts[index]}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -363,4 +316,4 @@ function LedgerDonutChart3D({ entries }) {
   );
 }
 
-export { LedgerRoleBarChart3D, LedgerDonutChart3D };
+export { LedgerRoleBarChart, LedgerDonutChart3D };

@@ -5,7 +5,7 @@ import { searchPatients } from '../api/patients';
 import { createStaff, searchStaff } from '../api/staff';
 import Modal from '../components/Modal';
 import DashboardShell, { LedgerIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
-import { LedgerDonutChart3D, LedgerRoleBarChart3D } from './LedgerCharts3D';
+import { LedgerDonutChart3D, LedgerRoleBarChart } from './LedgerCharts3D';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -105,7 +105,7 @@ function LedgerPanel() {
       <div className="ledger-chart-row">
         <div className="ledger-chart-card">
           <h3>Activity by staff role</h3>
-          <LedgerRoleBarChart3D entries={entries} />
+          <LedgerRoleBarChart entries={entries} />
         </div>
         <div className="ledger-chart-card">
           <h3>Event breakdown</h3>

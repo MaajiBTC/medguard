@@ -195,20 +195,27 @@ visibly re-trigger anything) — same `easeOutBack` entrance easing already
 used for the login shield in `LoginScene.jsx`.
 
 **Amended a third time (2026-08-30, role bar chart + white/plum cards):** the
-left card changed again the same day, per the user — it's now
-`LedgerRoleBarChart3D`, a 3D **horizontal bar chart** of Ledger activity
-broken down by **staff role** (Doctor/Nurse/Pharmacist/Lab Technician/Clerk),
-not event type over time. This needed a small `ledger` app addition:
-`LedgerEntry.staff_role` (new denormalized field, same reasoning as
-`staff_full_name` — the Ledger can't hold a foreign key to `Staff`, and
-**not** part of `_compute_entry_hash()`'s payload, matching how
-`staff_full_name` was never hashed either), populated by
+left card changed again the same day, per the user — it's now a horizontal
+bar chart of Ledger activity broken down by **staff role** (Doctor/Nurse/
+Pharmacist/Lab Technician/Clerk), not event type over time. This needed a
+small `ledger` app addition: `LedgerEntry.staff_role` (new denormalized
+field, same reasoning as `staff_full_name` — the Ledger can't hold a foreign
+key to `Staff`, and **not** part of `_compute_entry_hash()`'s payload,
+matching how `staff_full_name` was never hashed either), populated by
 `ledger.services.record_event()` alongside the other denormalized staff
-fields. Bars are a single on-brand plum tone rather than the severity
-palette, since role isn't a severity — severity color stays exactly where it
-still means something (the donut, the live-feed table rows). Both
-`.ledger-chart-card`s also switched from lavender to **white with a
-1px `var(--plum)` border**.
+fields. Both `.ledger-chart-card`s also switched from lavender to **white
+with a 1px `var(--plum)` border**.
+
+**Amended a fourth time (2026-08-31, 2D + heat-scale coloring):** the bar
+chart itself changed the very next day, per the user — `LedgerRoleBarChart`
+(`frontend/src/pages/LedgerCharts3D.jsx`) is now plain 2D CSS (a
+`div`-and-width-percentage bar per role, `transition: width` for the
+grow-in), not three.js — so this panel now holds one three.js visual
+(`LedgerDonutChart3D`) and one plain-CSS one side by side. Bar color is a
+red/orange/yellow/green heat scale keyed to that role's count relative to
+the busiest role in the current feed (red = busiest), not the flat plum used
+before — a deliberate departure from the severity palette, chosen by the
+user specifically for this chart.
 
 ## Offline Mode
 
