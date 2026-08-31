@@ -379,20 +379,29 @@ button {
   background: #f6f1fd;
 }
 
-.ledger-row.severity-EMERGENCY_OVERRIDE {
-  color: #e879f9;
+/* Severity color-coding, exact palette per the user (2026-08-31) -- applied
+   as a left-edge stripe on the row's first cell rather than text color:
+   #FFFF00 (audited deviation) as running text on a white row would be all
+   but unreadable, so a colored stripe + keeping body text its normal color
+   keeps every row legible while still using the exact requested hues. */
+.ledger-row.severity-STANDARD_ACCESS td:first-child {
+  border-left: 4px solid #00cc00;
 }
 
-.ledger-row.severity-ACCESS_DENIED {
-  color: #f87171;
+.ledger-row.severity-AUDITED_DEVIATION td:first-child {
+  border-left: 4px solid #ffff00;
 }
 
-.ledger-row.severity-REDUCED_ACCESS {
-  color: #fb923c;
+.ledger-row.severity-REDUCED_ACCESS td:first-child {
+  border-left: 4px solid #ff9300;
 }
 
-.ledger-row.severity-AUDITED_DEVIATION {
-  color: #d97706;
+.ledger-row.severity-ACCESS_DENIED td:first-child {
+  border-left: 4px solid #ff0000;
+}
+
+.ledger-row.severity-EMERGENCY_OVERRIDE td:first-child {
+  border-left: 4px solid #0000ff;
 }
 
 .ledger-drilldown pre {

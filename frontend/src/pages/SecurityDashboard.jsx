@@ -10,12 +10,12 @@ import { LedgerDonutChart3D, LedgerRoleBarChart } from './LedgerCharts3D';
 const POLL_INTERVAL_MS = 5000;
 
 const EVENT_TYPE_OPTIONS = [
-  { value: '', label: 'All flagged events' },
+  { value: '', label: 'All events' },
+  { value: 'STANDARD_ACCESS', label: 'Standard access' },
   { value: 'AUDITED_DEVIATION', label: 'Audited deviation' },
   { value: 'REDUCED_ACCESS', label: 'Reduced access' },
   { value: 'ACCESS_DENIED', label: 'Access denied' },
   { value: 'EMERGENCY_OVERRIDE', label: 'Emergency override' },
-  { value: 'STANDARD_ACCESS', label: 'Standard access (not normally shown)' },
 ];
 
 function errorMessage(err) {
@@ -74,11 +74,12 @@ function LedgerEntriesFeed({ entries, error }) {
   );
 }
 
-/** Ledger page: live, filterable feed of AUDITED_DEVIATION/REDUCED_ACCESS/
- * ACCESS_DENIED/EMERGENCY_OVERRIDE events with drill-down, plus the three.js
- * visualization scoped to this screen (per CLAUDE.md). Staff/patient lookup
- * moved out to their own sidebar pages below (added 2026-08-30) -- this page
- * keeps only the event-type filter, which is a property of the feed itself. */
+/** Ledger page: live, filterable feed of all 5 event types (including
+ * STANDARD_ACCESS, shown by default again as of 2026-08-31 per the user) with
+ * drill-down, plus the three.js visualization scoped to this screen (per
+ * CLAUDE.md). Staff/patient lookup moved out to their own sidebar pages below
+ * (added 2026-08-30) -- this page keeps only the event-type filter, which is
+ * a property of the feed itself. */
 function LedgerPanel() {
   const [eventType, setEventType] = useState('');
   const [entries, setEntries] = useState([]);
@@ -87,7 +88,7 @@ function LedgerPanel() {
   const fetchEntries = useCallback(async () => {
     try {
       const data = await getLedgerEntries({ event_type: eventType || undefined });
-      setEntries(eventType ? data : data.filter((e) => e.event_type !== 'STANDARD_ACCESS'));
+      setEntries(data);
       setError(null);
     } catch (err) {
       setError(err.message);

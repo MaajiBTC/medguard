@@ -9,17 +9,20 @@ import { CLINICAL_ROLES } from '../roles';
 // d3/recharts/chart.js -- matching how every other visual here is built from
 // scratch); LedgerRoleBarChart is plain 2D CSS, per the user (2026-08-31).
 
-// Same 4 severity colors already used elsewhere on this page (the live-feed
-// table's row coloring) -- STANDARD_ACCESS excluded, matching the page's own
-// default filter.
+// Exact severity palette per the user (2026-08-31) -- same 5 colors used for
+// the live-feed table's row stripes (App.css's .ledger-row.severity-* rules).
+// STANDARD_ACCESS is included here (and so in EVENT_TYPES/the donut below)
+// since it's no longer hidden from the feed by default.
 const SEVERITY_COLOR = {
-  AUDITED_DEVIATION: 0xfbbf24,
-  REDUCED_ACCESS: 0xfb923c,
-  ACCESS_DENIED: 0xf87171,
-  EMERGENCY_OVERRIDE: 0xe879f9,
+  STANDARD_ACCESS: 0x00cc00,
+  AUDITED_DEVIATION: 0xffff00,
+  REDUCED_ACCESS: 0xff9300,
+  ACCESS_DENIED: 0xff0000,
+  EMERGENCY_OVERRIDE: 0x0000ff,
 };
 
 const SEVERITY_LABEL = {
+  STANDARD_ACCESS: 'Standard access',
   AUDITED_DEVIATION: 'Audited deviation',
   REDUCED_ACCESS: 'Reduced access',
   ACCESS_DENIED: 'Access denied',

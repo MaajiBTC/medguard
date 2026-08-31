@@ -217,6 +217,21 @@ the busiest role in the current feed (red = busiest), not the flat plum used
 before — a deliberate departure from the severity palette, chosen by the
 user specifically for this chart.
 
+**Amended a fifth time (2026-08-31, STANDARD_ACCESS shown + exact severity
+palette):** `STANDARD_ACCESS` is no longer hidden from the Ledger live feed
+by default (`SecurityDashboard.jsx`'s `LedgerPanel` used to filter it out
+client-side unless explicitly selected; that filter is gone, and the
+event-type dropdown's "not normally shown" label is gone too, per the user).
+The 5-event-type severity palette is now an exact fixed set the user
+specified: `STANDARD_ACCESS` `#00CC00`, `AUDITED_DEVIATION` `#FFFF00`,
+`REDUCED_ACCESS` `#FF9300`, `ACCESS_DENIED` `#FF0000`, `EMERGENCY_OVERRIDE`
+`#0000FF` — used as-is for `LedgerDonutChart3D`'s slices/legend
+(`LedgerCharts3D.jsx`'s `SEVERITY_COLOR`/`SEVERITY_LABEL`, now including
+`STANDARD_ACCESS`) and, in `App.css`, as a **left-edge border stripe** on
+each live-feed table row rather than text color — `#FFFF00` as running body
+text on a white row would be close to unreadable, so the exact hex still
+shows (as a stripe) but body text stays its normal readable color.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.
