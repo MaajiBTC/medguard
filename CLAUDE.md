@@ -417,6 +417,27 @@ on-duty/on-call concept at all), and that page's right card in the selected
 state is `AdminActivityCard` (`AdminActionLog` entries), not Ledger data a
 duty slicer could narrow in the first place.
 
+**Amended a fourteenth time (2026-08-31, mascot-style avatars):** same day,
+per the user, confirmed via `AskUserQuestion`. The user shared a 3D-rendered
+stock photo (a cartoon doctor character) as a reference for what they
+wanted `RoleAvatar` to look like — since that exact image is a watermarked,
+copyrighted stock illustration and there's no way to generate a real 3D
+render, `RoleAvatar.jsx` was rebuilt as hand-drawn flat-cartoon "mascot"
+SVGs instead (still no downloaded/generated images): a shared `Head`
+(skin-tone circle, gloss highlight, hair shape, dot eyes, blush cheeks,
+smile) reused across all 7 characters, each varying only hair color, an
+outfit-colored collar/coat shape, and a small role prop — stethoscope
+(doctor), nurse cap with a cross (nurse), a small pill capsule (pharmacist),
+safety goggles (lab technician), a purple tie (clerk), a shield pin on a
+dark suit (admin), a plain gown with a small heart stitch (patient, the one
+generic icon per the existing rule). Prototyped and visually tweaked in a
+standalone HTML file served locally before porting into the component, to
+avoid iterating blind. Verified live in-browser (Claude-in-Chrome, logged
+in as the real security officer account): the doctor mascot renders
+correctly on the Staff page for the real `282828` account, and the admin
+mascot renders correctly on the Admins page for the real `ADMIN-1` account.
+No console errors.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.

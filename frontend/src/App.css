@@ -489,6 +489,11 @@ button {
   justify-content: center;
 }
 
+.role-avatar svg {
+  width: 62%;
+  height: 62%;
+}
+
 /* Live feed: a tinted "tray" holding one white row-card per entry (added
    2026-08-31, per the user) -- distinct cards with gaps between them, not one
    shared table sheet, same "individual card per row" language as .card-row
