@@ -163,23 +163,20 @@ function useThreeMount(mountRef, stateRef, onFrame) {
   }, []);
 }
 
-/** Left card: a plain 2D horizontal bar chart (per the user -- no three.js
- * here, unlike the donut) -- one row per staff role (Doctor/Nurse/
- * Pharmacist/Lab Technician/Clerk), bar length proportional to how many
- * current Ledger entries involved that role. Bar color is a red/orange/
- * yellow/green heat scale keyed to that role's count relative to the busiest
- * role, not the severity palette -- role isn't a severity, so that scheme
- * wouldn't mean anything here; severity stays where it still applies (the
- * donut, the live-feed table rows). Bars animate in via a CSS width
- * transition, growing from 0 a tick after mount/data changes rather than
- * jumping straight to their final width. */
-function LedgerRoleBarChart({ entries }) {
-  const counts = ROLES.map((role) => entries.filter((e) => e.staff_role === role).length);
-  const maxCount = Math.max(...counts, 1);
-  const targetPercents = counts.map((c) => (c / maxCount) * 100);
+/** Plain 2D horizontal bar chart (per the user -- no three.js here, unlike
+ * the donut) -- one row per `rows` entry, bar length proportional to
+ * `count` relative to the largest count in the set. Bars animate in via a
+ * CSS width transition, growing from 0 a tick after mount/data changes
+ * rather than jumping straight to their final width. Generic over what the
+ * rows represent (staff role, event type, ...) -- `LedgerRoleBarChart` and
+ * `EventTypeBarChart` below are both thin wrappers that build `rows` from
+ * different data and colors. */
+function HorizontalBarChart({ rows }) {
+  const maxCount = Math.max(...rows.map((r) => r.count), 1);
+  const targetPercents = rows.map((r) => (r.count / maxCount) * 100);
   const targetKey = targetPercents.join(',');
 
-  const [percents, setPercents] = useState(() => ROLES.map(() => 0));
+  const [percents, setPercents] = useState(() => rows.map(() => 0));
 
   useEffect(() => {
     const frameId = requestAnimationFrame(() => setPercents(targetPercents));
@@ -189,20 +186,52 @@ function LedgerRoleBarChart({ entries }) {
 
   return (
     <div className="role-bar-chart">
-      {ROLES.map((role, index) => (
-        <div className="role-bar-row" key={role}>
-          <span className="role-bar-label">{formatRole(role)}</span>
+      {rows.map((row, index) => (
+        <div className="role-bar-row" key={row.key}>
+          <span className="role-bar-label">{row.label}</span>
           <div className="role-bar-track">
-            <div
-              className="role-bar-fill"
-              style={{ width: `${percents[index]}%`, background: heatColor(counts[index] / maxCount) }}
-            />
+            <div className="role-bar-fill" style={{ width: `${percents[index]}%`, background: row.color }} />
           </div>
-          <span className="role-bar-count">{counts[index]}</span>
+          <span className="role-bar-count">{row.count}</span>
         </div>
       ))}
     </div>
   );
+}
+
+/** Staff-role breakdown -- one row per staff role (Doctor/Nurse/Pharmacist/
+ * Lab Technician/Clerk), bar color a red/orange/yellow/green heat scale keyed
+ * to that role's count relative to the busiest role, not the severity
+ * palette -- role isn't a severity, so that scheme wouldn't mean anything
+ * here; severity stays where it still applies (the donut, the per-entity
+ * event breakdown below, the live-feed table rows). Used as the Ledger
+ * page's own left card, and as the Staff/Patients activity pages' default
+ * (nothing selected yet) left card. */
+function LedgerRoleBarChart({ entries }) {
+  const counts = ROLES.map((role) => entries.filter((e) => e.staff_role === role).length);
+  const maxCount = Math.max(...counts, 1);
+  const rows = ROLES.map((role, i) => ({
+    key: role,
+    label: formatRole(role),
+    count: counts[i],
+    color: heatColor(counts[i] / maxCount),
+  }));
+  return <HorizontalBarChart rows={rows} />;
+}
+
+/** Event-type breakdown as bars instead of a donut -- added 2026-08-31 for
+ * the Staff/Patients activity pages: once a specific staff member or patient
+ * is selected, the right card switches from the donut to this, showing that
+ * one entity's own event-type counts. Same exact severity colors as the
+ * donut/live-feed table, just rendered as bars per the user. */
+function EventTypeBarChart({ entries }) {
+  const rows = EVENT_TYPES.map((type) => ({
+    key: type,
+    label: SEVERITY_LABEL[type],
+    count: entries.filter((e) => e.event_type === type).length,
+    color: toHex(SEVERITY_COLOR[type]),
+  }));
+  return <HorizontalBarChart rows={rows} />;
 }
 
 /** Right card: a live 3D donut -- one extruded annulus segment per event
@@ -322,4 +351,4 @@ function LedgerDonutChart3D({ entries }) {
   );
 }
 
-export { LedgerRoleBarChart, LedgerDonutChart3D };
+export { LedgerRoleBarChart, EventTypeBarChart, LedgerDonutChart3D };

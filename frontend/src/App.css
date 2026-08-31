@@ -389,6 +389,27 @@ button {
   flex: 0 0 auto;
 }
 
+/* A single big number + caption -- used for the Patient activity page's
+   "staff who accessed this patient" card and the Admins page's summary
+   cards (both added 2026-08-31, per the user). */
+.big-stat {
+  text-align: center;
+  padding: 12px 0 16px;
+}
+
+.big-stat-number {
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--plum-deep);
+  line-height: 1;
+}
+
+.big-stat-label {
+  margin-top: 6px;
+  font-size: 13px;
+  color: rgba(42, 15, 92, 0.7);
+}
+
 /* Live feed: a tinted "tray" holding one white row-card per entry (added
    2026-08-31, per the user) -- distinct cards with gaps between them, not one
    shared table sheet, same "individual card per row" language as .card-row

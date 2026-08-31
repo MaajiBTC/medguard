@@ -1,11 +1,12 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 
 import { getLedgerEntries } from '../api/ledger';
-import { searchPatients } from '../api/patients';
-import { createStaff, searchStaff } from '../api/staff';
+import { getPatientSummary, searchPatients } from '../api/patients';
+import { createStaff, getStaffSummary, searchStaff } from '../api/staff';
 import Modal from '../components/Modal';
+import { WARDS } from '../wards';
 import DashboardShell, { LedgerIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
-import { LedgerDonutChart3D, LedgerRoleBarChart } from './LedgerCharts3D';
+import { EventTypeBarChart, LedgerDonutChart3D, LedgerRoleBarChart } from './LedgerCharts3D';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -127,13 +128,51 @@ function LedgerPanel() {
   );
 }
 
-/** Shared shape for the Staff/Patient activity pages: search, pick a result,
- * see their filtered Ledger history. Deliberately search-only, not a role/
- * ward category-tile breakdown (per the user) -- this is a lookup tool, not a
+/** Read-only staff details, per the user -- once a specific staff member is
+ * selected on the Staff activity page, the left card switches from the
+ * system-wide role breakdown to this. Only shows fields the search result
+ * actually carries (StaffSummarySerializer) -- no new backend data needed. */
+function StaffDetailsCard({ staff }) {
+  return (
+    <div>
+      <p className="meta-line">{staff.full_name}</p>
+      <p className="meta-line">{staff.staff_id} · {formatRole(staff.role)}</p>
+      {staff.ward && <p className="meta-line">Ward: {staff.ward}</p>}
+      {(staff.on_duty !== undefined || staff.on_call !== undefined) && (
+        <p className="meta-line">
+          {staff.on_duty ? 'On duty' : 'Off duty'}
+          {staff.on_call ? ' · On call' : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** How many distinct staff members have a Ledger entry against this patient
+ * -- computed client-side from the entries already fetched for the selected
+ * patient, no new backend endpoint needed. Per the user, this is the Patient
+ * activity page's left card once a patient is selected. */
+function StaffAccessCountCard({ entries }) {
+  const count = new Set(entries.map((e) => e.staff_id)).size;
+  return (
+    <div className="big-stat">
+      <div className="big-stat-number">{count}</div>
+      <div className="big-stat-label">staff member{count === 1 ? '' : 's'} accessed this patient</div>
+    </div>
+  );
+}
+
+/** Shared shape for the Staff/Patient activity pages: two summary cards on
+ * top (added 2026-08-31, per the user -- same two cards the Ledger page
+ * itself has, system-wide, until something's selected, then both switch to
+ * that entity's own numbers), then search, pick a result, see their
+ * filtered Ledger history below. Deliberately search-only, not a role/ward
+ * category-tile breakdown (per the user) -- this is a lookup tool, not a
  * management screen. `search(query)` resolves to a result list; `resultKey`/
  * `renderResult`/`describeSelected` customize per-entity display;
- * `buildFilter(selected)` produces the getLedgerEntries() filter object. */
-function ActivityLookupPanel({ label, search, resultKey, renderResult, describeSelected, buildFilter }) {
+ * `buildFilter(selected)` produces the getLedgerEntries() filter object;
+ * `cardOne` customizes the left card once something's selected. */
+function ActivityLookupPanel({ label, search, resultKey, renderResult, describeSelected, buildFilter, cardOne }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -151,9 +190,8 @@ function ActivityLookupPanel({ label, search, resultKey, renderResult, describeS
   };
 
   const fetchEntries = useCallback(async () => {
-    if (!selected) return;
     try {
-      setEntries(await getLedgerEntries(buildFilter(selected)));
+      setEntries(await getLedgerEntries(selected ? buildFilter(selected) : {}));
       setError(null);
     } catch (err) {
       setError(errorMessage(err));
@@ -161,47 +199,57 @@ function ActivityLookupPanel({ label, search, resultKey, renderResult, describeS
   }, [selected, buildFilter]);
 
   useEffect(() => {
-    if (!selected) return undefined;
     fetchEntries();
     const intervalId = setInterval(fetchEntries, POLL_INTERVAL_MS);
     return () => clearInterval(intervalId);
-  }, [selected, fetchEntries]);
-
-  if (selected) {
-    return (
-      <div>
-        <button type="button" className="back-link" onClick={() => setSelected(null)}>
-          ← Back to search
-        </button>
-        <section className="panel-card">
-          <h2>{describeSelected(selected)}</h2>
-          <LedgerEntriesFeed entries={entries} error={error} />
-        </section>
-      </div>
-    );
-  }
+  }, [fetchEntries]);
 
   return (
     <div>
-      <div className="search-row">
-        <form className="search-bar" onSubmit={runSearch} role="search">
-          <SearchIcon />
-          <input placeholder={label} value={query} onChange={(e) => setQuery(e.target.value)} />
-        </form>
+      <div className="ledger-chart-row">
+        <div className="ledger-chart-card">
+          <h3>{selected ? cardOne.selectedTitle : 'Staff Role'}</h3>
+          {selected ? cardOne.renderSelected(selected, entries) : <LedgerRoleBarChart entries={entries} />}
+        </div>
+        <div className="ledger-chart-card">
+          <h3>Event breakdown</h3>
+          {selected ? <EventTypeBarChart entries={entries} /> : <LedgerDonutChart3D entries={entries} />}
+        </div>
       </div>
 
-      {error && <p role="alert" className="dev-error">{error}</p>}
-
-      {results.map((r) => (
-        <div className="card-row" key={r[resultKey]}>
-          {renderResult(r)}
-          <div className="card-row-actions">
-            <button type="button" className="btn-secondary" onClick={() => setSelected(r)}>
-              View activity
-            </button>
-          </div>
+      {selected ? (
+        <div>
+          <button type="button" className="back-link" onClick={() => setSelected(null)}>
+            ← Back to search
+          </button>
+          <section className="panel-card">
+            <h2>{describeSelected(selected)}</h2>
+            <LedgerEntriesFeed entries={entries} error={error} />
+          </section>
         </div>
-      ))}
+      ) : (
+        <div>
+          <div className="search-row">
+            <form className="search-bar" onSubmit={runSearch} role="search">
+              <SearchIcon />
+              <input placeholder={label} value={query} onChange={(e) => setQuery(e.target.value)} />
+            </form>
+          </div>
+
+          {error && <p role="alert" className="dev-error">{error}</p>}
+
+          {results.map((r) => (
+            <div className="card-row" key={r[resultKey]}>
+              {renderResult(r)}
+              <div className="card-row-actions">
+                <button type="button" className="btn-secondary" onClick={() => setSelected(r)}>
+                  View activity
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -220,6 +268,10 @@ function StaffActivityPanel() {
       )}
       describeSelected={(s) => `${s.full_name} (${s.staff_id})`}
       buildFilter={(s) => ({ staff_id: s.staff_id })}
+      cardOne={{
+        selectedTitle: 'Staff Details',
+        renderSelected: (s) => <StaffDetailsCard staff={s} />,
+      }}
     />
   );
 }
@@ -238,7 +290,39 @@ function PatientActivityPanel() {
       )}
       describeSelected={(p) => `${p.full_name} (${p.hospital_number})`}
       buildFilter={(p) => ({ patient_hospital_number: p.hospital_number })}
+      cardOne={{
+        selectedTitle: 'Staff Access',
+        renderSelected: (_p, entries) => <StaffAccessCountCard entries={entries} />,
+      }}
     />
+  );
+}
+
+function wardLabel(value) {
+  return WARDS.find((w) => w.value === value)?.label || value;
+}
+
+/** Big total + label:value breakdown rows -- used for the Admins page's two
+ * summary cards (added 2026-08-31, per the user). Reuses the exact summary
+ * data the Admin dashboard's own Overview page already shows
+ * (getPatientSummary()/getStaffSummary()) since admin accounts don't
+ * generate scoring-pipeline Ledger events for a role/event-type breakdown to
+ * mean anything here -- see CLAUDE.md's Security Dashboard section. */
+function SummaryCard({ total, totalLabel, breakdown }) {
+  return (
+    <div>
+      <div className="big-stat">
+        <div className="big-stat-number">{total}</div>
+        <div className="big-stat-label">{totalLabel}</div>
+      </div>
+      <div className="ledger-chart-legend">
+        {breakdown.map(([label, value]) => (
+          <span className="ledger-chart-legend-item" key={label}>
+            {label}: {value}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -247,12 +331,21 @@ const NEW_ADMIN_INITIAL = { username: '', password: '', staff_id: '', full_name:
 /** Admins page: the only place an admin account can be created (added
  * 2026-08-30, per the user) -- Admin dashboard's own "Add Staff" no longer
  * offers the admin role, so this is the sole path. Admin accounts are shared
- * (no ward/on-duty/on-call), so the form only asks for login + identity. */
+ * (no ward/on-duty/on-call), so the form only asks for login + identity.
+ * Gained two summary cards at the top 2026-08-31, per the user -- see
+ * SummaryCard above. */
 function AdminsPanel() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newAdmin, setNewAdmin] = useState(NEW_ADMIN_INITIAL);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [patientSummary, setPatientSummary] = useState(null);
+  const [staffSummary, setStaffSummary] = useState(null);
+
+  useEffect(() => {
+    getPatientSummary().then(setPatientSummary).catch((err) => setError(errorMessage(err)));
+    getStaffSummary().then(setStaffSummary).catch((err) => setError(errorMessage(err)));
+  }, []);
 
   const handleCreate = async (event) => {
     event.preventDefault();
@@ -269,6 +362,39 @@ function AdminsPanel() {
 
   return (
     <div>
+      <div className="ledger-chart-row">
+        <div className="ledger-chart-card">
+          <h3>Patients</h3>
+          {patientSummary && (
+            <SummaryCard
+              total={patientSummary.total}
+              totalLabel="total patients"
+              breakdown={Object.entries(patientSummary.by_ward).map(
+                ([ward, count]) => [ward === 'unassigned' ? 'Unassigned' : wardLabel(ward), count]
+              )}
+            />
+          )}
+        </div>
+        <div className="ledger-chart-card">
+          <h3>Staff</h3>
+          {staffSummary && (
+            <SummaryCard
+              total={staffSummary.total}
+              totalLabel="total staff"
+              breakdown={[
+                ['On duty', staffSummary.on_duty],
+                ['On call', staffSummary.on_call],
+                ...Object.entries(staffSummary.by_role)
+                  .filter(([role]) => role !== 'admin' && role !== 'security_officer')
+                  .map(([role, count]) => [formatRole(role), count]),
+              ]}
+            />
+          )}
+        </div>
+      </div>
+
+      {error && <p role="alert" className="dev-error">{error}</p>}
+
       <div className="search-row">
         <p className="meta-line">Security officers are the only role that can create admin accounts.</p>
         <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>

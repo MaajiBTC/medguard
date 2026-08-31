@@ -259,6 +259,34 @@ bar chart already puts each role's label beside its bar in one row. The
 donut itself is sized up (`OUTER_R`/`INNER_R` from 1.7/0.9 to 1.95/1.05 in
 `LedgerCharts3D.jsx`) without changing `.ledger-chart-mount`'s footprint.
 
+**Amended an eighth time (2026-08-31, two summary cards on Staff/Patients/
+Admins):** the Ledger page's own two cards now also appear at the top of the
+other three Security-dashboard pages, updating based on what's selected.
+`LedgerCharts3D.jsx`'s `LedgerRoleBarChart` was split into a generic
+`HorizontalBarChart({ rows })` plus a new `EventTypeBarChart` (same bars,
+event-type data + the exact severity colors instead of role data + the heat
+scale). On the **Staff**/**Patients** pages (`ActivityLookupPanel` in
+`SecurityDashboard.jsx`), before anything's selected both cards are
+system-wide and identical to the Ledger page's (`LedgerRoleBarChart` +
+`LedgerDonutChart3D`, fetched via `getLedgerEntries({})` unfiltered); once a
+specific staff member or patient is selected, Card 2 switches to
+`EventTypeBarChart` (bars, not the donut, per the user's explicit
+correction) scoped to that entity, and Card 1 switches to something
+per-page-specific: Staff gets `StaffDetailsCard` (name/ID/role/ward/duty from
+the already-available search result, no new backend data), Patients gets
+`StaffAccessCountCard` (count of *distinct* `staff_id`s among that patient's
+entries, computed client-side — `new Set(entries.map(e => e.staff_id)).size`,
+no new backend endpoint). The existing search box now renders below the two
+cards instead of above (this is what "drop it down a little" meant). On
+**Admins** (`AdminsPanel`), the two cards are unrelated to the Ledger — per
+the user, admin accounts don't generate scoring-pipeline Ledger events for a
+role/event-type breakdown to mean anything there, so both cards reuse the
+exact summary data the Admin dashboard's own Overview page already shows
+(`getPatientSummary()`/`getStaffSummary()`, both already-built endpoints, no
+backend changes): "Patients" (total + `by_ward`) and "Staff" (total, on-duty/
+on-call, `by_role` excluding admin/security_officer). New small
+`SummaryCard`/`big-stat` presentational pattern shared by both.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.
