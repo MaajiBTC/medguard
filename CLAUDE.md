@@ -457,6 +457,33 @@ preview workflow as the fourteenth amendment before porting in. Verified
 live in-browser against the real `282828` doctor account — bigger avatar,
 new face, details shifted right, no console errors.
 
+**Amended a sixteenth time (2026-08-31, bold-outline redesign):** same day,
+the user shared two more references (a photorealistic doctor photo, then a
+flat-vector clip-art doctor illustration) and asked to "use" each. The
+photo was declined for the same copyright reasons as before, plus a
+second, distinct concern this file hadn't previously recorded: a real (or
+realistic) human likeness raises publicity/consent issues beyond copyright,
+independent of any watermark. The clip-art illustration was also declined
+(same copyright reasoning — professional stock clip art, licensing
+unverifiable, regardless of whether a watermark happens to be visible in
+a given crop), but its bold-outline flat-vector style was judged genuinely
+achievable by hand, unlike the photo. `RoleAvatar.jsx` was redrawn with a
+consistent dark outline (`OUTLINE = "#241a30"`, stroke-width ~1.2–1.8) on
+every shape across all 7 characters, plus a shared `hairPath` (a cleaner
+side-part swoop, extracted as `SIDE_PART_HAIR` and passed into `Head`
+alongside `hair`/`skin`, replacing the single inline hair path each
+character drew before) and, on the **doctor** specifically, a chest pocket
+with three pens and a redraped stethoscope resting closer to the pocket,
+matching the reference's composition. The user then asked for "a much more
+realistic" avatar; declined on hard technical grounds (this project only
+produces SVG markup — vector shapes and gradients — with no image-
+generation capability available, so pixel-level photorealism isn't
+reachable regardless of how much the vector style is refined) rather than
+a preference call, and offered gradient-based shading as the closest
+achievable next step if pursued further. Prototyped in the same local-
+HTML-preview workflow before porting in; verified live in-browser against
+the real `282828` doctor account, no console errors.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.
