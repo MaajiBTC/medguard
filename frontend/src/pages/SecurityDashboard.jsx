@@ -26,51 +26,48 @@ function formatRole(role) {
   return role.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
 }
 
-/** The entries table + row drilldown, shared by the live Ledger feed and the
+/** The entries list + row drilldown, shared by the live Ledger feed and the
  * Staff/Patient activity pages below -- same markup, just fed a different
- * (already-filtered) `entries` array. */
+ * (already-filtered) `entries` array. Each entry is its own white row-card
+ * (added 2026-08-31, per the user) sitting on a tinted `.ledger-feed`
+ * background, rather than one shared table sheet -- same "distinct card per
+ * row" language as `.card-row` elsewhere in this app (Staff/Patient lists),
+ * just with more columns. */
 function LedgerEntriesFeed({ entries, error }) {
   const [expandedSequence, setExpandedSequence] = useState(null);
 
   return (
-    <>
+    <div className="ledger-feed">
       {error && <p role="alert" className="dev-error">{error}</p>}
 
-      <table className="ledger-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Date/Time</th>
-            <th>Event</th>
-            <th>Staff</th>
-            <th>Patient</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((entry) => (
-            <Fragment key={entry.sequence}>
-              <tr
-                className={`ledger-row severity-${entry.event_type}`}
-                onClick={() => setExpandedSequence(expandedSequence === entry.sequence ? null : entry.sequence)}
-              >
-                <td>{entry.sequence}</td>
-                <td>{new Date(entry.occurred_at).toLocaleString()}</td>
-                <td>{entry.event_type}</td>
-                <td>{entry.staff_full_name} ({entry.staff_id})</td>
-                <td>{entry.patient_hospital_number || '—'}</td>
-              </tr>
-              {expandedSequence === entry.sequence && (
-                <tr className="ledger-drilldown">
-                  <td colSpan={5}>
-                    <pre>{JSON.stringify(entry.details, null, 2)}</pre>
-                  </td>
-                </tr>
-              )}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
-    </>
+      <div className="ledger-row-card ledger-row-card-header">
+        <span>#</span>
+        <span>Date/Time</span>
+        <span>Event</span>
+        <span>Staff</span>
+        <span>Patient</span>
+      </div>
+
+      {entries.map((entry) => (
+        <Fragment key={entry.sequence}>
+          <div
+            className={`ledger-row-card ledger-row-card-entry severity-${entry.event_type}`}
+            onClick={() => setExpandedSequence(expandedSequence === entry.sequence ? null : entry.sequence)}
+          >
+            <span>{entry.sequence}</span>
+            <span>{new Date(entry.occurred_at).toLocaleString()}</span>
+            <span>{entry.event_type}</span>
+            <span>{entry.staff_full_name} ({entry.staff_id})</span>
+            <span>{entry.patient_hospital_number || '—'}</span>
+          </div>
+          {expandedSequence === entry.sequence && (
+            <div className="ledger-row-card ledger-drilldown">
+              <pre>{JSON.stringify(entry.details, null, 2)}</pre>
+            </div>
+          )}
+        </Fragment>
+      ))}
+    </div>
   );
 }
 

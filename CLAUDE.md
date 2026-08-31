@@ -228,9 +228,22 @@ specified: `STANDARD_ACCESS` `#00CC00`, `AUDITED_DEVIATION` `#FFFF00`,
 `#0000FF` — used as-is for `LedgerDonutChart3D`'s slices/legend
 (`LedgerCharts3D.jsx`'s `SEVERITY_COLOR`/`SEVERITY_LABEL`, now including
 `STANDARD_ACCESS`) and, in `App.css`, as a **left-edge border stripe** on
-each live-feed table row rather than text color — `#FFFF00` as running body
-text on a white row would be close to unreadable, so the exact hex still
-shows (as a stripe) but body text stays its normal readable color.
+each live-feed row rather than text color — `#FFFF00` as running body text
+on a white row would be close to unreadable, so the exact hex still shows
+(as a stripe) but body text stays its normal readable color.
+
+**Amended a sixth time (2026-08-31, distinct row-cards):** `LedgerEntriesFeed`
+(`SecurityDashboard.jsx`, shared by the Ledger live feed and the Staff/Patient
+activity pages) is no longer a single `<table>` sheet — each entry renders as
+its own white, rounded `.ledger-row-card`, with a gap between rows, sitting
+inside a light-tinted `.ledger-feed` tray (`#f3effc`) so the individual cards
+read as visually distinct from each other and from the header row above them
+— same "one card per row" language `.card-row` already uses for Staff/Patient
+lists elsewhere in this app, just with more columns (CSS grid, not flex).
+Column alignment (`#`/Date-Time/Event/Staff/Patient) comes from a shared
+`grid-template-columns` on `.ledger-row-card` rather than table cells; the
+severity stripe from the previous amendment moved from `td:first-child` to
+the row-card's own `border-left`.
 
 ## Offline Mode
 

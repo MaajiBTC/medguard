@@ -358,56 +358,83 @@ button {
   flex: 0 0 auto;
 }
 
-.ledger-table {
-  width: 100%;
-  border-collapse: collapse;
+/* Live feed: a tinted "tray" holding one white row-card per entry (added
+   2026-08-31, per the user) -- distinct cards with gaps between them, not one
+   shared table sheet, same "individual card per row" language as .card-row
+   elsewhere in this app (Staff/Patient lists), just with more columns. */
+.ledger-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #f3effc;
+  border-radius: 12px;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.ledger-row-card {
+  display: grid;
+  grid-template-columns: 50px 190px 160px 1fr 140px;
+  align-items: center;
+  gap: 10px;
   font-size: 14px;
+  min-width: 640px;
 }
 
-.ledger-table th,
-.ledger-table td {
-  text-align: left;
-  padding: 6px 10px;
-  border-bottom: 1px solid #ece5fa;
+.ledger-row-card-header {
+  padding: 4px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--plum-deep);
 }
 
-.ledger-row {
+.ledger-row-card-entry {
+  background: #fff;
+  border-left: 4px solid transparent;
+  border-radius: 10px;
+  padding: 10px 14px;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
-.ledger-row:hover {
-  background: #f6f1fd;
+.ledger-row-card-entry:hover {
+  background: #faf7ff;
 }
 
 /* Severity color-coding, exact palette per the user (2026-08-31) -- applied
-   as a left-edge stripe on the row's first cell rather than text color:
-   #FFFF00 (audited deviation) as running text on a white row would be all
-   but unreadable, so a colored stripe + keeping body text its normal color
-   keeps every row legible while still using the exact requested hues. */
-.ledger-row.severity-STANDARD_ACCESS td:first-child {
-  border-left: 4px solid #00cc00;
+   as a left-edge stripe rather than text color: #FFFF00 (audited deviation)
+   as running text on a white card would be all but unreadable, so a colored
+   stripe + keeping body text its normal color keeps every row legible while
+   still using the exact requested hues. */
+.ledger-row-card-entry.severity-STANDARD_ACCESS {
+  border-left-color: #00cc00;
 }
 
-.ledger-row.severity-AUDITED_DEVIATION td:first-child {
-  border-left: 4px solid #ffff00;
+.ledger-row-card-entry.severity-AUDITED_DEVIATION {
+  border-left-color: #ffff00;
 }
 
-.ledger-row.severity-REDUCED_ACCESS td:first-child {
-  border-left: 4px solid #ff9300;
+.ledger-row-card-entry.severity-REDUCED_ACCESS {
+  border-left-color: #ff9300;
 }
 
-.ledger-row.severity-ACCESS_DENIED td:first-child {
-  border-left: 4px solid #ff0000;
+.ledger-row-card-entry.severity-ACCESS_DENIED {
+  border-left-color: #ff0000;
 }
 
-.ledger-row.severity-EMERGENCY_OVERRIDE td:first-child {
-  border-left: 4px solid #0000ff;
+.ledger-row-card-entry.severity-EMERGENCY_OVERRIDE {
+  border-left-color: #0000ff;
+}
+
+.ledger-drilldown {
+  background: #f8f5fd;
+  border-radius: 10px;
+  padding: 12px;
+  display: block;
 }
 
 .ledger-drilldown pre {
-  background: #f8f5fd;
-  padding: 12px;
-  border-radius: 6px;
+  margin: 0;
   overflow-x: auto;
   font-size: 12px;
   max-height: 320px;
