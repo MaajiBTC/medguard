@@ -320,6 +320,103 @@ filter pattern); `since`/`until` already existed. 46/46 new/scoped backend
 tests passing, full suite green; migration applied to the real dev database
 (default connection this time, not `ledger` — no `--database=ledger` needed).
 
+**Amended a tenth time (2026-08-31, Admins page default cards restored):**
+same day, the user asked to bring back the eighth amendment's bar+donut
+default look on **Admins** — confirmed via `AskUserQuestion` that they
+wanted both: the system-wide bar+donut cards by default (matching
+Staff/Patients exactly), *and* to keep clicking into one admin's Details +
+Activity from the ninth amendment. `AdminsPanel` now fetches `entries` via
+`getLedgerEntries({})` (unfiltered, system-wide) whenever nothing's
+selected and renders `LedgerRoleBarChart`/`LedgerDonutChart3D` under the
+"Staff Role"/"Event breakdown" titles — same component, same data, same
+titles as `ActivityLookupPanel`'s unselected state — then swaps to
+`AdminDetailsCard`/`AdminActivityCard` under "Admin Details"/"Activity" once
+an admin is selected, exactly as the ninth amendment already had it. Not
+merged into `ActivityLookupPanel` itself, for the same reason the ninth
+amendment gave: the selected-state data source (`AdminActionLog`) doesn't
+fit that component's Ledger-entries-only shape.
+
+**Amended an eleventh time (2026-08-31, Staff page slicers + rename):**
+same day, per the user, confirmed via `AskUserQuestion`. The **Staff**
+page's default left card (previously "Staff Role", same as every other
+page's) is renamed to **"Staff Activity"** — Staff-page-only, via a new
+`cardOne.defaultTitle` override on `ActivityLookupPanel` (falls back to
+"Staff Role" everywhere else, so Ledger/Patients/Admins are unaffected).
+`ActivityLookupPanel` gained an opt-in `activityFilters` prop (Staff page
+only) adding, in its unselected system-wide state: a role `<select>` +
+on-duty-status `<select>` (All / On duty / Off duty / On call) in the
+"Staff Activity" card's header, and the same from/to date `<input
+type="date">`s the Ledger page's "Event breakdown" card already has in
+this card's header — no event-type filter here, per the user's explicit
+scope (just role + duty on the left, dates on the right). Role and date
+narrow the `getLedgerEntries()` call itself (`staff_role`/`since`/`until`,
+same as the Ledger page). On-duty status has no equivalent field on
+`LedgerEntry`, so per the user's explicit choice it filters by each
+matching staff member's **current** live on-duty/on-call status (looked up
+via `searchStaff('', roleFilter)` and cross-referenced by `staff_id`) —
+not their duty status back when each historical event happened. These
+slicers only render and apply in the unselected state; once a specific
+staff member is selected the cards behave exactly as before (unaffected by
+this change).
+
+**Amended a twelfth time (2026-08-31, Patients page slicers + rename):**
+same day, per the user, confirmed via `AskUserQuestion`. The **Patients**
+page's left card is renamed to **"Patient Record Activity"** — via
+`cardOne.defaultTitle` *and* `cardOne.selectedTitle` both set to that same
+string, so unlike the Staff page (title changes on selection) this one
+stays constant whether browsing system-wide or looking at one patient.
+Gets the same role + on-duty-status slicers (left) and date-range slicers
+(right) the eleventh amendment added to the Staff page, via the same
+`activityFilters` prop — but here they're also live once a patient is
+selected (new `filtersApplyWhenSelected` prop on `ActivityLookupPanel`,
+Patients-only), per the user's explicit choice: narrowing to "just doctors"
+or "just on-duty staff" who accessed that one patient's record, not only
+the system-wide default view. `ActivityLookupPanel`'s `fetchEntries`
+unified around one `filtersActive = activityFilters && (!selected ||
+filtersApplyWhenSelected)` flag so both pages share the same fetch/filter
+code path. Already-existing `buildFilter` scoping
+(`patient_hospital_number`) is what keeps this page's entries limited to
+record-access events on that one patient in the first place — no change
+needed there, per the user's own confirmation this already matched what
+they wanted ("just the activity on a patient's record").
+
+**Amended a thirteenth time (2026-08-31, avatar detail layout on
+selection):** same day, per the user, confirmed via `AskUserQuestion`.
+Once a specific staff member, patient, or admin is selected on the
+Staff/Patients/Admins pages, that left card's **title disappears entirely**
+and its content becomes a `RoleAvatar` (new `frontend/src/pages/
+RoleAvatar.jsx` — one small flat SVG icon per role plus 'admin' and a
+single generic 'patient' icon, hand-drawn in the same style as
+`DashboardShell.jsx`'s sidebar icons, no downloaded images per the user) at
+~30% width beside that entity's vertically-stacked detail fields (`.entity-
+detail-row`/`.entity-detail-avatar`/`.entity-detail-info` in `App.css`).
+This **replaces** the twelfth amendment's `selectedTitle`/
+`filtersApplyWhenSelected` mechanism (now removed) with a simpler, uniform
+rule applied identically across all three pages: the **role** slicer only
+shows/applies in the unselected system-wide view ("of no importance" once
+one specific entity is already picked, per the user) while the **duty-
+status** slicer stays visible and functional in both states (new shared
+`filterEntriesByDuty()` helper + `DUTY_OPTIONS`, used by both
+`ActivityLookupPanel` and `AdminsPanel`); the date-range slicers stay
+unselected-only, unchanged. The Patients page's card title is simplified
+back to always reading "Patient Record Activity" via `cardOne.defaultTitle`
+alone (no more separate `selectedTitle`). Its `renderSelected` also
+changed: `StaffAccessCountCard` (the old sole content) is replaced by a new
+`PatientDetailsCard` showing the patient's own identity fields (full
+name/hospital number/ward from `PatientSummarySerializer` — **phone number
+and address are deliberately not shown**, since those live in category 1
+behind the full scoring/access-decision flow, not this lightweight search
+endpoint, and exposing them here would let a Security Officer see patient
+PII without going through access control) plus the old distinct-staff-count
+line folded in underneath. The **Admins** page gained the same role+duty
+slicers on its previously-slicer-less unselected view, and the same
+avatar-layout treatment on selection (`RoleAvatar role="admin"` beside
+`AdminDetailsCard`) — but with **no duty slicer** in its selected state,
+a deliberate exception: admin accounts are `Staff.NO_WARD_DUTY_ROLES` (no
+on-duty/on-call concept at all), and that page's right card in the selected
+state is `AdminActivityCard` (`AdminActionLog` entries), not Ledger data a
+duty slicer could narrow in the first place.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.

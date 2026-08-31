@@ -6,6 +6,33 @@ import { createStaff, getAdminActions, searchStaff } from '../api/staff';
 import Modal from '../components/Modal';
 import DashboardShell, { LedgerIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
 import { EventTypeBarChart, LedgerDonutChart3D, LedgerRoleBarChart, ROLES } from './LedgerCharts3D';
+import RoleAvatar from './RoleAvatar';
+
+const DUTY_OPTIONS = [
+  { value: '', label: 'All' },
+  { value: 'on_duty', label: 'On duty' },
+  { value: 'off_duty', label: 'Off duty' },
+  { value: 'on_call', label: 'On call' },
+];
+
+/** Cross-references Ledger `entries` against each acting staff member's
+ * CURRENT live on-duty/on-call status (not their status back when the
+ * historical event happened -- per the user, 2026-08-31). `LedgerEntry` has
+ * no duty field of its own, so this is client-side post-filtering rather
+ * than a query param. Shared by `ActivityLookupPanel` and `AdminsPanel`. */
+async function filterEntriesByDuty(entries, dutyFilter, roleFilter) {
+  if (!dutyFilter) return entries;
+  const staffList = await searchStaff('', roleFilter || undefined);
+  const dutyById = Object.fromEntries(staffList.map((s) => [s.staff_id, s]));
+  return entries.filter((e) => {
+    const s = dutyById[e.staff_id];
+    if (!s) return false;
+    if (dutyFilter === 'on_duty') return s.on_duty;
+    if (dutyFilter === 'off_duty') return !s.on_duty;
+    if (dutyFilter === 'on_call') return s.on_call;
+    return true;
+  });
+}
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -185,36 +212,64 @@ function StaffDetailsCard({ staff }) {
   );
 }
 
-/** How many distinct staff members have a Ledger entry against this patient
- * -- computed client-side from the entries already fetched for the selected
- * patient, no new backend endpoint needed. Per the user, this is the Patient
- * activity page's left card once a patient is selected. */
-function StaffAccessCountCard({ entries }) {
+/** Read-only patient details, per the user (2026-08-31) -- once a specific
+ * patient is selected on the Patients activity page, the left card switches
+ * from the system-wide role breakdown to this. Only shows fields the search
+ * result actually carries (`PatientSummarySerializer`: hospital_number/
+ * full_name/ward) -- phone number and address live in category 1 (Identity)
+ * behind the full scoring/access-decision flow, not this lightweight lookup
+ * endpoint, so they're deliberately not shown here. The distinct-staff-access
+ * count (this card's old sole content, before the rename) is folded in as
+ * an extra line, computed client-side from the entries already fetched for
+ * this patient -- no new backend endpoint needed. */
+function PatientDetailsCard({ patient, entries }) {
   const count = new Set(entries.map((e) => e.staff_id)).size;
   return (
-    <div className="big-stat">
-      <div className="big-stat-number">{count}</div>
-      <div className="big-stat-label">staff member{count === 1 ? '' : 's'} accessed this patient</div>
+    <div>
+      <p className="meta-line">{patient.full_name}</p>
+      <p className="meta-line">{patient.hospital_number}</p>
+      {patient.ward && <p className="meta-line">Ward: {patient.ward}</p>}
+      <p className="meta-line">{count} staff member{count === 1 ? '' : 's'} accessed this record</p>
     </div>
   );
 }
 
 /** Shared shape for the Staff/Patient activity pages: two summary cards on
  * top (added 2026-08-31, per the user -- same two cards the Ledger page
- * itself has, system-wide, until something's selected, then both switch to
- * that entity's own numbers), then search, pick a result, see their
- * filtered Ledger history below. Deliberately search-only, not a role/ward
- * category-tile breakdown (per the user) -- this is a lookup tool, not a
- * management screen. `search(query)` resolves to a result list; `resultKey`/
- * `renderResult`/`describeSelected` customize per-entity display;
- * `buildFilter(selected)` produces the getLedgerEntries() filter object;
- * `cardOne` customizes the left card once something's selected. */
-function ActivityLookupPanel({ label, search, resultKey, renderResult, describeSelected, buildFilter, cardOne }) {
+ * itself has, system-wide, until something's selected), then search, pick a
+ * result, see their filtered Ledger history below. Deliberately search-only,
+ * not a role/ward category-tile breakdown (per the user) -- this is a
+ * lookup tool, not a management screen. `search(query)` resolves to a
+ * result list; `resultKey`/`renderResult`/`describeSelected` customize
+ * per-entity display; `buildFilter(selected)` produces the
+ * getLedgerEntries() filter object; `cardOne` (`defaultTitle`, falls back
+ * to "Staff Role"; `renderSelected(selected, entries)` returns just the
+ * vertical detail fields, no avatar; optional `avatarRole(selected)`, falls
+ * back to `selected.role`) customizes the left card.
+ *
+ * `activityFilters` (Staff/Patients pages) opts a page into a role select +
+ * on-duty-status select on the left card and a date-range select on the
+ * right, narrowing the `entries` feeding both cards. Amended 2026-08-31,
+ * per the user: once something's selected the role/date slicers stop
+ * applying (role is "of no importance" for one already-identified entity)
+ * but the duty-status slicer keeps working in both states -- and the left
+ * card's title disappears entirely, replaced by a `RoleAvatar` (~30% width)
+ * beside `cardOne.renderSelected`'s vertical detail fields. On-duty status
+ * has no field on `LedgerEntry` itself, so it's resolved by
+ * `filterEntriesByDuty` cross-referencing each entry's `staff_id` against a
+ * live `searchStaff()` lookup -- current status, not status at the time of
+ * that historical event. */
+function ActivityLookupPanel({ label, search, resultKey, renderResult, describeSelected, buildFilter, cardOne, activityFilters }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
   const [entries, setEntries] = useState([]);
   const [error, setError] = useState(null);
+
+  const [roleFilter, setRoleFilter] = useState('');
+  const [dutyFilter, setDutyFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const runSearch = async (event) => {
     event.preventDefault();
@@ -228,12 +283,25 @@ function ActivityLookupPanel({ label, search, resultKey, renderResult, describeS
 
   const fetchEntries = useCallback(async () => {
     try {
-      setEntries(await getLedgerEntries(selected ? buildFilter(selected) : {}));
+      const baseFilter = selected ? buildFilter(selected) : {};
+      if (!activityFilters) {
+        setEntries(await getLedgerEntries(baseFilter));
+        setError(null);
+        return;
+      }
+      const queryFilter = { ...baseFilter };
+      if (!selected) {
+        queryFilter.staff_role = roleFilter || undefined;
+        queryFilter.since = dateFrom ? `${dateFrom}T00:00:00` : undefined;
+        queryFilter.until = dateTo ? `${dateTo}T23:59:59` : undefined;
+      }
+      const data = await getLedgerEntries(queryFilter);
+      setEntries(await filterEntriesByDuty(data, dutyFilter, selected ? undefined : roleFilter));
       setError(null);
     } catch (err) {
       setError(errorMessage(err));
     }
-  }, [selected, buildFilter]);
+  }, [selected, buildFilter, activityFilters, roleFilter, dutyFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchEntries();
@@ -245,11 +313,59 @@ function ActivityLookupPanel({ label, search, resultKey, renderResult, describeS
     <div>
       <div className="ledger-chart-row">
         <div className="ledger-chart-card">
-          <h3>{selected ? cardOne.selectedTitle : 'Staff Role'}</h3>
-          {selected ? cardOne.renderSelected(selected, entries) : <LedgerRoleBarChart entries={entries} />}
+          <div className="ledger-chart-card-header">
+            {!selected && <h3>{cardOne.defaultTitle || 'Staff Role'}</h3>}
+            {activityFilters && (
+              <div className="ledger-slicers">
+                {!selected && (
+                  <select className="slicer-input" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} aria-label="Filter by role">
+                    <option value="">All roles</option>
+                    {ROLES.map((role) => (
+                      <option key={role} value={role}>{formatRole(role)}</option>
+                    ))}
+                  </select>
+                )}
+                <select className="slicer-input" value={dutyFilter} onChange={(e) => setDutyFilter(e.target.value)} aria-label="Filter by duty status">
+                  {DUTY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+          {selected ? (
+            <div className="entity-detail-row">
+              <div className="entity-detail-avatar">
+                <RoleAvatar role={cardOne.avatarRole ? cardOne.avatarRole(selected) : selected.role} />
+              </div>
+              <div className="entity-detail-info">{cardOne.renderSelected(selected, entries)}</div>
+            </div>
+          ) : (
+            <LedgerRoleBarChart entries={entries} />
+          )}
         </div>
         <div className="ledger-chart-card">
-          <h3>Event breakdown</h3>
+          <div className="ledger-chart-card-header">
+            <h3>Event breakdown</h3>
+            {activityFilters && !selected && (
+              <div className="ledger-slicers">
+                <input
+                  type="date"
+                  className="slicer-input"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  aria-label="From date"
+                />
+                <input
+                  type="date"
+                  className="slicer-input"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  aria-label="To date"
+                />
+              </div>
+            )}
+          </div>
           {selected ? <EventTypeBarChart entries={entries} /> : <LedgerDonutChart3D entries={entries} />}
         </div>
       </div>
@@ -306,9 +422,10 @@ function StaffActivityPanel() {
       describeSelected={(s) => `${s.full_name} (${s.staff_id})`}
       buildFilter={(s) => ({ staff_id: s.staff_id })}
       cardOne={{
-        selectedTitle: 'Staff Details',
+        defaultTitle: 'Staff Activity',
         renderSelected: (s) => <StaffDetailsCard staff={s} />,
       }}
+      activityFilters
     />
   );
 }
@@ -328,9 +445,11 @@ function PatientActivityPanel() {
       describeSelected={(p) => `${p.full_name} (${p.hospital_number})`}
       buildFilter={(p) => ({ patient_hospital_number: p.hospital_number })}
       cardOne={{
-        selectedTitle: 'Staff Access',
-        renderSelected: (_p, entries) => <StaffAccessCountCard entries={entries} />,
+        defaultTitle: 'Patient Record Activity',
+        renderSelected: (p, entries) => <PatientDetailsCard patient={p} entries={entries} />,
+        avatarRole: () => 'patient',
       }}
+      activityFilters
     />
   );
 }
@@ -377,16 +496,29 @@ function AdminActivityCard({ actions }) {
 
 const NEW_ADMIN_INITIAL = { username: '', password: '', staff_id: '', full_name: '' };
 
-/** Admins page: search/list admin accounts, select one, see their details +
- * activity (added 2026-08-31, per the user, replacing the previous
- * Patients/Staff summary-only version -- there was no way to actually see
- * existing admins before this). Also the only place an admin account can be
- * created (added 2026-08-30) -- Admin dashboard's own "Add Staff" no longer
- * offers the admin role, so this is the sole path. Same search -> select ->
- * two-cards shape as StaffActivityPanel/PatientActivityPanel above, but not
- * built on ActivityLookupPanel -- the data source (AdminActionLog via
- * getAdminActions) is different enough from Ledger entries that reusing it
- * would need more indirection than it'd save. */
+/** Admins page: system-wide bar+donut cards (same Staff Role/Event breakdown
+ * cards Staff/Patients show, added 2026-08-31) until an admin is selected,
+ * then those two cards switch to that admin's Details + Activity (added
+ * 2026-08-31, replacing the previous Patients/Staff summary-only version --
+ * there was no way to actually see existing admins before that). Reverted
+ * back to the bar+donut default the same day, per the user, once they
+ * clarified they wanted both: the same default look as Staff/Patients, and
+ * still able to click into one admin. Also the only place an admin account
+ * can be created (added 2026-08-30) -- Admin dashboard's own "Add Staff" no
+ * longer offers the admin role, so this is the sole path. Not built on
+ * ActivityLookupPanel above -- the selected-state data source (AdminActionLog
+ * via getAdminActions) is different enough from Ledger entries that reusing
+ * it would need more indirection than it'd save.
+ *
+ * Amended 2026-08-31 (same day): gained the role + on-duty-status slicers
+ * on its unselected "Staff Role" card, matching Staff/Patients (this was
+ * the one page that had been missing them). Once an admin is selected the
+ * title disappears and the left card becomes a `RoleAvatar` (role="admin")
+ * beside `AdminDetailsCard`'s vertical fields, same layout as the other two
+ * pages -- but with no duty slicer in that state, unlike Staff/Patients:
+ * admin accounts are `Staff.NO_WARD_DUTY_ROLES` (no on-duty/on-call concept
+ * at all), and the right card here is `AdminActivityCard` (that admin's own
+ * `AdminActionLog` entries), not Ledger data a duty slicer could narrow. */
 function AdminsPanel() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newAdmin, setNewAdmin] = useState(NEW_ADMIN_INITIAL);
@@ -397,6 +529,10 @@ function AdminsPanel() {
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
   const [actions, setActions] = useState(null);
+  const [entries, setEntries] = useState([]);
+
+  const [roleFilter, setRoleFilter] = useState('');
+  const [dutyFilter, setDutyFilter] = useState('');
 
   const runSearch = async (event) => {
     event.preventDefault();
@@ -418,6 +554,17 @@ function AdminsPanel() {
     }
   }, [selected]);
 
+  const fetchEntries = useCallback(async () => {
+    if (selected) return;
+    try {
+      const data = await getLedgerEntries({ staff_role: roleFilter || undefined });
+      setEntries(await filterEntriesByDuty(data, dutyFilter, roleFilter));
+      setError(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, [selected, roleFilter, dutyFilter]);
+
   useEffect(() => {
     if (!selected) return undefined;
     setActions(null);
@@ -425,6 +572,13 @@ function AdminsPanel() {
     const intervalId = setInterval(fetchActions, POLL_INTERVAL_MS);
     return () => clearInterval(intervalId);
   }, [selected, fetchActions]);
+
+  useEffect(() => {
+    if (selected) return undefined;
+    fetchEntries();
+    const intervalId = setInterval(fetchEntries, POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [selected, fetchEntries]);
 
   const handleCreate = async (event) => {
     event.preventDefault();
@@ -443,20 +597,40 @@ function AdminsPanel() {
     <div>
       <div className="ledger-chart-row">
         <div className="ledger-chart-card">
-          <h3>{selected ? 'Admin Details' : 'Admins'}</h3>
+          <div className="ledger-chart-card-header">
+            {!selected && <h3>Staff Role</h3>}
+            {!selected && (
+              <div className="ledger-slicers">
+                <select className="slicer-input" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} aria-label="Filter by role">
+                  <option value="">All roles</option>
+                  {ROLES.map((role) => (
+                    <option key={role} value={role}>{formatRole(role)}</option>
+                  ))}
+                </select>
+                <select className="slicer-input" value={dutyFilter} onChange={(e) => setDutyFilter(e.target.value)} aria-label="Filter by duty status">
+                  {DUTY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
           {selected ? (
-            <AdminDetailsCard admin={selected} />
+            <div className="entity-detail-row">
+              <div className="entity-detail-avatar">
+                <RoleAvatar role="admin" />
+              </div>
+              <div className="entity-detail-info">
+                <AdminDetailsCard admin={selected} />
+              </div>
+            </div>
           ) : (
-            <p className="meta-line">Search below to see an admin's details and activity.</p>
+            <LedgerRoleBarChart entries={entries} />
           )}
         </div>
         <div className="ledger-chart-card">
-          <h3>Activity</h3>
-          {selected ? (
-            <AdminActivityCard actions={actions} />
-          ) : (
-            <p className="meta-line">Select an admin to see their account actions.</p>
-          )}
+          <h3>{selected ? 'Activity' : 'Event breakdown'}</h3>
+          {selected ? <AdminActivityCard actions={actions} /> : <LedgerDonutChart3D entries={entries} />}
         </div>
       </div>
 

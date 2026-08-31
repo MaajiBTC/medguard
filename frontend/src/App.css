@@ -418,24 +418,6 @@ button {
 /* A single big number + caption -- used for the Patient activity page's
    "staff who accessed this patient" card and the Admins page's summary
    cards (both added 2026-08-31, per the user). */
-.big-stat {
-  text-align: center;
-  padding: 12px 0 16px;
-}
-
-.big-stat-number {
-  font-size: 40px;
-  font-weight: 700;
-  color: var(--plum-deep);
-  line-height: 1;
-}
-
-.big-stat-label {
-  margin-top: 6px;
-  font-size: 13px;
-  color: rgba(42, 15, 92, 0.7);
-}
-
 /* The Admins page's "Activity" card -- a list of discrete admin actions
    (added 2026-08-31, per the user), not count data, so a scrollable list
    reads better than a chart. */
@@ -472,6 +454,39 @@ button {
 .admin-action-time {
   font-size: 12px;
   color: rgba(42, 15, 92, 0.6);
+}
+
+/* Selected-entity detail layout (added 2026-08-31, per the user): the left
+   chart card's content swaps to a role avatar (~30% width) beside a
+   vertically-stacked details block, once a specific staff/patient/admin is
+   selected on the Staff/Patients/Admins activity pages. */
+.entity-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.entity-detail-avatar {
+  flex: 0 0 30%;
+  display: flex;
+  justify-content: center;
+}
+
+.entity-detail-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.role-avatar {
+  width: 100%;
+  max-width: 84px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--lavender);
+  color: var(--plum-deep);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Live feed: a tinted "tray" holding one white row-card per entry (added
