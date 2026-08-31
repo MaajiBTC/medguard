@@ -6,8 +6,11 @@
 // Admins activity pages once a specific entity is selected. Each character
 // shares the same face/head shapes; only hair, outfit color, and a small
 // role-specific accessory differ. Redrawn with bold dark outlines on every
-// shape the same day to get closer to a flat-vector-clip-art reference's
-// style (still hand-drawn, not the reference image itself).
+// shape to get closer to a flat-vector-clip-art reference's style (still
+// hand-drawn, not the reference image itself), and again so the coat/
+// shoulders bleed all the way to the circular badge's edge -- per the user,
+// there should be no visible seam/gap where the illustration "stops" short
+// of the circle and the plain badge background shows through underneath.
 
 const OUTLINE = "#241a30";
 
@@ -35,20 +38,25 @@ function Head({ skin, hair, hairPath }) {
 const SIDE_PART_HAIR =
   "M25 40 C24 15 76 15 75 40 C74 28 65 19 50 19 C57 21 63 26 65 33 C58 24 48 20 38 23 C44 22 49 25 51 29 C43 22 32 24 27 34 C26 30 25 35 25 40 Z";
 
+// Shoulders rise all the way to the viewBox's edges (not just a narrow
+// column in the middle) so the outfit fully bleeds under the circular
+// badge's mask with no gap, whatever `.role-avatar`'s render size is.
+const BODY_PATH = "M0 62 Q25 74 40 79 Q50 81 60 79 Q75 74 100 62 L100 106 L0 106 Z";
+
 function DoctorIcon() {
   return (
-    <svg viewBox="0 0 100 100">
-      <path d="M30 80 Q50 72 70 80 L72 102 L28 102 Z" fill="#ffffff" stroke={OUTLINE} strokeWidth="1.6" />
+    <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+      <path d={BODY_PATH} fill="#ffffff" stroke={OUTLINE} strokeWidth="1.6" />
       <path d="M40 78 L50 90 L50 74 Z" fill="#f4f2fb" stroke={OUTLINE} strokeWidth="1.4" />
       <path d="M60 78 L50 90 L50 74 Z" fill="#f4f2fb" stroke={OUTLINE} strokeWidth="1.4" />
       <path d="M45 76 L50 84 L55 76 L53 73 L47 73 Z" fill="#2f5fa8" stroke={OUTLINE} strokeWidth="1.2" />
-      <rect x="55" y="86" width="12" height="10" rx="1.5" fill="#ffffff" stroke={OUTLINE} strokeWidth="1.3" />
-      <rect x="57" y="82" width="1.6" height="7" fill="#e0435c" />
-      <rect x="60" y="82" width="1.6" height="7" fill="#2f5fa8" />
-      <rect x="63" y="82" width="1.6" height="7" fill="#2a2a2a" />
-      <path d="M37 82 Q37 70 50 70 Q63 70 63 82" fill="none" stroke="#4a4a52" strokeWidth="2.6" strokeLinecap="round" />
-      <path d="M37 82 Q35 92 42 96" fill="none" stroke="#4a4a52" strokeWidth="2.4" strokeLinecap="round" />
-      <circle cx="43" cy="97" r="3.6" fill="#8a97ab" stroke={OUTLINE} strokeWidth="1.2" />
+      <rect x="58" y="88" width="13" height="11" rx="1.5" fill="#ffffff" stroke={OUTLINE} strokeWidth="1.3" />
+      <rect x="60" y="84" width="1.7" height="7" fill="#e0435c" />
+      <rect x="63" y="84" width="1.7" height="7" fill="#2f5fa8" />
+      <rect x="66" y="84" width="1.7" height="7" fill="#2a2a2a" />
+      <path d="M36 84 Q36 71 50 71 Q64 71 64 84" fill="none" stroke="#4a4a52" strokeWidth="2.8" strokeLinecap="round" />
+      <path d="M36 84 Q34 95 42 99" fill="none" stroke="#4a4a52" strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx="43" cy="100" r="3.8" fill="#8a97ab" stroke={OUTLINE} strokeWidth="1.2" />
       <Head skin="#f0b98d" hair="#5b4636" hairPath={SIDE_PART_HAIR} />
     </svg>
   );
@@ -56,12 +64,12 @@ function DoctorIcon() {
 
 function NurseIcon() {
   return (
-    <svg viewBox="0 0 100 100">
-      <path d="M30 80 Q50 72 70 80 L72 102 L28 102 Z" fill="#ffffff" stroke={OUTLINE} strokeWidth="1.6" />
+    <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+      <path d={BODY_PATH} fill="#ffffff" stroke={OUTLINE} strokeWidth="1.6" />
       <path d="M63 32 C82 36 84 60 70 76 C78 62 76 44 62 36 Z" fill="#6a3d28" stroke={OUTLINE} strokeWidth="1.4" />
       <circle cx="66" cy="34" r="4" fill="#8a5a3a" stroke={OUTLINE} strokeWidth="1" />
       <path d="M42 78 Q50 82 58 78" fill="none" stroke="#3fb3a3" strokeWidth="2.6" strokeLinecap="round" />
-      <path d="M37 80 Q37 68 50 68 Q63 68 63 80" fill="none" stroke="#4a4a52" strokeWidth="2.4" strokeLinecap="round" />
+      <path d="M36 82 Q36 70 50 70 Q64 70 64 82" fill="none" stroke="#4a4a52" strokeWidth="2.4" strokeLinecap="round" />
       <Head skin="#f0b98d" hair="#6a3d28" hairPath={SIDE_PART_HAIR} />
     </svg>
   );
@@ -69,10 +77,10 @@ function NurseIcon() {
 
 function PharmacistIcon() {
   return (
-    <svg viewBox="0 0 100 100">
-      <path d="M30 80 Q50 72 70 80 L72 102 L28 102 Z" fill="#ffffff" stroke={OUTLINE} strokeWidth="1.6" />
+    <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+      <path d={BODY_PATH} fill="#ffffff" stroke={OUTLINE} strokeWidth="1.6" />
       <Head skin="#e3a877" hair="#1f1a17" hairPath={SIDE_PART_HAIR} />
-      <g transform="translate(50 84) rotate(-40)">
+      <g transform="translate(50 86) rotate(-40)">
         <rect x="-9" y="-3" width="18" height="6" rx="3" fill="#3fb3a3" stroke={OUTLINE} strokeWidth="1.2" />
         <line x1="-6" y1="0" x2="6" y2="0" stroke="#ffffff" strokeWidth="1.3" />
       </g>
@@ -82,22 +90,22 @@ function PharmacistIcon() {
 
 function LabTechnicianIcon() {
   return (
-    <svg viewBox="0 0 100 100">
-      <path d="M30 80 Q50 72 70 80 L72 102 L28 102 Z" fill="#ffffff" stroke={OUTLINE} strokeWidth="1.6" />
+    <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+      <path d={BODY_PATH} fill="#ffffff" stroke={OUTLINE} strokeWidth="1.6" />
       <Head skin="#f0b98d" hair="#6b4a2f" hairPath={SIDE_PART_HAIR} />
       <rect x="32" y="42" width="15" height="9" rx="4" fill="none" stroke={OUTLINE} strokeWidth="2" />
       <rect x="53" y="42" width="15" height="9" rx="4" fill="none" stroke={OUTLINE} strokeWidth="2" />
       <line x1="47" y1="46.5" x2="53" y2="46.5" stroke={OUTLINE} strokeWidth="2" />
-      <path d="M43 76 L36 83 L36 92 L43 87 Z" fill="#7ad1c4" stroke={OUTLINE} strokeWidth="1.2" />
-      <path d="M57 76 L64 83 L64 92 L57 87 Z" fill="#7ad1c4" stroke={OUTLINE} strokeWidth="1.2" />
+      <path d="M43 78 L36 85 L36 94 L43 89 Z" fill="#7ad1c4" stroke={OUTLINE} strokeWidth="1.2" />
+      <path d="M57 78 L64 85 L64 94 L57 89 Z" fill="#7ad1c4" stroke={OUTLINE} strokeWidth="1.2" />
     </svg>
   );
 }
 
 function ClerkIcon() {
   return (
-    <svg viewBox="0 0 100 100">
-      <path d="M30 80 Q50 72 70 80 L72 102 L28 102 Z" fill="#ffffff" stroke={OUTLINE} strokeWidth="1.6" />
+    <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+      <path d={BODY_PATH} fill="#ffffff" stroke={OUTLINE} strokeWidth="1.6" />
       <Head skin="#f0b98d" hair="#4a3223" hairPath={SIDE_PART_HAIR} />
       <path d="M39 80 L50 88 L61 80 L61 71 L50 76 L39 71 Z" fill="#6528d9" stroke={OUTLINE} strokeWidth="1.3" />
       <path d="M46 71 L50 84 L54 71 L52 69 L48 69 Z" fill="#ffffff" stroke={OUTLINE} strokeWidth="1" />
@@ -107,8 +115,8 @@ function ClerkIcon() {
 
 function AdminIcon() {
   return (
-    <svg viewBox="0 0 100 100">
-      <path d="M30 80 Q50 72 70 80 L72 102 L28 102 Z" fill="#2a0f5c" stroke={OUTLINE} strokeWidth="1.6" />
+    <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+      <path d={BODY_PATH} fill="#2a0f5c" stroke={OUTLINE} strokeWidth="1.6" />
       <Head skin="#e3a877" hair="#241a12" hairPath={SIDE_PART_HAIR} />
       <path d="M50 73 L59 77 L59 86 Q50 92 41 86 L41 77 Z" fill="#c4b5fd" stroke={OUTLINE} strokeWidth="1.3" />
       <path d="M50 75 L56 78 L56 84 Q50 89 44 84 L44 78 Z" fill="#6528d9" />
@@ -118,8 +126,8 @@ function AdminIcon() {
 
 function PatientIcon() {
   return (
-    <svg viewBox="0 0 100 100">
-      <path d="M30 80 Q50 72 70 80 L72 102 L28 102 Z" fill="#eef7fb" stroke={OUTLINE} strokeWidth="1.6" />
+    <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+      <path d={BODY_PATH} fill="#eef7fb" stroke={OUTLINE} strokeWidth="1.6" />
       <Head skin="#f0b98d" hair="#7a5236" hairPath={SIDE_PART_HAIR} />
       <path d="M45 80 q5 4 10 0" stroke="#e0435c" strokeWidth="2" fill="none" strokeLinecap="round" />
     </svg>

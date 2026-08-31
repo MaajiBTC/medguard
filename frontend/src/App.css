@@ -489,11 +489,12 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
 .role-avatar svg {
-  width: 62%;
-  height: 62%;
+  width: 100%;
+  height: 100%;
 }
 
 /* Live feed: a tinted "tray" holding one white row-card per entry (added

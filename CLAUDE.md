@@ -484,6 +484,25 @@ achievable next step if pursued further. Prototyped in the same local-
 HTML-preview workflow before porting in; verified live in-browser against
 the real `282828` doctor account, no console errors.
 
+**Amended a seventeenth time (2026-08-31, full-bleed avatar):** same day,
+per the user — each avatar was floating in the middle of its circular
+badge with a visible flat seam at the chest/shoulders where the coat shape
+ended short of the badge's edge, leaving the plain `--lavender` background
+showing around it. `RoleAvatar.jsx`'s per-character body/coat path (was a
+narrow, fixed-width shape only spanning roughly the middle 44% of the
+viewBox) replaced with one shared `BODY_PATH` whose shoulders rise all the
+way to the viewBox's left/right edges before dipping to the neckline, so
+the outfit bleeds fully under the badge with no gap regardless of the
+badge's render size. `App.css`: `.role-avatar` gained `overflow: hidden`
+(so it now genuinely clips to the circle rather than relying on the SVG's
+own bounds) and its `svg` rule changed from `width/height: 62%` to `100%`
+so the character fills the whole badge instead of floating with padding on
+every side; each character's `<svg>` also gained
+`preserveAspectRatio="xMidYMid slice"` for robustness. Prototyped in the
+same local-HTML-preview workflow before porting in; verified live
+in-browser against both the real `282828` doctor and `ADMIN-1` admin
+accounts — full bleed, no seam, no console errors.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.
