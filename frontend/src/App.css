@@ -282,14 +282,42 @@ button {
   padding: 16px;
 }
 
+/* A small background chip behind just the title text (corrected 2026-08-31 --
+   an earlier pass wrongly applied plum to the whole card; the user meant just
+   the text). Card background/border above stays the original white/plum. */
 .ledger-chart-card h3 {
-  margin: 0 0 8px;
-  color: var(--plum-deep);
+  display: inline-block;
+  margin: 0 0 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--plum);
+  color: var(--off-white);
 }
 
 .ledger-chart-mount {
   width: 100%;
   height: 220px;
+}
+
+/* Donut card only (2026-08-31, per the user): legend and donut sit side by
+   side in one row -- legend on the left, donut shifted right into the space
+   that frees up -- rather than the legend stacked underneath, mirroring how
+   the bar chart already puts each role's label beside its bar in one row. */
+.donut-chart-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.donut-chart-row .ledger-chart-mount {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.donut-chart-row .ledger-chart-legend {
+  flex: 0 0 auto;
+  margin-top: 0;
 }
 
 .role-bar-chart {
@@ -336,10 +364,13 @@ button {
   text-align: right;
 }
 
+/* Vertical, one item per line -- matches the bar chart's stacked role rows
+   (added 2026-08-31, per the user), replacing the earlier wrapped-row
+   layout. */
 .ledger-chart-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
+  flex-direction: column;
+  gap: 8px;
   margin-top: 8px;
 }
 

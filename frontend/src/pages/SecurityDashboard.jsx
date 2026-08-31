@@ -102,7 +102,7 @@ function LedgerPanel() {
     <>
       <div className="ledger-chart-row">
         <div className="ledger-chart-card">
-          <h3>Activity by staff role</h3>
+          <h3>Staff Role</h3>
           <LedgerRoleBarChart entries={entries} />
         </div>
         <div className="ledger-chart-card">

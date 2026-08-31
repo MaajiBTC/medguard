@@ -245,6 +245,20 @@ Column alignment (`#`/Date-Time/Event/Staff/Patient) comes from a shared
 severity stripe from the previous amendment moved from `td:first-child` to
 the row-card's own `border-left`.
 
+**Amended a seventh time (2026-08-31, chart card titles + donut layout):** the
+two `.ledger-chart-card`s' background/border stay the original white/plum
+(an in-session attempt to make the whole card plum was corrected by the
+user — only the **title text** gets a small plum background chip
+(`.ledger-chart-card h3`: `display:inline-block`, plum background, white
+text), not the card itself. The bar chart's title changed to "Staff Role"
+(Title Case, per the user); the donut's stays "Event breakdown". The donut
+card's `Legend` and its three.js mount now sit side by side in one row
+(`.donut-chart-row`, new) — legend on the left, donut shifted right into the
+freed space — rather than the legend stacked underneath, mirroring how the
+bar chart already puts each role's label beside its bar in one row. The
+donut itself is sized up (`OUTER_R`/`INNER_R` from 1.7/0.9 to 1.95/1.05 in
+`LedgerCharts3D.jsx`) without changing `.ledger-chart-mount`'s footprint.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.

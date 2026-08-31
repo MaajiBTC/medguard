@@ -261,8 +261,11 @@ function LedgerDonutChart3D({ entries }) {
       total += counts[type];
     });
 
-    const OUTER_R = 1.7;
-    const INNER_R = 0.9;
+    // Sized up ~15% from the original 1.7/0.9 (per the user, "a little
+    // bigger" without enlarging .ledger-chart-mount itself) -- same camera
+    // framing, just a larger donut within it.
+    const OUTER_R = 1.95;
+    const INNER_R = 1.05;
 
     if (total > 0) {
       let angle = -Math.PI / 2;
@@ -312,9 +315,9 @@ function LedgerDonutChart3D({ entries }) {
   }, [entries]);
 
   return (
-    <div>
-      <div ref={mountRef} className="ledger-chart-mount" />
+    <div className="donut-chart-row">
       <Legend />
+      <div ref={mountRef} className="ledger-chart-mount" />
     </div>
   );
 }
