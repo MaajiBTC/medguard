@@ -36,6 +36,14 @@ class RecordEventChainTests(TestCase):
         self.assertEqual(entry.prev_hash, GENESIS_HASH)
         self.assertEqual(entry.sequence, 1)
 
+    def test_staff_role_is_denormalized_onto_the_entry(self):
+        """Added 2026-08-30, for the Security Dashboard's staff-role breakdown
+        chart -- same denormalization reasoning as staff_full_name, not part
+        of the hash payload."""
+        staff = self._make_staff()
+        entry = record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=staff)
+        self.assertEqual(entry.staff_role, Staff.Role.DOCTOR)
+
     def test_successive_entries_link_by_hash(self):
         staff = self._make_staff()
         first = record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=staff)
@@ -219,6 +227,7 @@ class LedgerFeedViewTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(len(resp.data), 2)
         self.assertEqual(resp.data[0]["event_type"], "ACCESS_DENIED")  # newest first
+        self.assertEqual(resp.data[0]["staff_role"], "doctor")
         self.assertNotIn("session_token", resp.data[0])
 
         filtered_resp = self.client.get(

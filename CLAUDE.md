@@ -182,19 +182,33 @@ the spiral instead of just color brightness.
 
 **Amended again (2026-08-30, chart cards replace the spiral):** the spiral
 above was itself replaced the same day, per the user — `LedgerVisualization.jsx`
-is deleted. In its place, the Ledger page now shows two lavender
-`.ledger-chart-card`s side by side (`frontend/src/pages/LedgerCharts3D.jsx`,
-still three.js, still one of CLAUDE.md's two sanctioned three.js spots): a 3D
-area chart (`LedgerAreaChart3D`, extruded ribbons, one per event type,
-bucketed across the current entries' real time span, not list position) and a
-3D donut (`LedgerDonutChart3D`, extruded annulus segments sized by each event
-type's share of the current feed). Both cover the same 4 non-`STANDARD_ACCESS`
-event types already color-coded elsewhere on this page, with an HTML legend
-underneath since this is the first place on the page that needed one
-explicitly. Both grow in on first mount and pulse when the polled data
-actually changes (compared via a cheap entries signature, so an unchanged
-re-poll doesn't visibly re-trigger anything) — same `easeOutBack` entrance
-easing already used for the login shield in `LoginScene.jsx`.
+is deleted. In its place, the Ledger page shows two `.ledger-chart-card`s side
+by side (`frontend/src/pages/LedgerCharts3D.jsx`, still three.js, still one of
+CLAUDE.md's two sanctioned three.js spots): a 3D donut (`LedgerDonutChart3D`,
+extruded annulus segments sized by each of the 4 non-`STANDARD_ACCESS` event
+types' share of the current feed, using the same severity colors already used
+elsewhere on this page) and, on the left, an HTML legend underneath each
+chart since this is the first place on the page that needed one explicitly.
+Both grow in on first mount and pulse when the polled data actually changes
+(compared via a cheap entries signature, so an unchanged re-poll doesn't
+visibly re-trigger anything) — same `easeOutBack` entrance easing already
+used for the login shield in `LoginScene.jsx`.
+
+**Amended a third time (2026-08-30, role bar chart + white/plum cards):** the
+left card changed again the same day, per the user — it's now
+`LedgerRoleBarChart3D`, a 3D **horizontal bar chart** of Ledger activity
+broken down by **staff role** (Doctor/Nurse/Pharmacist/Lab Technician/Clerk),
+not event type over time. This needed a small `ledger` app addition:
+`LedgerEntry.staff_role` (new denormalized field, same reasoning as
+`staff_full_name` — the Ledger can't hold a foreign key to `Staff`, and
+**not** part of `_compute_entry_hash()`'s payload, matching how
+`staff_full_name` was never hashed either), populated by
+`ledger.services.record_event()` alongside the other denormalized staff
+fields. Bars are a single on-brand plum tone rather than the severity
+palette, since role isn't a severity — severity color stays exactly where it
+still means something (the donut, the live-feed table rows). Both
+`.ledger-chart-card`s also switched from lavender to **white with a
+1px `var(--plum)` border**.
 
 ## Offline Mode
 

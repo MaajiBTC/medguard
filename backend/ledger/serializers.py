@@ -16,6 +16,7 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
             "event_type",
             "staff_id",
             "staff_full_name",
+            "staff_role",
             "patient_hospital_number",
             "device_id",
             "details",

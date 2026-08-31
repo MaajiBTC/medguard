@@ -50,6 +50,7 @@ def record_event(*, event_type, staff, patient=None, session=None, details=None,
 
         staff_id = staff.staff_id
         staff_full_name = staff.full_name
+        staff_role = staff.role
         patient_hospital_number = patient.hospital_number if patient else ""
         session_token = session.token if session else ""
         device_id = session.device_id if session else ""
@@ -72,6 +73,7 @@ def record_event(*, event_type, staff, patient=None, session=None, details=None,
             event_type=event_type,
             staff_id=staff_id,
             staff_full_name=staff_full_name,
+            staff_role=staff_role,
             patient_hospital_number=patient_hospital_number,
             session_token=session_token,
             device_id=device_id,

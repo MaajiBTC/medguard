@@ -56,6 +56,12 @@ class LedgerEntry(models.Model):
 
     staff_id = models.CharField(max_length=64)
     staff_full_name = models.CharField(max_length=255, blank=True, default="")
+    staff_role = models.CharField(
+        max_length=32, blank=True, default="",
+        help_text="Denormalized snapshot of Staff.role at write time (added 2026-08-30, "
+                   "for the Security Dashboard's staff-role breakdown chart) -- same "
+                   "reasoning as staff_full_name above, not part of the hash payload.",
+    )
     patient_hospital_number = models.CharField(max_length=64, blank=True, default="")
     session_token = models.CharField(max_length=64, blank=True, default="")
     device_id = models.CharField(max_length=255, blank=True, default="")

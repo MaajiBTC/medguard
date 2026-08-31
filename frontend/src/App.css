@@ -276,7 +276,8 @@ button {
 }
 
 .ledger-chart-card {
-  background: var(--lavender);
+  background: #fff;
+  border: 1px solid var(--plum);
   border-radius: 12px;
   padding: 16px;
 }

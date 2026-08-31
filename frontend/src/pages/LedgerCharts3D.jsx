@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
+import { CLINICAL_ROLES } from '../roles';
+
 // CLAUDE.md scopes three.js to exactly two places: this panel (replacing the
 // earlier spiral) and the login page. Hand-rolled with three.js primitives
 // rather than a charting library -- this project has never pulled one in
@@ -26,6 +28,15 @@ const SEVERITY_LABEL = {
 
 const EVENT_TYPES = Object.keys(SEVERITY_COLOR);
 
+// Fixed row order for the role bar chart -- mirrors backend/staff/models.py's
+// Staff.CLINICAL_ROLES, same set already used elsewhere on the frontend.
+const ROLES = [...CLINICAL_ROLES];
+const PLUM = 0x6528d9;
+
+function formatRole(role) {
+  return role.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+
 function toHex(n) {
   return `#${n.toString(16).padStart(6, '0')}`;
 }
@@ -48,6 +59,21 @@ function Legend() {
         <span key={type} className="ledger-chart-legend-item">
           <span className="ledger-chart-legend-dot" style={{ background: toHex(SEVERITY_COLOR[type]) }} />
           {SEVERITY_LABEL[type]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// The bar chart's bars are all one color (role isn't a severity), so its
+// legend reads exact counts per role instead of explaining a color per item.
+function RoleCounts({ entries }) {
+  return (
+    <div className="ledger-chart-legend">
+      {ROLES.map((role) => (
+        <span key={role} className="ledger-chart-legend-item">
+          <span className="ledger-chart-legend-dot" style={{ background: toHex(PLUM) }} />
+          {formatRole(role)}: {entries.filter((e) => e.staff_role === role).length}
         </span>
       ))}
     </div>
@@ -127,11 +153,18 @@ function useThreeMount(mountRef, stateRef, onFrame) {
   }, []);
 }
 
-/** Left card: a live 3D area chart -- one translucent extruded ribbon per
- * event type, bucketed across the current entries' oldest->newest time span
- * (not by list position, same real-time reasoning as the spiral this
- * replaced). Rises from the ground on first load / when new data arrives. */
-function LedgerAreaChart3D({ entries }) {
+const BAR_ROW_SPACING = 0.55;
+const BAR_HEIGHT = 0.34;
+const BAR_MAX_LENGTH = 4;
+
+/** Left card: a live 3D horizontal bar chart -- one extruded bar per staff
+ * role (Doctor/Nurse/Pharmacist/Lab Technician/Clerk), length proportional to
+ * how many current Ledger entries involved that role. Grows out from the
+ * axis on first load / when new data arrives. Bars are a single on-brand
+ * plum tone rather than the severity palette -- role isn't a severity, so
+ * that color scheme wouldn't mean anything here; severity stays where it
+ * still applies (the donut, the live-feed table rows). */
+function LedgerRoleBarChart3D({ entries }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
 
@@ -142,16 +175,16 @@ function LedgerAreaChart3D({ entries }) {
 
     if (entrance.phase === 'in') {
       const t = Math.min(elapsed / 700, 1);
-      group.scale.y = Math.max(easeOutBack(t), 0);
+      group.scale.x = Math.max(easeOutBack(t), 0);
       if (t >= 1) {
-        group.scale.y = 1;
+        group.scale.x = 1;
         entrance.phase = 'idle';
       }
     } else if (entrance.phase === 'pulse') {
       const t = Math.min(elapsed / 380, 1);
-      group.scale.y = 1 - 0.15 * Math.sin(Math.PI * t);
+      group.scale.x = 1 - 0.15 * Math.sin(Math.PI * t);
       if (t >= 1) {
-        group.scale.y = 1;
+        group.scale.x = 1;
         entrance.phase = 'idle';
       }
     }
@@ -166,8 +199,8 @@ function LedgerAreaChart3D({ entries }) {
     if (!state) return;
     const { group, camera } = state;
 
-    camera.position.set(4.5, 3.3, 6.5);
-    camera.lookAt(2, 0.8, 0);
+    camera.position.set(3.5, 2, 6.5);
+    camera.lookAt(1.5, -(BAR_ROW_SPACING * (ROLES.length - 1)) / 2, 0);
 
     group.children.forEach((mesh) => {
       mesh.geometry.dispose();
@@ -175,50 +208,28 @@ function LedgerAreaChart3D({ entries }) {
     });
     group.clear();
 
-    const relevant = entries.filter((e) => SEVERITY_COLOR[e.event_type]);
-    const BUCKETS = 8;
+    const counts = ROLES.map((role) => entries.filter((e) => e.staff_role === role).length);
+    const maxCount = Math.max(...counts, 1);
 
-    if (relevant.length > 0) {
-      const times = relevant.map((e) => new Date(e.occurred_at).getTime());
-      const oldest = Math.min(...times);
-      const span = Math.max(Math.max(...times) - oldest, 1);
+    ROLES.forEach((role, index) => {
+      const length = Math.max((counts[index] / maxCount) * BAR_MAX_LENGTH, 0.06);
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.lineTo(length, 0);
+      shape.lineTo(length, BAR_HEIGHT);
+      shape.lineTo(0, BAR_HEIGHT);
+      shape.closePath();
 
-      EVENT_TYPES.forEach((type, seriesIndex) => {
-        const counts = new Array(BUCKETS).fill(0);
-        relevant
-          .filter((e) => e.event_type === type)
-          .forEach((e) => {
-            const t = (new Date(e.occurred_at).getTime() - oldest) / span;
-            counts[Math.min(BUCKETS - 1, Math.floor(t * BUCKETS))] += 1;
-          });
-
-        const maxCount = Math.max(...counts, 1);
-        const shape = new THREE.Shape();
-        shape.moveTo(0, 0);
-        counts.forEach((c, i) => {
-          shape.lineTo((i / (BUCKETS - 1)) * 4, (c / maxCount) * 2);
-        });
-        shape.lineTo(4, 0);
-        shape.closePath();
-
-        const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.22, bevelEnabled: false });
-        // emissive keeps the true severity color visible under lighting --
-        // without it a flat MeshStandardMaterial darkens/shifts hue on faces
-        // angled away from the point light, making the legend hard to match
-        // (same fix the spiral this replaced used for its markers).
-        const material = new THREE.MeshStandardMaterial({
-          color: SEVERITY_COLOR[type],
-          emissive: SEVERITY_COLOR[type],
-          emissiveIntensity: 0.45,
-          transparent: true,
-          opacity: 0.78,
-          side: THREE.DoubleSide,
-        });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(0, 0, seriesIndex * 0.32 - 0.48);
-        group.add(mesh);
+      const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.34, bevelEnabled: false });
+      const material = new THREE.MeshStandardMaterial({
+        color: PLUM,
+        emissive: PLUM,
+        emissiveIntensity: 0.4,
       });
-    }
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(0, -index * BAR_ROW_SPACING, 0);
+      group.add(mesh);
+    });
 
     const signature = entriesSignature(entries);
     if (!state.everLoaded) {
@@ -233,7 +244,7 @@ function LedgerAreaChart3D({ entries }) {
   return (
     <div>
       <div ref={mountRef} className="ledger-chart-mount" />
-      <Legend />
+      <RoleCounts entries={entries} />
     </div>
   );
 }
@@ -352,4 +363,4 @@ function LedgerDonutChart3D({ entries }) {
   );
 }
 
-export { LedgerAreaChart3D, LedgerDonutChart3D };
+export { LedgerRoleBarChart3D, LedgerDonutChart3D };
