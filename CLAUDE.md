@@ -728,6 +728,57 @@ through the existing error state.
    Frontend reveals an inline warning + a second "Yes, permanently delete"
    button before acting (same pattern as BTG's reason textarea — no native
    `confirm()` dialog).
+
+   **Amended (2026-09-03, assign a patient from the Staff panel):** patient
+   assignment previously only worked from one direction — select a patient
+   in `PatientPanel`, type a staff ID into a raw text field. Per the user,
+   the Admin dashboard's `StaffPanel` now supports the reverse too: select
+   a doctor/nurse, see their current patient assignments, search for a
+   patient inline, and assign/unassign directly from the staff side.
+   `PatientAssignmentListCreateView`'s existing POST/`PatientAssignmentDeactivateView`
+   are reused unchanged (patient-first or staff-first, same underlying
+   `PatientAssignment` row) — only a new read endpoint was needed, the
+   reverse of the existing per-patient GET: `GET /api/patients/staff/<staff_pk>/assignments/`
+   (`patients.views.StaffAssignmentsView`, `IsAdmin`-gated). Reuses
+   `AssignedPatientSerializer` (already used by `MyAssignedPatientsView`),
+   which gained an `id` field so the Staff panel can build the deactivate
+   URL. Not shown for pharmacist/lab_technician/clerk — assignment isn't a
+   concept for those roles per the Contextual module. 22/22 `patients` app
+   tests passing (3 new). Verified live in-browser against the real admin
+   and doctor accounts: the Staff panel's Patient Assignments section shows
+   the existing assignment, and the inline patient search returns and
+   renders a matching result correctly.
+
+   **Amended (2026-09-03, structured fields per category):** reverses this
+   step's original `PatientCategoryRecord` design — "generic `{"notes":
+   ...}` content, deliberately not a structured EMR" (see the original
+   sentence above) — per the user, who wants each of the 13 categories to
+   have its own named fields (e.g. category 1 Identity: date of birth, sex,
+   address, phone, next of kin, marital status, occupation) rather than one
+   free-text box. Confirmed via `AskUserQuestion`: real validated
+   structure, all 13 categories, not just a cosmetic form over unstructured
+   JSON. New `patients/category_fields.py`'s `CATEGORY_FIELDS` dict (keyed
+   by category number, each a list of `{name, label, type}`) is the single
+   source of truth — `PatientCategoryRecordSerializer` exposes it per
+   record as `field_defs` (named that, not `fields` — collides with DRF's
+   own `Serializer.fields` property) so the frontend renders each
+   category's form purely from what the backend sends, no schema
+   duplicated in JS; `PatientCategoryContentUpdateSerializer` validates
+   saved content against it (unknown keys or non-string values 400).
+   `content` stays a plain `JSONField` — no migration, only what's *allowed
+   inside it* changed. Frontend: `AdminDashboard.jsx`'s category editor
+   (was `CategoryNotesEditor`, one hardcoded textarea) is now
+   `CategoryFieldsEditor`, rendering one labeled input per `field_defs`
+   entry (`text`/`number`/`date` → `<input>`, `textarea` → `<textarea>`,
+   `select` → `<select>` with `options`). Checked the real dev database
+   first: exactly 1 patient existed, every category still `{}` — nothing
+   real to migrate. 25/25 `patients` app tests passing (3 new, plus the
+   pre-existing category-content test's payload updated since `{"notes":
+   ...}` is no longer a valid shape for category 6). Verified live
+   in-browser against the one real patient: Identity's seven fields render
+   correctly, a value round-trips through a full page reload, Allergies
+   renders its own distinct two fields — test values cleared back to empty
+   afterward.
 5. ✅ **Done (2026-08-28).** Emergency Override ("Break the Glass" / BTG in the UI — see the Emergency Override section above for naming and scope decisions). New `POST /api/scoring/emergency-override/` (`scoring.views.EmergencyOverrideView`, `IsClinicalStaff`-gated): takes `{patient_id, reason}` (reason min 10 chars), grants the caller's full role ceiling (`ROLE_CEILINGS[staff.role]`) regardless of the hard gate/score band/Nurse rule, writes an `AccessDecision` row (`decision_type=EMERGENCY_OVERRIDE`; `gate_passed`/`score`/`score_band` now nullable on that model — an override never ran the scoring pipeline, so "not applicable" is more honest than a sentinel score) and an `EMERGENCY_OVERRIDE` Ledger entry (`reason` in `details`). Does not check `contextual.target_patient_id` the way `DecideView` does (must still work if capture/contextual state is missing or itself the reason normal access failed) and does not reinforce the behavioral baseline (an override is by definition an abnormal session). `scoring.views.PatientRecordView` needed no changes — it already treats any non-`ACCESS_DENIED` decision type the same way. Frontend: `ClinicalDashboard.jsx` gained a "Break the Glass" button in the patient-view section (always visible once a patient is selected, not gated behind a denial) that reveals an inline reason textarea before submitting — no native `confirm()` dialog. `SecurityDashboard.jsx` needed no changes (its event-type filter/severity coloring/drill-down already handled `EMERGENCY_OVERRIDE` rows from step 4). 105/105 backend tests passing (8 new); verified end-to-end via direct API calls against the real dev database using the real Admin and doctor accounts (Chrome browser extension wasn't connected for a live UI click-through) — confirmed the full round trip (override → granted all 13 categories → records endpoint returns content → a correctly hash-chained `EMERGENCY_OVERRIDE` Ledger entry with the reason). The temporary QA patient and sessions were deleted afterward; the Ledger entry itself was left in place since it's append-only by design.
 
    **Amended 2026-08-29** (after a live demo surfaced a real gap): added the Doctor rule (see Role → category access above) and BTG's own availability gate (see Emergency Override above). `AccessDecision.nurse_path` renamed to `role_rule_path` (now used by both roles' rule paths; migration `scoring/0003_rename_nurse_path_to_role_rule_path.py`). New `captures/services.py` (`compute_patient_assignment_status`) extracted from `captures.views.TargetPatientView` so both the normal capture flow and BTG's fresh gate check share one implementation instead of two.

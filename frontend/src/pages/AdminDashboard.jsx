@@ -7,6 +7,7 @@ import {
   getAllPatientCategoryRecords,
   getPatientAssignments,
   getPatientSummary,
+  getStaffAssignments,
   searchPatients,
   updatePatientCategory,
   updatePatientWard,
@@ -180,6 +181,14 @@ function StaffPanel() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
 
+  // Patient-assignment section (added 2026-09-03, per the user) -- only
+  // applies to doctor/nurse (CLAUDE.md's Contextual module: patient
+  // assignment isn't a concept for pharmacist/lab_technician/clerk).
+  const [assignments, setAssignments] = useState([]);
+  const [assignRole, setAssignRole] = useState('doctor');
+  const [patientQuery, setPatientQuery] = useState('');
+  const [patientResults, setPatientResults] = useState([]);
+
   const [newStaff, setNewStaff] = useState({
     username: '', password: '', staff_id: '', full_name: '', role: 'doctor', ward: '', on_duty: false, on_call: false,
   });
@@ -225,7 +234,7 @@ function StaffPanel() {
     setSelected(null);
   };
 
-  const select = (s) => {
+  const select = async (s) => {
     setSelected(s);
     setWard(s.ward || '');
     setOnDuty(s.on_duty);
@@ -233,6 +242,51 @@ function StaffPanel() {
     setNotice(null);
     setError(null);
     setDeleteConfirming(false);
+    setAssignRole(s.role === 'nurse' ? 'nurse' : 'doctor');
+    setPatientQuery('');
+    setPatientResults([]);
+    if (s.role === 'doctor' || s.role === 'nurse') {
+      try {
+        setAssignments(await getStaffAssignments(s.id));
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    } else {
+      setAssignments([]);
+    }
+  };
+
+  const searchPatientsToAssign = async (event) => {
+    event.preventDefault();
+    setError(null);
+    try {
+      setPatientResults(await searchPatients(patientQuery));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const assignPatient = async (patientId) => {
+    setError(null);
+    try {
+      await createPatientAssignment(patientId, selected.staff_id, assignRole);
+      setAssignments(await getStaffAssignments(selected.id));
+      setPatientQuery('');
+      setPatientResults([]);
+      setNotice('Assignment added.');
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const removeAssignment = async (a) => {
+    setError(null);
+    try {
+      await deactivatePatientAssignment(a.patient_id, a.id);
+      setAssignments(await getStaffAssignments(selected.id));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
   };
 
   const saveDuty = async () => {
@@ -402,6 +456,46 @@ function StaffPanel() {
               </div>
             </div>
           )}
+
+          {(selected.role === 'doctor' || selected.role === 'nurse') && (
+            <>
+              <h4>Patient Assignments</h4>
+              {assignments.length === 0 && <p className="meta-line">Not assigned to any patient.</p>}
+              {assignments.map((a) => (
+                <div className="detail-block" key={a.id}>
+                  {a.full_name} ({a.hospital_number}) — {formatRole(a.role_in_assignment)}{' '}
+                  <button type="button" className="btn-secondary" onClick={() => removeAssignment(a)}>Unassign</button>
+                </div>
+              ))}
+              <form className="assign-form" onSubmit={searchPatientsToAssign}>
+                <input
+                  className="form-input"
+                  placeholder="Hospital number or name"
+                  value={patientQuery}
+                  onChange={(e) => setPatientQuery(e.target.value)}
+                />
+                <select className="form-input" value={assignRole} onChange={(e) => setAssignRole(e.target.value)}>
+                  <option value="doctor">Doctor</option>
+                  <option value="nurse">Nurse</option>
+                </select>
+                <button type="submit" className="btn-secondary">Find Patient</button>
+              </form>
+              {patientResults.map((p) => (
+                <div className="card-row" key={p.id}>
+                  <div className="card-row-main">
+                    <div className="name-line">{p.full_name}</div>
+                    <div className="meta-line">
+                      {p.hospital_number}
+                      {p.ward ? ` · ${wardLabel(p.ward)}` : ''}
+                    </div>
+                  </div>
+                  <div className="card-row-actions">
+                    <button type="button" className="btn-secondary" onClick={() => assignPatient(p.id)}>Assign</button>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       )}
 
@@ -555,10 +649,10 @@ function PatientPanel() {
     }
   };
 
-  const saveCategoryNotes = async (category, notes) => {
+  const saveCategoryContent = async (category, content) => {
     setError(null);
     try {
-      const updated = await updatePatientCategory(selected.id, category, { notes });
+      const updated = await updatePatientCategory(selected.id, category, content);
       setCategoryRecords((prev) => prev.map((r) => (r.category === category ? updated : r)));
       setNotice('Category saved.');
     } catch (err) {
@@ -701,7 +795,7 @@ function PatientPanel() {
           {categoryRecords.map((r) => (
             <details key={r.category} className="detail-block">
               <summary>{r.category_name}</summary>
-              <CategoryNotesEditor record={r} onSave={(notes) => saveCategoryNotes(r.category, notes)} />
+              <CategoryFieldsEditor record={r} onSave={(content) => saveCategoryContent(r.category, content)} />
             </details>
           ))}
         </div>
@@ -736,12 +830,56 @@ function PatientPanel() {
   );
 }
 
-function CategoryNotesEditor({ record, onSave }) {
-  const [notes, setNotes] = useState(record.content?.notes || '');
+/** One labeled input per this category's structured field definitions
+ * (record.field_defs, backend-owned -- see patients/category_fields.py),
+ * replacing the old single free-text notes box (reversed 2026-09-03, per
+ * the user). Local state is one object keyed by field name; Save posts the
+ * whole object as the category's new content. */
+function CategoryFieldsEditor({ record, onSave }) {
+  const [values, setValues] = useState(() => {
+    const initial = {};
+    for (const field of record.field_defs) {
+      initial[field.name] = record.content?.[field.name] || '';
+    }
+    return initial;
+  });
+
+  const setField = (name, value) => setValues((prev) => ({ ...prev, [name]: value }));
+
   return (
     <div className="category-editor">
-      <textarea className="form-input" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-      <button type="button" className="btn-secondary" onClick={() => onSave(notes)}>Save</button>
+      {record.field_defs.map((field) => (
+        <label className="form-label" key={field.name}>
+          {field.label}
+          {field.type === 'textarea' ? (
+            <textarea
+              className="form-input"
+              rows={3}
+              value={values[field.name]}
+              onChange={(e) => setField(field.name, e.target.value)}
+            />
+          ) : field.type === 'select' ? (
+            <select
+              className="form-input"
+              value={values[field.name]}
+              onChange={(e) => setField(field.name, e.target.value)}
+            >
+              <option value="">— None —</option>
+              {field.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+            </select>
+          ) : (
+            <input
+              className="form-input"
+              type={field.type}
+              value={values[field.name]}
+              onChange={(e) => setField(field.name, e.target.value)}
+            />
+          )}
+        </label>
+      ))}
+      <div className="button-row">
+        <button type="button" className="btn-secondary" onClick={() => onSave(values)}>Save</button>
+      </div>
     </div>
   );
 }

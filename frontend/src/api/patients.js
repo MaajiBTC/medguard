@@ -60,6 +60,14 @@ function deactivatePatientAssignment(patientId, assignmentId) {
   return request(`/patients/${patientId}/assignments/${assignmentId}/`, { method: 'DELETE' });
 }
 
+/** GET /api/patients/staff/<staffPk>/assignments/ — admin-only, that staff
+ * member's active assignments. The reverse lookup of getPatientAssignments —
+ * lets the Admin dashboard's Staff panel assign a patient starting from the
+ * staff side. */
+function getStaffAssignments(staffPk) {
+  return request(`/patients/staff/${staffPk}/assignments/`);
+}
+
 export {
   searchPatients,
   getPatientSummary,
@@ -71,4 +79,5 @@ export {
   getPatientAssignments,
   createPatientAssignment,
   deactivatePatientAssignment,
+  getStaffAssignments,
 };

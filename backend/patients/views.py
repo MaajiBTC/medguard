@@ -112,7 +112,7 @@ class PatientCategoryUpdateView(APIView):
 
     def patch(self, request, patient_id, category):
         record = get_object_or_404(PatientCategoryRecord, patient_id=patient_id, category=category)
-        serializer = PatientCategoryContentUpdateSerializer(data=request.data)
+        serializer = PatientCategoryContentUpdateSerializer(data=request.data, context={"category": category})
         serializer.is_valid(raise_exception=True)
         record.content = serializer.validated_data["content"]
         record.save(update_fields=["content", "updated_at"])
@@ -170,5 +170,20 @@ class MyAssignedPatientsView(APIView):
 
     def get(self, request):
         staff = request.auth.staff
+        assignments = PatientAssignment.objects.filter(staff=staff, active=True).select_related("patient")
+        return Response(AssignedPatientSerializer(assignments, many=True).data)
+
+
+class StaffAssignmentsView(APIView):
+    """GET /api/patients/staff/<staff_pk>/assignments/ -- admin-only, that staff
+    member's active patient assignments. The reverse lookup of
+    PatientAssignmentListCreateView's GET above -- added 2026-09-03, per the user,
+    so the Admin dashboard's Staff panel can assign a patient to a staff member
+    directly, not just the other way around via the Patient panel."""
+
+    permission_classes = [IsAdmin]
+
+    def get(self, request, staff_pk):
+        staff = get_object_or_404(Staff, pk=staff_pk)
         assignments = PatientAssignment.objects.filter(staff=staff, active=True).select_related("patient")
         return Response(AssignedPatientSerializer(assignments, many=True).data)

@@ -26,4 +26,9 @@ urlpatterns = [
         views.PatientAssignmentDeactivateView.as_view(),
         name="assignment-deactivate",
     ),
+    path(
+        "staff/<int:staff_pk>/assignments/",
+        views.StaffAssignmentsView.as_view(),
+        name="staff-assignments",
+    ),
 ]

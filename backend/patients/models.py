@@ -75,11 +75,15 @@ class PatientAssignment(models.Model):
 
 class PatientCategoryRecord(models.Model):
     """One row per (patient, category) -- the actual content behind CLAUDE.md's 13
-    patient record categories. Deliberately generic (`content` is free-form JSON, edited
-    in the admin UI as a single notes field) rather than 13 bespoke structured schemas --
-    this is a security/access-control layer, not a hospital management system (CLAUDE.md
-    explicit exclusions), so category *content* stays minimal while category *access
-    control* (which is what this project is actually about) is the real thing.
+    patient record categories. `content` is a plain JSONField (no migration needed
+    per category), but what's *allowed inside it* is validated against per-category
+    structured field definitions (see category_fields.py's CATEGORY_FIELDS) rather
+    than one free-text notes field -- reversed 2026-09-03, per the user, from this
+    model's original "deliberately generic, not 13 bespoke schemas" design (see
+    CLAUDE.md's dated amendment for the reasoning). Category *access control*
+    (which role/score band unlocks which categories) is still the real point of
+    this project, not the content schema -- this only changes what's stored once a
+    category is unlocked, not who unlocks it.
 
     All 13 rows are created empty alongside a new Patient (see patients.views
     PatientCreateView) -- empty structure, not fabricated content, same as this

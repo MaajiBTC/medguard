@@ -148,13 +148,60 @@ class PatientApiTests(APITestCase):
 
         content_resp = self.client.patch(
             f"/api/patients/{patient.id}/records/6/",
-            {"content": {"notes": "Penicillin allergy"}},
+            {"content": {"drug_allergies": "Penicillin"}},
             format="json",
             **self._auth(token),
         )
         self.assertEqual(content_resp.status_code, status.HTTP_200_OK)
         record = PatientCategoryRecord.objects.get(patient=patient, category=6)
-        self.assertEqual(record.content, {"notes": "Penicillin allergy"})
+        self.assertEqual(record.content, {"drug_allergies": "Penicillin"})
+
+    def test_category_content_rejects_unknown_field_for_that_category(self):
+        """Structured per-category validation (added 2026-09-03, per the user) --
+        a key that isn't one of category 6's defined fields (drug_allergies/
+        other_allergies) 400s rather than silently saving."""
+        _admin, token = self._login("adminCategoryFieldApi1", "pw-patient-api-18", "STF-P917", Staff.Role.ADMIN)
+        patient = Patient.objects.create(hospital_number="HN-P909", full_name="P", ward="Ward A")
+        PatientCategoryRecord.objects.create(patient=patient, category=6)
+
+        resp = self.client.patch(
+            f"/api/patients/{patient.id}/records/6/",
+            {"content": {"notes": "not a real field for this category"}},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_category_content_rejects_non_string_value(self):
+        _admin, token = self._login("adminCategoryFieldApi2", "pw-patient-api-19", "STF-P918", Staff.Role.ADMIN)
+        patient = Patient.objects.create(hospital_number="HN-P910", full_name="P", ward="Ward A")
+        PatientCategoryRecord.objects.create(patient=patient, category=3)
+
+        resp = self.client.patch(
+            f"/api/patients/{patient.id}/records/3/",
+            {"content": {"height_cm": 180}},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_category_records_all_includes_field_defs_for_each_category(self):
+        _admin, token = self._login("adminCategoryFieldApi3", "pw-patient-api-20", "STF-P919", Staff.Role.ADMIN)
+        patient = Patient.objects.create(hospital_number="HN-P911", full_name="P", ward="Ward A")
+        PatientCategoryRecord.objects.bulk_create(
+            PatientCategoryRecord(patient=patient, category=c) for c, _ in PatientCategoryRecord.Category.choices
+        )
+
+        resp = self.client.get(f"/api/patients/{patient.id}/records/all/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        by_category = {r["category"]: r for r in resp.data}
+        identity_field_names = {f["name"] for f in by_category[1]["field_defs"]}
+        self.assertEqual(
+            identity_field_names,
+            {"date_of_birth", "sex", "address", "phone", "next_of_kin", "marital_status", "occupation"},
+        )
+        allergy_field_names = {f["name"] for f in by_category[6]["field_defs"]}
+        self.assertEqual(allergy_field_names, {"drug_allergies", "other_allergies"})
 
     def test_admin_can_assign_and_deactivate_doctor_and_nurse(self):
         _admin, admin_token = self._login("adminPatientApi3", "pw-patient-api-5", "STF-P904", Staff.Role.ADMIN)
@@ -207,6 +254,37 @@ class PatientApiTests(APITestCase):
         resp = self.client.get("/api/patients/assigned-to-me/", **self._auth(token))
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data, [])
+
+    def test_staff_assignments_view_returns_that_staffs_active_assignments(self):
+        """StaffAssignmentsView -- the reverse lookup used by the Admin dashboard's
+        Staff panel (added 2026-09-03, per the user) to assign a patient starting
+        from the staff side rather than only the patient side."""
+        admin, admin_token = self._login("adminStaffAssignApi", "pw-patient-api-11", "STF-P910", Staff.Role.ADMIN)
+        doctor, _t = self._login("docStaffAssignApi", "pw-patient-api-12", "STF-P911", Staff.Role.DOCTOR)
+        other_doctor, _t2 = self._login("otherDocStaffAssignApi", "pw-patient-api-13", "STF-P912", Staff.Role.DOCTOR)
+        patient_mine = Patient.objects.create(hospital_number="HN-P907", full_name="Mine", ward="Ward A")
+        patient_other = Patient.objects.create(hospital_number="HN-P908", full_name="Other", ward="Ward A")
+        PatientAssignment.objects.create(patient=patient_mine, staff=doctor, role_in_assignment="doctor")
+        PatientAssignment.objects.create(patient=patient_other, staff=other_doctor, role_in_assignment="doctor")
+
+        resp = self.client.get(f"/api/patients/staff/{doctor.id}/assignments/", **self._auth(admin_token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp.data), 1)
+        self.assertEqual(resp.data[0]["hospital_number"], "HN-P907")
+        self.assertIn("id", resp.data[0])
+
+    def test_staff_assignments_view_empty_for_staff_with_no_assignments(self):
+        admin, admin_token = self._login("adminStaffAssignApi2", "pw-patient-api-14", "STF-P913", Staff.Role.ADMIN)
+        nurse, _t = self._login("nurseStaffAssignApi", "pw-patient-api-15", "STF-P914", Staff.Role.NURSE)
+        resp = self.client.get(f"/api/patients/staff/{nurse.id}/assignments/", **self._auth(admin_token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data, [])
+
+    def test_staff_assignments_view_forbidden_for_non_admin(self):
+        _staff, token = self._login("clerkStaffAssignApi", "pw-patient-api-16", "STF-P915", Staff.Role.CLERK)
+        doctor, _t = self._login("docStaffAssignApi2", "pw-patient-api-17", "STF-P916", Staff.Role.DOCTOR)
+        resp = self.client.get(f"/api/patients/staff/{doctor.id}/assignments/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_invalid_ward_rejected_on_create(self):
         _admin, token = self._login("adminPatientApi4", "pw-patient-api-11", "STF-P910", Staff.Role.ADMIN)
