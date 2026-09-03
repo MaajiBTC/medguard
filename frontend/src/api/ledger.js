@@ -12,4 +12,12 @@ function getLedgerEntries(filters = {}) {
   return request(`/ledger/entries/${qs ? `?${qs}` : ''}`);
 }
 
-export { getLedgerEntries };
+/** POST /api/ledger/entries/<sequence>/explain/ — security-officer-only.
+ * Translates that entry's raw factor breakdown into a plain-English
+ * explanation via Gemini (see backend ledger/gemini.py). Returns
+ * `{ explanation }`. */
+function explainLedgerEntry(sequence) {
+  return request(`/ledger/entries/${sequence}/explain/`, { method: 'POST' });
+}
+
+export { getLedgerEntries, explainLedgerEntry };

@@ -533,6 +533,42 @@ shown by default):** same day, per the user, confirmed via
    narrows the list instantly without pressing Enter, and the labeled
    detail card renders correctly. No console errors.
 
+**Amended a nineteenth time (2026-09-03, "MedGuard AI explanation" on the
+live feed):** the Ledger live feed's row drilldown (raw `entry.details`
+JSON) gained an AI-generated plain-English translation next to it, per the
+user — planned via Plan Mode, approved plan at
+`.claude/plans/greedy-humming-graham.md`. The user explicitly chose Google
+Gemini over the Claude API for this (they already had a Gemini key; intend
+to switch to a paid Claude API key "when I buy it for the competition" —
+noted here so a future session doesn't assume Gemini is the permanent
+choice). New `ledger/gemini.py`: `explain_entry(entry)` builds a prompt
+from the entry's denormalized fields + `details` JSON and calls Gemini's
+REST `generateContent` endpoint directly via `requests` (new dependency —
+no official SDK installed, a single call didn't justify one), reading
+`settings.GEMINI_API_KEY`/`GEMINI_MODEL` (env-configured, `.env.example`
+documented, real key lives only in the gitignored `backend/.env`) with a
+45s timeout and one automatic retry on a timeout/connection blip — observed
+Gemini latency for this prompt size varies widely in practice (14s-30s+ for
+the *same* request back to back), and separately, free-tier Gemini keys
+are subject to real 429 rate-limiting that surfaces as a normal error-panel
+state, not a bug. New `POST /api/ledger/entries/<sequence>/explain/`
+(`LedgerEntryExplainView`, `IsSecurityOfficer`-gated) returns
+`{explanation}` or a 502 with a message — **never persisted**, generated
+fresh every call, since an AI's paraphrase of a decision is not part of
+the audited Ledger record. Frontend: `LedgerEntriesFeed`'s drilldown
+becomes a `.ledger-drilldown-split` two-column layout the moment a row
+expands (raw JSON left, `.ledger-ai-panel` right) — but per the user's
+explicit correction, that panel only *fires the request* on an explicit
+"Explain with AI" click; an earlier version that auto-fetched the moment a
+row expanded was tried and reverted the same day, since the user did not
+want an automatic API call just from opening a row. Panel header reads
+"✨ MedGuard AI explanation" (also renamed same day, per the user). 17/17
+`ledger` app tests passing (4 new, `gemini.explain_entry` mocked so the
+suite never makes a real network call). Verified live end-to-end via the
+Claude-in-Chrome extension against a real Ledger entry and the real
+security officer account, including a real Gemini 429 rendering correctly
+through the existing error state.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.

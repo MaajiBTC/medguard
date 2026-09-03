@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 
-import { getLedgerEntries } from '../api/ledger';
+import { explainLedgerEntry, getLedgerEntries } from '../api/ledger';
 import { searchPatients } from '../api/patients';
 import { createStaff, getAdminActions, searchStaff } from '../api/staff';
 import Modal from '../components/Modal';
@@ -63,6 +63,17 @@ function formatRole(role) {
  * just with more columns. */
 function LedgerEntriesFeed({ entries, error }) {
   const [expandedSequence, setExpandedSequence] = useState(null);
+  const [aiPanels, setAiPanels] = useState({});
+
+  const handleExplain = async (sequence) => {
+    setAiPanels((prev) => ({ ...prev, [sequence]: { status: 'loading' } }));
+    try {
+      const { explanation } = await explainLedgerEntry(sequence);
+      setAiPanels((prev) => ({ ...prev, [sequence]: { status: 'done', text: explanation } }));
+    } catch (err) {
+      setAiPanels((prev) => ({ ...prev, [sequence]: { status: 'error', error: errorMessage(err) } }));
+    }
+  };
 
   return (
     <div className="ledger-feed">
@@ -76,25 +87,48 @@ function LedgerEntriesFeed({ entries, error }) {
         <span>Patient</span>
       </div>
 
-      {entries.map((entry) => (
-        <Fragment key={entry.sequence}>
-          <div
-            className={`ledger-row-card ledger-row-card-entry severity-${entry.event_type}`}
-            onClick={() => setExpandedSequence(expandedSequence === entry.sequence ? null : entry.sequence)}
-          >
-            <span>{entry.sequence}</span>
-            <span>{new Date(entry.occurred_at).toLocaleString()}</span>
-            <span>{entry.event_type}</span>
-            <span>{entry.staff_full_name} ({entry.staff_id})</span>
-            <span>{entry.patient_hospital_number || '—'}</span>
-          </div>
-          {expandedSequence === entry.sequence && (
-            <div className="ledger-row-card ledger-drilldown">
-              <pre>{JSON.stringify(entry.details, null, 2)}</pre>
+      {entries.map((entry) => {
+        const ai = aiPanels[entry.sequence];
+        return (
+          <Fragment key={entry.sequence}>
+            <div
+              className={`ledger-row-card ledger-row-card-entry severity-${entry.event_type}`}
+              onClick={() => setExpandedSequence(expandedSequence === entry.sequence ? null : entry.sequence)}
+            >
+              <span>{entry.sequence}</span>
+              <span>{new Date(entry.occurred_at).toLocaleString()}</span>
+              <span>{entry.event_type}</span>
+              <span>{entry.staff_full_name} ({entry.staff_id})</span>
+              <span>{entry.patient_hospital_number || '—'}</span>
             </div>
-          )}
-        </Fragment>
-      ))}
+            {expandedSequence === entry.sequence && (
+              <div className="ledger-row-card ledger-drilldown ledger-drilldown-split">
+                <div>
+                  <pre>{JSON.stringify(entry.details, null, 2)}</pre>
+                </div>
+                <div className="ledger-ai-panel">
+                  <h4>✨ MedGuard AI explanation</h4>
+                  {!ai && (
+                    <button type="button" className="btn-secondary" onClick={() => handleExplain(entry.sequence)}>
+                      Explain with AI
+                    </button>
+                  )}
+                  {ai?.status === 'loading' && <p className="meta-line">Thinking…</p>}
+                  {ai?.status === 'done' && <p>{ai.text}</p>}
+                  {ai?.status === 'error' && (
+                    <>
+                      <p role="alert" className="dev-error">{ai.error}</p>
+                      <button type="button" className="btn-secondary" onClick={() => handleExplain(entry.sequence)}>
+                        Retry
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }

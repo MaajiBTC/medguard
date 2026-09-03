@@ -43,6 +43,11 @@ ALLOWED_HOSTS = ['*']
 # Static per-workstation network segment (see .env / CLAUDE.md Contextual module).
 WORKSTATION_NETWORK_SEGMENT = os.environ.get('WORKSTATION_NETWORK_SEGMENT', 'unknown')
 
+# Ledger live-feed "explain with AI" feature (see .env / ledger/gemini.py).
+# Unset locally means that feature returns a friendly 502, not a crash.
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.6-flash')
+
 
 # Application definition
 

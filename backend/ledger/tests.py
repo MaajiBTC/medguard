@@ -3,6 +3,8 @@ and `ledger` get their own temporary test databases) -- no real enrollment data,
 CLAUDE.md.
 """
 
+from unittest.mock import patch
+
 from django.contrib.auth.models import User
 from django.db import connections
 from django.test import TestCase
@@ -15,6 +17,7 @@ from captures.models import BehavioralCapture, ContextualCapture
 from patients.models import Patient
 from staff.models import Staff
 
+from .gemini import GeminiError
 from .models import LedgerEntry, LedgerImmutableError
 from .services import GENESIS_HASH, record_event
 from .verification import verify_chain
@@ -250,3 +253,63 @@ class LedgerFeedViewTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(len(resp.data), 1)
         self.assertEqual(resp.data[0]["staff_role"], "nurse")
+
+
+class LedgerEntryExplainViewTests(APITestCase):
+    """/api/ledger/entries/<sequence>/explain/ -- security-officer-only.
+    gemini.explain_entry is always mocked here so the suite never makes a
+    real network call (added 2026-09-03, per the user's "explain with AI"
+    feature)."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(user=user, staff_id=staff_id, full_name=username, role=role)
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_non_security_officer_forbidden(self):
+        _staff, token = self._login("adminExplainApi", "pw-explain-1", "STF-EX900", Staff.Role.ADMIN)
+        resp = self.client.post("/api/ledger/entries/1/explain/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unknown_sequence_404s(self):
+        _officer, token = self._login("secOfficerExplainApi", "pw-explain-2", "STF-EX901", Staff.Role.SECURITY_OFFICER)
+        resp = self.client.post("/api/ledger/entries/999999/explain/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_success_returns_explanation(self):
+        officer, token = self._login("secOfficerExplainApi2", "pw-explain-3", "STF-EX902", Staff.Role.SECURITY_OFFICER)
+        doctor = self._login("docExplainApi", "pw-explain-4", "STF-EX903", Staff.Role.DOCTOR)[0]
+        entry = record_event(
+            event_type=LedgerEntry.EventType.ACCESS_DENIED,
+            staff=doctor,
+            details={"score": 12.5, "factor_breakdown": {"gate": {"keystroke_touch_similarity": 0.1}}},
+        )
+
+        with patch("ledger.views.explain_entry", return_value="The doctor's typing pattern didn't match, so access was denied.") as mocked:
+            resp = self.client.post(f"/api/ledger/entries/{entry.sequence}/explain/", **self._auth(token))
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["explanation"], "The doctor's typing pattern didn't match, so access was denied.")
+        mocked.assert_called_once()
+
+    def test_gemini_failure_returns_502(self):
+        officer, token = self._login("secOfficerExplainApi3", "pw-explain-5", "STF-EX904", Staff.Role.SECURITY_OFFICER)
+        doctor = self._login("docExplainApi2", "pw-explain-6", "STF-EX905", Staff.Role.DOCTOR)[0]
+        entry = record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=doctor)
+
+        with patch("ledger.views.explain_entry", side_effect=GeminiError("AI explanations aren't configured.")):
+            resp = self.client.post(f"/api/ledger/entries/{entry.sequence}/explain/", **self._auth(token))
+
+        self.assertEqual(resp.status_code, 502)
+        self.assertIn("aren't configured", resp.data["detail"])

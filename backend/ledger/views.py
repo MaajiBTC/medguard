@@ -1,8 +1,10 @@
+from django.shortcuts import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from staff.permissions import IsSecurityOfficer
 
+from .gemini import GeminiError, explain_entry
 from .models import LedgerEntry
 from .serializers import LedgerEntrySerializer
 
@@ -55,3 +57,23 @@ class LedgerFeedView(APIView):
 
         entries = entries.order_by("-sequence")[:PAGE_SIZE]
         return Response(LedgerEntrySerializer(entries, many=True).data)
+
+
+class LedgerEntryExplainView(APIView):
+    """POST /api/ledger/entries/<sequence>/explain/ -- security-officer-only.
+    Sends the entry's denormalized fields + details JSON to Gemini (see
+    gemini.py) and returns a plain-English explanation for the security
+    officer. Generated fresh on every call, never persisted -- the Ledger
+    stays exactly what services.record_event() wrote; an AI's paraphrase of
+    an entry is not part of the audited record.
+    """
+
+    permission_classes = [IsSecurityOfficer]
+
+    def post(self, request, sequence):
+        entry = get_object_or_404(LedgerEntry.objects.using("ledger"), sequence=sequence)
+        try:
+            explanation = explain_entry(entry)
+        except GeminiError as exc:
+            return Response({"detail": str(exc)}, status=502)
+        return Response({"explanation": explanation})

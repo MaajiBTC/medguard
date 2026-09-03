@@ -579,6 +579,36 @@ button {
   max-height: 320px;
 }
 
+/* Live feed drilldown split (added 2026-09-03, per the user): the raw JSON
+   and the "MedGuard AI explanation" panel sit side by side the moment a
+   row expands -- the panel itself waits for an explicit "Explain with AI"
+   click before firing the request (per the user, 2026-09-03: no automatic
+   API call just from expanding a row). */
+.ledger-drilldown-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 720px) {
+  .ledger-drilldown-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ledger-ai-panel {
+  background: #fff;
+  border: 1px solid var(--plum);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.ledger-ai-panel h4 {
+  margin: 0 0 8px;
+  color: var(--plum-deep);
+  font-size: 13px;
+}
+
 /* Dashboard shell (new): fixed light plum/lavender/off-white brand palette, same
    as the login page -- replaces the dark-mode-aware --bg/--text/--accent look
    above as each dashboard (Admin/Clinical/Security) migrates to <DashboardShell>. */
