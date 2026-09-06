@@ -145,8 +145,18 @@ const ICONS = {
 };
 
 /** Circular role-badge avatar -- `role` is a Staff.Role value, 'admin', or
- * 'patient' (the one generic icon used for every patient, per the user). */
-function RoleAvatar({ role }) {
+ * 'patient' (the one generic icon used for every patient, per the user).
+ * When `photoUrl` is given (a staff member has uploaded a real profile
+ * photo, added 2026-09-05), it's shown instead of the cartoon -- same
+ * circular frame, real image cropped to fill it. */
+function RoleAvatar({ role, photoUrl }) {
+  if (photoUrl) {
+    return (
+      <div className="role-avatar" aria-hidden="true">
+        <img src={photoUrl} className="role-avatar-photo" alt="" />
+      </div>
+    );
+  }
   const Icon = ICONS[role] || PatientIcon;
   return (
     <div className="role-avatar" aria-hidden="true">

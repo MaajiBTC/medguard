@@ -48,6 +48,26 @@ WORKSTATION_NETWORK_SEGMENT = os.environ.get('WORKSTATION_NETWORK_SEGMENT', 'unk
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.6-flash')
 
+# Login brute-force lockout (added 2026-09-06 -- see access/services.py).
+# An account is locked while it has at least LOGIN_MAX_FAILED_ATTEMPTS failed
+# attempts inside the last LOGIN_LOCKOUT_MINUTES; the lock then expires on its
+# own as those failures age out of the window (an admin can also clear it
+# early -- staff.views.StaffUnlockView).
+LOGIN_MAX_FAILED_ATTEMPTS = int(os.environ.get('LOGIN_MAX_FAILED_ATTEMPTS', '5'))
+LOGIN_LOCKOUT_MINUTES = int(os.environ.get('LOGIN_LOCKOUT_MINUTES', '15'))
+
+# Step-up verification via device biometrics (added 2026-09-06, replacing a
+# typed PIN -- see access/views.py, scoring/views.py). WebAuthn ties a
+# credential to the origin the BROWSER believes it's on -- that's the
+# FRONTEND's origin (Vercel), not this backend's (Render), even though
+# verification happens here. Getting this wrong is the classic WebAuthn
+# deployment mistake: set these to the real frontend domain once one exists,
+# not the backend's. Locally both default to localhost, which just works
+# regardless of the two dev servers running on different ports.
+WEBAUTHN_RP_ID = os.environ.get('WEBAUTHN_RP_ID', 'localhost')
+WEBAUTHN_RP_NAME = os.environ.get('WEBAUTHN_RP_NAME', 'MedGuard')
+WEBAUTHN_ORIGIN = os.environ.get('WEBAUTHN_ORIGIN', 'http://localhost:5173')
+
 
 # Application definition
 
@@ -68,6 +88,10 @@ INSTALLED_APPS = [
     'captures',
     'scoring',
     'ledger',
+    # Security alerts (added 2026-09-06) -- raised by access/scoring, read by the
+    # Security dashboard. Depends on nothing (denormalized fields, no FKs), so it
+    # sits at the end of the order above.
+    'alerts',
 ]
 
 MIDDLEWARE = [
@@ -189,9 +213,19 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Uploaded staff photos (see staff.Staff.photo, added 2026-09-05). Served via
+# config/urls.py's static() helper in DEBUG only -- local-disk storage, so this
+# won't survive a redeploy on Render's ephemeral free-tier disk (accepted
+# tradeoff, per the user -- swap to real object storage later if needed).
+MEDIA_URL = 'media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 # Manifest storage needs `collectstatic` to have run (Render build step does
 # this); locally in dev, Django's own default serves static files fine.
 STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
     'staticfiles': {
         'BACKEND': (
             'django.contrib.staticfiles.storage.StaticFilesStorage'

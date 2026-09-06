@@ -30,7 +30,8 @@ function setToken(token) {
  * @param {boolean} [options.auth] - attach the Bearer token (default true)
  */
 async function request(path, { method = 'GET', body, auth = true } = {}) {
-  const headers = { 'Content-Type': 'application/json' };
+  const isFormData = body instanceof FormData;
+  const headers = isFormData ? {} : { 'Content-Type': 'application/json' };
 
   if (auth) {
     const token = getToken();
@@ -42,7 +43,7 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : isFormData ? body : JSON.stringify(body),
   });
 
   const text = await response.text();

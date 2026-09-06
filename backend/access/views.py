@@ -1,17 +1,38 @@
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from webauthn import base64url_to_bytes, generate_registration_options, verify_registration_response
+from webauthn.helpers import bytes_to_base64url, options_to_json_dict
+from webauthn.helpers.exceptions import InvalidRegistrationResponse
+from webauthn.helpers.structs import (
+    AuthenticatorAttachment,
+    AuthenticatorSelectionCriteria,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
 
+from alerts.models import SecurityAlert
+from alerts.services import raise_alert
 from captures.serializers import KeystrokeFeaturesSerializer
 from staff.models import Staff
+from staff.permissions import IsClinicalStaff
 
-from .models import AccessSession, Device, PendingDeviceRequest
+from .models import AccessSession, Device, PendingDeviceRequest, WebAuthnCredential
 from .serializers import ChangePasswordSerializer, DeviceSerializer, PendingDeviceRequestSerializer
-from .services import create_session
+from .services import (
+    clear_webauthn_challenge,
+    create_session,
+    is_locked_out,
+    lockout_remaining_minutes,
+    record_login_attempt,
+    webauthn_challenge_is_fresh,
+)
 
 
 class LoginView(APIView):
@@ -60,8 +81,44 @@ class LoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        ip_address = request.META.get("REMOTE_ADDR") or None
+
+        # Brute-force lockout (added 2026-09-06) -- checked BEFORE authenticate(),
+        # so a locked account is refused even when the password is finally
+        # guessed correctly. That's the whole point: the attacker gets no signal
+        # that they've landed on the right one.
+        if is_locked_out(username):
+            minutes = lockout_remaining_minutes(username)
+            record_login_attempt(username, succeeded=False, device_id=device_id, ip_address=ip_address)
+            return Response(
+                {
+                    "detail": (
+                        f"Account temporarily locked after too many failed attempts. "
+                        f"Try again in {minutes} minute{'s' if minutes != 1 else ''}, "
+                        f"or ask an administrator to unlock it."
+                    ),
+                    "locked_out": True,
+                    "minutes_remaining": minutes,
+                },
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
         user = authenticate(request, username=username, password=password)
         if user is None:
+            record_login_attempt(username, succeeded=False, device_id=device_id, ip_address=ip_address)
+            if is_locked_out(username):
+                # This failure is the one that crossed the threshold.
+                raise_alert(
+                    alert_type=SecurityAlert.AlertType.LOGIN_LOCKOUT,
+                    staff=Staff.objects.filter(user__username=username).first(),
+                    details={
+                        "username": username,
+                        "failed_attempts": settings.LOGIN_MAX_FAILED_ATTEMPTS,
+                        "lockout_minutes": settings.LOGIN_LOCKOUT_MINUTES,
+                        "device_id": device_id,
+                        "ip_address": ip_address,
+                    },
+                )
             return Response(
                 {"detail": "Invalid credentials."},
                 status=status.HTTP_401_UNAUTHORIZED,
@@ -69,10 +126,13 @@ class LoginView(APIView):
 
         staff = getattr(user, "staff_profile", None)
         if staff is None:
+            record_login_attempt(username, succeeded=False, device_id=device_id, ip_address=ip_address)
             return Response(
                 {"detail": "This account has no associated staff profile."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+
+        record_login_attempt(username, succeeded=True, device_id=device_id, ip_address=ip_address)
 
         # One device per account (added 2026-08-30), clinical roles only -- admin/
         # security_officer are documented shared accounts (Staff.NO_WARD_DUTY_ROLES)
@@ -264,6 +324,12 @@ class LogoutView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+def _photo_url(request, staff):
+    """Absolute URL for a staff member's uploaded photo, or None -- shared by
+    every view that returns staff info alongside a photo (added 2026-09-05)."""
+    return request.build_absolute_uri(staff.photo.url) if staff.photo else None
+
+
 class ChangePasswordView(APIView):
     """POST /api/access/change-password/ -- any logged-in staff member changes
     their own password (self-service, from the frontend's Profile page). Default
@@ -284,6 +350,30 @@ class ChangePasswordView(APIView):
         return Response({"detail": "Password updated."})
 
 
+class ProfilePhotoView(APIView):
+    """POST (multipart, {photo: <file>}) to upload/replace the caller's own
+    profile photo; DELETE to remove it. Self-service like ChangePasswordView
+    above -- always request.auth.staff, no staff_id in the URL. Added
+    2026-09-05, per the user, so the Security dashboard can show a real photo
+    instead of RoleAvatar's cartoon once one exists."""
+
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        photo = request.FILES.get("photo")
+        if not photo:
+            return Response({"detail": "photo file is required."}, status=status.HTTP_400_BAD_REQUEST)
+        staff = request.auth.staff
+        staff.photo = photo
+        staff.save(update_fields=["photo"])
+        return Response({"photo_url": _photo_url(request, staff)})
+
+    def delete(self, request):
+        staff = request.auth.staff
+        staff.photo.delete(save=True)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class CurrentSessionView(APIView):
     """GET /api/access/session/current/ — the caller's own session, plus live (not
     login-time-snapshotted) duty status/ward, so dashboards can show current status
@@ -302,7 +392,9 @@ class CurrentSessionView(APIView):
                 "staff_full_name": staff.full_name,
                 "role": staff.role,
                 "on_duty": staff.on_duty,
+                "on_call": staff.on_call,
                 "ward": staff.ward,
+                "photo_url": _photo_url(request, staff),
                 "started_at": session.started_at,
                 "ended_at": session.ended_at,
                 "is_active": session.is_active,
@@ -310,5 +402,99 @@ class CurrentSessionView(APIView):
                 "device_type": session.device_type,
                 "user_agent": session.user_agent,
                 "network_segment": session.network_segment,
+                # Added 2026-09-06: does THIS device have a step-up biometric
+                # credential enrolled -- lets the clinical dashboard decide
+                # whether to offer the biometric button or go straight to
+                # "ask a colleague" without a separate round trip.
+                "has_webauthn_credential": WebAuthnCredential.objects.filter(
+                    staff=staff, device__device_id=session.device_id
+                ).exists(),
             }
         )
+
+
+class WebAuthnRegistrationOptionsView(APIView):
+    """POST /api/access/webauthn/registration-options/ -- self-service,
+    clinical roles only (admin/security officer never go through scoring, so
+    they'd have no use for step-up at all). First step of enrolling THIS
+    device's biometric unlock (Face ID/fingerprint/Windows Hello) as a
+    step-up credential (added 2026-09-06, replacing the typed PIN).
+
+    `authenticator_attachment=PLATFORM` is what restricts the browser to the
+    device's own built-in authenticator rather than also offering a USB
+    security key -- this is specifically about "this device", not "any
+    credential this person owns".
+    """
+
+    permission_classes = [IsClinicalStaff]
+
+    def post(self, request):
+        session = request.auth
+        staff = session.staff
+
+        options = generate_registration_options(
+            rp_id=settings.WEBAUTHN_RP_ID,
+            rp_name=settings.WEBAUTHN_RP_NAME,
+            user_id=str(staff.id).encode("utf-8"),
+            user_name=staff.staff_id,
+            user_display_name=staff.full_name,
+            authenticator_selection=AuthenticatorSelectionCriteria(
+                authenticator_attachment=AuthenticatorAttachment.PLATFORM,
+                user_verification=UserVerificationRequirement.REQUIRED,
+                resident_key=ResidentKeyRequirement.DISCOURAGED,
+            ),
+        )
+        session.webauthn_challenge = bytes_to_base64url(options.challenge)
+        session.webauthn_challenge_created_at = timezone.now()
+        session.save(update_fields=["webauthn_challenge", "webauthn_challenge_created_at"])
+
+        return Response(options_to_json_dict(options))
+
+
+class WebAuthnRegisterView(APIView):
+    """POST /api/access/webauthn/register/ -- {credential: <navigator.credentials.create() response>}
+
+    Second step: verifies the browser's response against the challenge from
+    registration-options/ above, then creates (or replaces) THIS device's
+    WebAuthnCredential. `device` is looked up by the session's own
+    device_id -- this only ever enrolls the device the staff member is
+    currently sitting at, never an arbitrary one.
+    """
+
+    permission_classes = [IsClinicalStaff]
+
+    def post(self, request):
+        session = request.auth
+        staff = session.staff
+
+        if not webauthn_challenge_is_fresh(session):
+            return Response(
+                {"detail": "Registration session expired. Please try again."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        device = get_object_or_404(Device, staff=staff, device_id=session.device_id)
+
+        try:
+            verification = verify_registration_response(
+                credential=request.data.get("credential"),
+                expected_challenge=base64url_to_bytes(session.webauthn_challenge),
+                expected_rp_id=settings.WEBAUTHN_RP_ID,
+                expected_origin=settings.WEBAUTHN_ORIGIN,
+                require_user_verification=True,
+            )
+        except InvalidRegistrationResponse as exc:
+            return Response({"detail": f"Could not verify registration: {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+        finally:
+            clear_webauthn_challenge(session)
+
+        WebAuthnCredential.objects.update_or_create(
+            device=device,
+            defaults={
+                "staff": staff,
+                "credential_id": bytes_to_base64url(verification.credential_id),
+                "public_key": bytes_to_base64url(verification.credential_public_key),
+                "sign_count": verification.sign_count,
+            },
+        )
+        return Response({"detail": "Step-up verification enabled on this device."})

@@ -21,6 +21,7 @@ import {
   createStaff,
   deactivateStaff,
   deleteStaff,
+  unlockStaff,
   getStaffSummary,
   reactivateStaff,
   searchStaff,
@@ -313,6 +314,16 @@ function StaffPanel() {
     }
   };
 
+  const handleUnlock = async () => {
+    setError(null);
+    try {
+      setSelected(await unlockStaff(selected.id));
+      setNotice('Account unlocked — they can log in again now.');
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
   const handleCreate = async (event) => {
     event.preventDefault();
     setError(null);
@@ -403,7 +414,21 @@ function StaffPanel() {
 
       {selected && (
         <div className="panel-card">
-          <h3>{selected.full_name} ({selected.staff_id})</h3>
+          <h3>
+            {selected.full_name} ({selected.staff_id})
+            {selected.is_locked_out && <span className="badge badge-open">Locked</span>}
+          </h3>
+
+          {/* Login lockout (added 2026-09-06). Step-up is self-service device
+              biometric enrollment now (see the Profile page) -- nothing for
+              an admin to set here. */}
+          {selected.is_locked_out && (
+            <p role="alert" className="access-reduced">
+              This account is locked after too many failed login attempts. It unlocks on
+              its own shortly, or you can clear it now.
+            </p>
+          )}
+
           {NO_WARD_DUTY_ROLES.has(selected.role) ? (
             <p className="meta-line">Shared account — no ward, on-duty, or on-call status.</p>
           ) : (
@@ -432,6 +457,11 @@ function StaffPanel() {
             <button type="button" className="btn-secondary" onClick={toggleActive}>
               {selected.account_active ? 'Deactivate account' : 'Reactivate account'}
             </button>
+            {selected.is_locked_out && (
+              <button type="button" className="btn-secondary" onClick={handleUnlock}>
+                Unlock account
+              </button>
+            )}
             {!deleteConfirming && (
               <button type="button" className="btn-danger" onClick={() => setDeleteConfirming(true)}>
                 Delete account

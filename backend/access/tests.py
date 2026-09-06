@@ -2,13 +2,34 @@
 AccessSessionAuthentication tests. See staff/tests.py docstring re: the throwaway
 test database and CLAUDE.md's no-placeholder-data rule."""
 
+import io
+from datetime import timedelta
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
+from PIL import Image
 from rest_framework import status
 from rest_framework.test import APITestCase
+from webauthn.helpers.exceptions import InvalidRegistrationResponse
 
+from alerts.models import SecurityAlert
 from staff.models import Staff
 
-from .models import AccessSession, Device, PendingDeviceRequest
+from .models import AccessSession, Device, LoginAttempt, PendingDeviceRequest, WebAuthnCredential
+from .services import is_locked_out
+
+
+def _tiny_png(name="photo.png"):
+    """A minimal real PNG (not a placeholder patient/staff data value -- just
+    bytes exercising the upload path) for ImageField-backed test uploads."""
+    buf = io.BytesIO()
+    Image.new("RGB", (2, 2), color=(10, 20, 30)).save(buf, format="PNG")
+    buf.seek(0)
+    return SimpleUploadedFile(name, buf.read(), content_type="image/png")
 
 
 class AccessSessionModelTests(APITestCase):
@@ -210,6 +231,8 @@ class AuthenticationTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data["staff_id"], "STF-300")
         self.assertEqual(resp.data["role"], "nurse")
+        self.assertEqual(resp.data["on_call"], False)
+        self.assertIsNone(resp.data["photo_url"])
 
     def test_missing_token_rejected(self):
         resp = self.client.get("/api/access/session/current/")
@@ -325,6 +348,288 @@ class ChangePasswordViewTests(APITestCase):
             {"current_password": "old-pass-123", "new_password": "brand-new-pass-1"},
             format="json",
         )
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class LoginLockoutTests(APITestCase):
+    """Brute-force lockout (added 2026-09-06). Lockout state is derived from
+    recent LoginAttempt rows rather than stored -- see access/services.py."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="lockDoc", password="right-password-1")
+        self.staff = Staff.objects.create(
+            user=self.user, staff_id="STF-LK1", full_name="Lock Doctor", role=Staff.Role.DOCTOR
+        )
+
+    def _attempt(self, password, device_id="device-lock-1"):
+        return self.client.post(
+            "/api/access/login/",
+            {"username": "lockDoc", "password": password, "device_id": device_id, "device_type": "desktop"},
+            format="json",
+        )
+
+    def _fail_to_threshold(self):
+        for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS):
+            resp = self._attempt("wrong-password")
+            self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_attempts_are_recorded(self):
+        self._attempt("wrong-password")
+        self._attempt("right-password-1")
+        self.assertEqual(LoginAttempt.objects.filter(username="lockDoc").count(), 2)
+        self.assertTrue(LoginAttempt.objects.filter(username="lockDoc", succeeded=True).exists())
+
+    def test_lockout_after_threshold_failures(self):
+        self._fail_to_threshold()
+        resp = self._attempt("wrong-password")
+        self.assertEqual(resp.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertTrue(resp.data["locked_out"])
+        self.assertGreaterEqual(resp.data["minutes_remaining"], 1)
+
+    def test_correct_password_still_refused_while_locked(self):
+        """The whole point -- an attacker who finally guesses right gets no
+        signal that they did."""
+        self._fail_to_threshold()
+        resp = self._attempt("right-password-1")
+        self.assertEqual(resp.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertEqual(AccessSession.objects.count(), 0)
+
+    def test_lockout_raises_a_security_alert(self):
+        self._fail_to_threshold()
+        alert = SecurityAlert.objects.filter(alert_type=SecurityAlert.AlertType.LOGIN_LOCKOUT).first()
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.details["username"], "lockDoc")
+        self.assertEqual(alert.staff_id, "STF-LK1")
+        self.assertFalse(alert.acknowledged)
+
+    def test_lockout_expires_once_failures_age_out_of_the_window(self):
+        self._fail_to_threshold()
+        self.assertEqual(self._attempt("right-password-1").status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+        # Age every recorded failure past the lockout window (auto_now_add means
+        # attempted_at can't be set at creation time).
+        stale = timezone.now() - timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES + 1)
+        LoginAttempt.objects.filter(username="lockDoc").update(attempted_at=stale)
+
+        resp = self._attempt("right-password-1")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+    def test_successful_login_resets_the_failure_count(self):
+        for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS - 1):
+            self._attempt("wrong-password")
+        self.assertEqual(self._attempt("right-password-1").status_code, status.HTTP_201_CREATED)
+
+        # Those earlier failures are behind a success now, so the next failure
+        # starts a fresh count rather than tipping straight into a lock.
+        self.assertEqual(self._attempt("wrong-password").status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertFalse(is_locked_out("lockDoc"))
+
+    def test_unknown_username_can_also_lock_out(self):
+        for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS):
+            self.client.post(
+                "/api/access/login/",
+                {"username": "ghost-account", "password": "guess", "device_id": "d", "device_type": "desktop"},
+                format="json",
+            )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": "ghost-account", "password": "guess", "device_id": "d", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+
+class WebAuthnRegistrationTests(APITestCase):
+    """Step-up biometric enrollment (added 2026-09-06, replacing the typed
+    PIN). Mocks verify_registration_response the same way ledger.gemini's
+    explain_entry is already mocked elsewhere in this suite -- a real
+    browser/authenticator ceremony can't be produced in a test, so the
+    library's own verification is the trusted external boundary here."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="webauthnNurse", password="pw-webauthn-1")
+        self.staff = Staff.objects.create(
+            user=self.user, staff_id="STF-WA1", full_name="WebAuthn Nurse", role=Staff.Role.NURSE
+        )
+        login = self.client.post(
+            "/api/access/login/",
+            {"username": "webauthnNurse", "password": "pw-webauthn-1", "device_id": "device-wa-1", "device_type": "desktop"},
+            format="json",
+        )
+        self.token = login.data["token"]
+        self.session = AccessSession.objects.get(token=self.token)
+
+    def _auth(self):
+        return {"HTTP_AUTHORIZATION": f"Bearer {self.token}"}
+
+    def test_registration_options_stores_a_challenge_on_the_session(self):
+        resp = self.client.post("/api/access/webauthn/registration-options/", **self._auth())
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("challenge", resp.data)
+        self.assertEqual(resp.data["rp"]["id"], "localhost")
+
+        self.session.refresh_from_db()
+        self.assertTrue(self.session.webauthn_challenge)
+        self.assertIsNotNone(self.session.webauthn_challenge_created_at)
+
+    def test_register_creates_credential_for_this_device(self):
+        self.client.post("/api/access/webauthn/registration-options/", **self._auth())
+        self.session.refresh_from_db()
+
+        fake_verification = SimpleNamespace(
+            credential_id=b"fake-credential-id",
+            credential_public_key=b"fake-public-key",
+            sign_count=0,
+        )
+        with patch("access.views.verify_registration_response", return_value=fake_verification):
+            resp = self.client.post(
+                "/api/access/webauthn/register/",
+                {"credential": {"id": "whatever"}},
+                format="json",
+                **self._auth(),
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        device = Device.objects.get(staff=self.staff, device_id="device-wa-1")
+        credential = WebAuthnCredential.objects.get(device=device)
+        self.assertEqual(credential.staff, self.staff)
+        self.assertEqual(credential.sign_count, 0)
+
+        # Challenge is single-use.
+        self.session.refresh_from_db()
+        self.assertEqual(self.session.webauthn_challenge, "")
+
+    def test_register_replaces_existing_credential_for_the_same_device(self):
+        self.client.post("/api/access/webauthn/registration-options/", **self._auth())
+        with patch(
+            "access.views.verify_registration_response",
+            return_value=SimpleNamespace(
+                credential_id=b"first-id", credential_public_key=b"first-key", sign_count=0
+            ),
+        ):
+            self.client.post(
+                "/api/access/webauthn/register/", {"credential": {}}, format="json", **self._auth()
+            )
+
+        self.client.post("/api/access/webauthn/registration-options/", **self._auth())
+        with patch(
+            "access.views.verify_registration_response",
+            return_value=SimpleNamespace(
+                credential_id=b"second-id", credential_public_key=b"second-key", sign_count=0
+            ),
+        ):
+            self.client.post(
+                "/api/access/webauthn/register/", {"credential": {}}, format="json", **self._auth()
+            )
+
+        device = Device.objects.get(staff=self.staff, device_id="device-wa-1")
+        self.assertEqual(WebAuthnCredential.objects.filter(device=device).count(), 1)
+
+    def test_register_fails_on_verification_error(self):
+        self.client.post("/api/access/webauthn/registration-options/", **self._auth())
+        with patch(
+            "access.views.verify_registration_response",
+            side_effect=InvalidRegistrationResponse("Client data challenge was not expected challenge"),
+        ):
+            resp = self.client.post(
+                "/api/access/webauthn/register/", {"credential": {}}, format="json", **self._auth()
+            )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(WebAuthnCredential.objects.exists())
+
+    def test_register_without_prior_options_call_rejected(self):
+        resp = self.client.post(
+            "/api/access/webauthn/register/", {"credential": {}}, format="json", **self._auth()
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_admin_cannot_enroll(self):
+        user = User.objects.create_user(username="webauthnAdmin", password="pw-webauthn-2")
+        Staff.objects.create(user=user, staff_id="STF-WA2", full_name="Admin", role=Staff.Role.ADMIN)
+        login = self.client.post(
+            "/api/access/login/",
+            {"username": "webauthnAdmin", "password": "pw-webauthn-2", "device_id": "device-wa-2", "device_type": "desktop"},
+            format="json",
+        )
+        resp = self.client.post(
+            "/api/access/webauthn/registration-options/",
+            HTTP_AUTHORIZATION=f"Bearer {login.data['token']}",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_current_session_reports_credential_presence(self):
+        self.assertFalse(
+            self.client.get("/api/access/session/current/", **self._auth()).data["has_webauthn_credential"]
+        )
+
+        self.client.post("/api/access/webauthn/registration-options/", **self._auth())
+        with patch(
+            "access.views.verify_registration_response",
+            return_value=SimpleNamespace(credential_id=b"id", credential_public_key=b"key", sign_count=0),
+        ):
+            self.client.post(
+                "/api/access/webauthn/register/", {"credential": {}}, format="json", **self._auth()
+            )
+
+        self.assertTrue(
+            self.client.get("/api/access/session/current/", **self._auth()).data["has_webauthn_credential"]
+        )
+
+
+class ProfilePhotoViewTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="clerkD", password="pw-clerk-123")
+        self.staff = Staff.objects.create(
+            user=self.user, staff_id="STF-500", full_name="Clerk D", role=Staff.Role.CLERK
+        )
+        login = self.client.post(
+            "/api/access/login/",
+            {"username": "clerkD", "password": "pw-clerk-123", "device_id": "device-photo-1", "device_type": "desktop"},
+            format="json",
+        )
+        self.token = login.data["token"]
+
+    def _auth_header(self):
+        return {"HTTP_AUTHORIZATION": f"Bearer {self.token}"}
+
+    def test_upload_sets_photo_and_returns_absolute_url(self):
+        resp = self.client.post(
+            "/api/access/profile/photo/",
+            {"photo": _tiny_png()},
+            format="multipart",
+            **self._auth_header(),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(resp.data["photo_url"])
+        self.assertTrue(resp.data["photo_url"].startswith("http"))
+
+        self.staff.refresh_from_db()
+        self.assertTrue(bool(self.staff.photo))
+
+        session_resp = self.client.get("/api/access/session/current/", **self._auth_header())
+        self.assertEqual(session_resp.data["photo_url"], resp.data["photo_url"])
+
+    def test_upload_without_file_rejected(self):
+        resp = self.client.post(
+            "/api/access/profile/photo/", {}, format="multipart", **self._auth_header()
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_delete_clears_photo(self):
+        self.client.post(
+            "/api/access/profile/photo/", {"photo": _tiny_png()}, format="multipart", **self._auth_header()
+        )
+        self.staff.refresh_from_db()
+        self.assertTrue(bool(self.staff.photo))
+
+        resp = self.client.delete("/api/access/profile/photo/", **self._auth_header())
+        self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.staff.refresh_from_db()
+        self.assertFalse(bool(self.staff.photo))
+
+    def test_unauthenticated_cannot_upload_photo(self):
+        resp = self.client.post("/api/access/profile/photo/", {"photo": _tiny_png()}, format="multipart")
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
 
 

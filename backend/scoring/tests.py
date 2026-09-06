@@ -2,11 +2,16 @@
 Staff/AccessSession/BehavioralCapture/ContextualCapture/Patient/PatientAssignment
 directly via the ORM -- no real enrollment data, per CLAUDE.md."""
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from django.contrib.auth.models import User
 from rest_framework import status
 from rest_framework.test import APITestCase
+from webauthn.helpers.exceptions import InvalidAuthenticationResponse
 
-from access.models import AccessSession
+from access.models import AccessSession, Device, WebAuthnCredential
+from alerts.models import SecurityAlert
 from captures.models import BehavioralCapture, ContextualCapture
 from ledger.models import LedgerEntry
 from patients.models import Patient, PatientAssignment, PatientCategoryRecord
@@ -14,7 +19,7 @@ from staff.models import Staff
 
 from .baseline import extract_keystroke_features, extract_mouse_features
 from .engine import compute_access_decision
-from .models import AccessDecision, BehavioralBaseline, DisasterModeEvent
+from .models import AccessDecision, BehavioralBaseline, DisasterModeEvent, StepUpAssistRequest
 
 SAMPLE_MOUSE_EVENTS = [
     {"event": "mousemove", "x": 0, "y": 0, "t": 0.0},
@@ -546,6 +551,469 @@ class PatientRecordViewTests(APITestCase):
 
         records_resp = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
         self.assertEqual(records_resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class StepUpVerificationTests(APITestCase):
+    """Step-up verification for the 40-69% REDUCED_ACCESS band. CLAUDE.md's
+    band table has always required it; originally enforced with a typed PIN
+    (2026-09-06), replaced the same day with device biometrics (WebAuthn) +
+    a colleague-vouches fallback -- see CLAUDE.md's amendment for why.
+
+    The reduced-band decision is built directly rather than scored through the
+    engine -- EngineFactorTests already covers the band arithmetic that
+    produces one; what's under test here is the gate on top of it.
+
+    Real biometric ceremonies can't be produced in a test, so
+    verify_authentication_response is mocked, same convention as
+    verify_registration_response in access.tests.WebAuthnRegistrationTests.
+    """
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(
+            user=user, staff_id=staff_id, full_name=username, role=role, ward="Ward A", on_duty=True,
+        )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def _enroll_credential(self, staff, device_id, sign_count=0):
+        device = Device.objects.get(staff=staff, device_id=device_id)
+        return WebAuthnCredential.objects.create(
+            staff=staff, device=device, credential_id=f"cred-{device.id}",
+            public_key="fake-public-key", sign_count=sign_count,
+        )
+
+    def _reduced_decision(self, token, patient, decision_type=None):
+        session = AccessSession.objects.get(token=token)
+        return AccessDecision.objects.create(
+            session=session,
+            patient=patient,
+            gate_passed=True,
+            score=65.0,
+            score_band=AccessDecision.ScoreBand.REDUCED,
+            decision_type=decision_type or AccessDecision.DecisionType.REDUCED_ACCESS,
+            granted_categories=[1, 2, 3, 4, 5, 6, 7, 12],
+        )
+
+    def _patient_with_records(self, hospital_number):
+        patient = Patient.objects.create(hospital_number=hospital_number, full_name="P", ward="Ward A")
+        PatientCategoryRecord.objects.bulk_create(
+            PatientCategoryRecord(patient=patient, category=c)
+            for c, _ in PatientCategoryRecord.Category.choices
+        )
+        return patient
+
+    def test_records_blocked_until_webauthn_verified_then_released(self):
+        staff, token = self._login("docStepUp1", "pw-stepup-1", "STF-SU1", Staff.Role.DOCTOR)
+        self._enroll_credential(staff, "device-STF-SU1")
+        patient = self._patient_with_records("HN-SU1")
+        decision = self._reduced_decision(token, patient)
+
+        blocked = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
+        self.assertEqual(blocked.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(blocked.data["step_up_required"])
+        self.assertTrue(blocked.data["webauthn_available"])
+        self.assertEqual(blocked.data["decision_id"], decision.id)
+
+        options_resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/webauthn/options/", **self._auth(token)
+        )
+        self.assertEqual(options_resp.status_code, status.HTTP_200_OK)
+        self.assertIn("challenge", options_resp.data)
+
+        with patch(
+            "scoring.views.verify_authentication_response",
+            return_value=SimpleNamespace(new_sign_count=1),
+        ):
+            verified = self.client.post(
+                f"/api/scoring/decisions/{decision.id}/step-up/webauthn/verify/",
+                {"credential": {}}, format="json", **self._auth(token),
+            )
+        self.assertEqual(verified.status_code, status.HTTP_200_OK)
+        self.assertTrue(verified.data["step_up_verified"])
+
+        released = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
+        self.assertEqual(released.status_code, status.HTTP_200_OK)
+        self.assertEqual(released.data["granted_categories"], [1, 2, 3, 4, 5, 6, 7, 12])
+        self.assertEqual(len(released.data["records"]), 8)
+
+        decision.refresh_from_db()
+        self.assertTrue(decision.step_up_verified)
+        self.assertIsNotNone(decision.step_up_verified_at)
+
+        credential = WebAuthnCredential.objects.get(staff=staff)
+        self.assertEqual(credential.sign_count, 1)
+        self.assertIsNotNone(credential.last_used_at)
+
+    def test_options_rejected_with_no_enrolled_credential(self):
+        """No credential on this device -- the frontend should offer only
+        the colleague-assist path in this case."""
+        _staff, token = self._login("docStepUp2", "pw-stepup-2", "STF-SU2", Staff.Role.DOCTOR)
+        patient = self._patient_with_records("HN-SU2")
+        decision = self._reduced_decision(token, patient)
+
+        resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/webauthn/options/", **self._auth(token)
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(resp.data["webauthn_available"])
+
+        # The records gate itself reports the same thing, unprompted.
+        blocked = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
+        self.assertFalse(blocked.data["webauthn_available"])
+
+    def test_wrong_webauthn_response_counts_down_and_raises_an_alert(self):
+        staff, token = self._login("docStepUp3", "pw-stepup-3", "STF-SU3", Staff.Role.DOCTOR)
+        self._enroll_credential(staff, "device-STF-SU3")
+        patient = self._patient_with_records("HN-SU3")
+        decision = self._reduced_decision(token, patient)
+
+        self.client.post(f"/api/scoring/decisions/{decision.id}/step-up/webauthn/options/", **self._auth(token))
+        with patch(
+            "scoring.views.verify_authentication_response",
+            side_effect=InvalidAuthenticationResponse("Could not verify authentication signature"),
+        ):
+            resp = self.client.post(
+                f"/api/scoring/decisions/{decision.id}/step-up/webauthn/verify/",
+                {"credential": {}}, format="json", **self._auth(token),
+            )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data["attempts_remaining"], 2)
+
+        alert = SecurityAlert.objects.filter(alert_type=SecurityAlert.AlertType.STEP_UP_FAILED).first()
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.staff_id, "STF-SU3")
+        self.assertEqual(alert.patient_hospital_number, "HN-SU3")
+        self.assertEqual(alert.details["method"], "webauthn")
+        self.assertFalse(alert.acknowledged)
+
+        # Records still blocked; credential sign_count untouched by a failure.
+        self.assertEqual(
+            self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token)).status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(WebAuthnCredential.objects.get(staff=staff).sign_count, 0)
+
+    def test_three_wrong_attempts_spend_the_decision(self):
+        staff, token = self._login("docStepUp4", "pw-stepup-4", "STF-SU4", Staff.Role.DOCTOR)
+        self._enroll_credential(staff, "device-STF-SU4")
+        patient = self._patient_with_records("HN-SU4")
+        decision = self._reduced_decision(token, patient)
+
+        with patch(
+            "scoring.views.verify_authentication_response",
+            side_effect=InvalidAuthenticationResponse("bad signature"),
+        ):
+            for _ in range(3):
+                self.client.post(
+                    f"/api/scoring/decisions/{decision.id}/step-up/webauthn/options/", **self._auth(token)
+                )
+                self.client.post(
+                    f"/api/scoring/decisions/{decision.id}/step-up/webauthn/verify/",
+                    {"credential": {}}, format="json", **self._auth(token),
+                )
+
+        # Even a real success would be refused now -- they have to re-run /decide/.
+        with patch(
+            "scoring.views.verify_authentication_response",
+            return_value=SimpleNamespace(new_sign_count=1),
+        ):
+            resp = self.client.post(
+                f"/api/scoring/decisions/{decision.id}/step-up/webauthn/verify/",
+                {"credential": {}}, format="json", **self._auth(token),
+            )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(resp.data["attempts_remaining"], 0)
+
+        decision.refresh_from_db()
+        self.assertFalse(decision.step_up_verified)
+        self.assertEqual(
+            SecurityAlert.objects.filter(alert_type=SecurityAlert.AlertType.STEP_UP_FAILED).count(), 3
+        )
+
+    def test_other_bands_are_unaffected(self):
+        """Only the reduced band gates -- a full-access decision still returns
+        records with no challenge, and so does Break the Glass."""
+        _staff, token = self._login("docStepUp5", "pw-stepup-5", "STF-SU5", Staff.Role.DOCTOR)
+        patient = self._patient_with_records("HN-SU5")
+        session = AccessSession.objects.get(token=token)
+        AccessDecision.objects.create(
+            session=session, patient=patient, gate_passed=True, score=95.0,
+            score_band=AccessDecision.ScoreBand.SILENT,
+            decision_type=AccessDecision.DecisionType.STANDARD_ACCESS,
+            granted_categories=list(range(1, 14)),
+        )
+
+        resp = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp.data["records"]), 13)
+
+    def test_webauthn_options_rejected_for_non_reduced_decision(self):
+        _staff, token = self._login("docStepUp6", "pw-stepup-6", "STF-SU6", Staff.Role.DOCTOR)
+        patient = self._patient_with_records("HN-SU6")
+        decision = self._reduced_decision(
+            token, patient, decision_type=AccessDecision.DecisionType.STANDARD_ACCESS
+        )
+        resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/webauthn/options/", **self._auth(token)
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cannot_step_up_someone_elses_decision(self):
+        """Scoped to the caller's own session -- and a 404, not a 403, so this
+        can't be used to probe which decision IDs exist."""
+        staff_a, token_a = self._login("docStepUp7", "pw-stepup-7", "STF-SU7", Staff.Role.DOCTOR)
+        _staff_b, token_b = self._login("docStepUp8", "pw-stepup-8", "STF-SU8", Staff.Role.DOCTOR)
+        self._enroll_credential(staff_a, "device-STF-SU7")
+        patient = self._patient_with_records("HN-SU7")
+        decision = self._reduced_decision(token_a, patient)
+
+        resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/webauthn/options/", **self._auth(token_b)
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_decide_response_flags_step_up_required(self):
+        staff, token = self._login("docStepUp9", "pw-stepup-9", "STF-SU9", Staff.Role.DOCTOR)
+        self._enroll_credential(staff, "device-STF-SU9")
+        patient = self._patient_with_records("HN-SU9")
+        decision = self._reduced_decision(token, patient)
+
+        blocked = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(token))
+        self.assertTrue(blocked.data["step_up_required"])
+
+        self.client.post(f"/api/scoring/decisions/{decision.id}/step-up/webauthn/options/", **self._auth(token))
+        with patch(
+            "scoring.views.verify_authentication_response", return_value=SimpleNamespace(new_sign_count=1)
+        ):
+            self.client.post(
+                f"/api/scoring/decisions/{decision.id}/step-up/webauthn/verify/",
+                {"credential": {}}, format="json", **self._auth(token),
+            )
+        decision.refresh_from_db()
+        self.assertTrue(decision.step_up_verified)
+
+
+class StepUpAssistTests(APITestCase):
+    """The colleague-vouches fallback (added 2026-09-06) for a device with no
+    biometric, or before the staff member has enrolled theirs."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(
+            user=user, staff_id=staff_id, full_name=username, role=role, ward="Ward A", on_duty=True,
+        )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def _reduced_decision(self, token, patient):
+        session = AccessSession.objects.get(token=token)
+        return AccessDecision.objects.create(
+            session=session, patient=patient, gate_passed=True, score=65.0,
+            score_band=AccessDecision.ScoreBand.REDUCED,
+            decision_type=AccessDecision.DecisionType.REDUCED_ACCESS,
+            granted_categories=[1, 2, 3, 4, 5, 6, 7, 12],
+        )
+
+    def test_request_creates_a_pending_row_visible_to_others_not_self(self):
+        _requester, req_token = self._login("docAssist1", "pw-assist-1", "STF-AS1", Staff.Role.DOCTOR)
+        _colleague, colleague_token = self._login("nurseAssist1", "pw-assist-2", "STF-AS2", Staff.Role.NURSE)
+        patient = Patient.objects.create(hospital_number="HN-AS1", full_name="P", ward="Ward A")
+        decision = self._reduced_decision(req_token, patient)
+
+        resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token)
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["requesting_staff_id"], "STF-AS1")
+        self.assertEqual(resp.data["patient_hospital_number"], "HN-AS1")
+        self.assertEqual(resp.data["status"], "pending")
+
+        # Visible to the colleague...
+        colleague_view = self.client.get(
+            "/api/scoring/step-up/assist-requests/", **self._auth(colleague_token)
+        )
+        self.assertEqual(len(colleague_view.data), 1)
+
+        # ...but not to the requester themselves.
+        own_view = self.client.get("/api/scoring/step-up/assist-requests/", **self._auth(req_token))
+        self.assertEqual(len(own_view.data), 0)
+
+    def test_duplicate_requests_do_not_pile_up(self):
+        _requester, req_token = self._login("docAssist2", "pw-assist-3", "STF-AS3", Staff.Role.DOCTOR)
+        patient = Patient.objects.create(hospital_number="HN-AS2", full_name="P", ward="Ward A")
+        decision = self._reduced_decision(req_token, patient)
+
+        self.client.post(f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token))
+        self.client.post(f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token))
+
+        self.assertEqual(
+            StepUpAssistRequest.objects.filter(decision=decision, status="pending").count(), 1
+        )
+
+    def test_approve_verifies_the_decision_and_releases_records(self):
+        _requester, req_token = self._login("docAssist3", "pw-assist-4", "STF-AS4", Staff.Role.DOCTOR)
+        colleague, colleague_token = self._login("nurseAssist3", "pw-assist-5", "STF-AS5", Staff.Role.NURSE)
+        patient = Patient.objects.create(hospital_number="HN-AS3", full_name="P", ward="Ward A")
+        PatientCategoryRecord.objects.bulk_create(
+            PatientCategoryRecord(patient=patient, category=c) for c, _ in PatientCategoryRecord.Category.choices
+        )
+        decision = self._reduced_decision(req_token, patient)
+
+        req_resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token)
+        )
+        assist_id = req_resp.data["id"]
+
+        approve_resp = self.client.post(
+            f"/api/scoring/step-up/assist-requests/{assist_id}/approve/", **self._auth(colleague_token)
+        )
+        self.assertEqual(approve_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(approve_resp.data["status"], "approved")
+        self.assertEqual(approve_resp.data["resolved_by_staff_id"], colleague.staff_id)
+
+        decision.refresh_from_db()
+        self.assertTrue(decision.step_up_verified)
+
+        released = self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(req_token))
+        self.assertEqual(released.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(released.data["records"]), 8)
+
+    def test_cannot_approve_own_request(self):
+        _requester, req_token = self._login("docAssist4", "pw-assist-6", "STF-AS6", Staff.Role.DOCTOR)
+        patient = Patient.objects.create(hospital_number="HN-AS4", full_name="P", ward="Ward A")
+        decision = self._reduced_decision(req_token, patient)
+        req_resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token)
+        )
+
+        resp = self.client.post(
+            f"/api/scoring/step-up/assist-requests/{req_resp.data['id']}/approve/", **self._auth(req_token)
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        decision.refresh_from_db()
+        self.assertFalse(decision.step_up_verified)
+
+    def test_decline_raises_an_alert_and_leaves_records_blocked(self):
+        _requester, req_token = self._login("docAssist5", "pw-assist-7", "STF-AS7", Staff.Role.DOCTOR)
+        colleague, colleague_token = self._login("nurseAssist5", "pw-assist-8", "STF-AS8", Staff.Role.NURSE)
+        patient = Patient.objects.create(hospital_number="HN-AS5", full_name="P", ward="Ward A")
+        decision = self._reduced_decision(req_token, patient)
+        req_resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token)
+        )
+
+        resp = self.client.post(
+            f"/api/scoring/step-up/assist-requests/{req_resp.data['id']}/decline/", **self._auth(colleague_token)
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["status"], "declined")
+
+        decision.refresh_from_db()
+        self.assertFalse(decision.step_up_verified)
+
+        alert = SecurityAlert.objects.filter(alert_type=SecurityAlert.AlertType.STEP_UP_FAILED).first()
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.details["method"], "assist")
+        self.assertEqual(alert.details["declined_by"], colleague.staff_id)
+
+        self.assertEqual(
+            self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(req_token)).status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_non_clinical_role_cannot_use_assist_endpoints(self):
+        user = User.objects.create_user(username="assistAdmin", password="pw-assist-9")
+        Staff.objects.create(user=user, staff_id="STF-AS9", full_name="Admin", role=Staff.Role.ADMIN)
+        login = self.client.post(
+            "/api/access/login/",
+            {"username": "assistAdmin", "password": "pw-assist-9", "device_id": "device-STF-AS9", "device_type": "desktop"},
+            format="json",
+        )
+        resp = self.client.get(
+            "/api/scoring/step-up/assist-requests/",
+            HTTP_AUTHORIZATION=f"Bearer {login.data['token']}",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class DeniedAccessAlertTests(ScoringTestBase):
+    """CLAUDE.md: sub-40%/gate-failed means "ACCESS_DENIED, security alert
+    triggered" -- the alert half, added 2026-09-06."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role, ward=""):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(
+            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward, on_duty=True
+        )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_denial_raises_an_alert_linked_to_its_ledger_entry(self):
+        """Nurse rule case 3 (neither assigned nor same ward) -- a hard deny."""
+        _staff, token = self._login("nurseAlertApi", "pw-denied-1", "STF-DA1", Staff.Role.NURSE, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-DA1", full_name="P", ward="Ward B")
+
+        self.client.post(
+            "/api/captures/contextual/target-patient/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        decide_resp = self.client.post(
+            "/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        self.assertEqual(decide_resp.data["decision_type"], AccessDecision.DecisionType.ACCESS_DENIED)
+
+        alert = SecurityAlert.objects.filter(alert_type=SecurityAlert.AlertType.ACCESS_DENIED).first()
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.staff_id, "STF-DA1")
+        self.assertEqual(alert.patient_hospital_number, "HN-DA1")
+        self.assertFalse(alert.acknowledged)
+
+        # Linked back to the Ledger entry written for the same decision.
+        entry = LedgerEntry.objects.using("ledger").order_by("-sequence").first()
+        self.assertEqual(alert.ledger_sequence, entry.sequence)
+
+    def test_granted_access_raises_no_alert(self):
+        _staff, token = self._login("docAlertApi3", "pw-denied-2", "STF-DA2", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-DA2", full_name="P", ward="Ward A")
+
+        self.client.post(
+            "/api/captures/contextual/target-patient/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        decide_resp = self.client.post(
+            "/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        self.assertNotEqual(decide_resp.data["decision_type"], AccessDecision.DecisionType.ACCESS_DENIED)
+        self.assertEqual(SecurityAlert.objects.count(), 0)
 
 
 class EmergencyOverrideTests(ScoringTestBase):

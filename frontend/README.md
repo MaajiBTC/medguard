@@ -1,16 +1,40 @@
-# React + Vite
+# MedGuard — frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + Vite. This is the client half of MedGuard; see the
+[project README](../README.md) for what MedGuard is, how access decisions
+work, and full setup instructions.
 
-Currently, two official plugins are available:
+## Quick start
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm install
+npm run dev
+```
 
-## React Compiler
+The backend must be running too (`cd ../backend && python manage.py runserver
+0.0.0.0:8000`). The API base URL is derived from the page's own hostname in
+development, so `localhost` and a LAN IP both work with no configuration. In
+production, set `VITE_API_BASE_URL` to the deployed backend's `/api` URL.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Scripts
 
-## Expanding the Oxlint configuration
+| Command | Does |
+|---|---|
+| `npm run dev` | Dev server with hot reload |
+| `npm run build` | Production build into `dist/` |
+| `npm run preview` | Serve the production build locally |
+| `npm run lint` | Lint with oxlint |
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## Layout
+
+```
+src/
+  api/       one thin module per backend app
+  capture/   behavioural + contextual signal capture
+  pages/     login + the three role dashboards
+  App.css    all styling (design tokens at the top)
+```
+
+three.js is deliberately limited to two places — the login page's shield scene
+and the Security Dashboard's event-breakdown donut. Record-access screens stay
+plain React for clarity and speed.

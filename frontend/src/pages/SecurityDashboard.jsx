@@ -1,11 +1,12 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 
-import { explainLedgerEntry, getLedgerEntries } from '../api/ledger';
+import { acknowledgeAlert, getAlerts, getUnacknowledgedAlertCount } from '../api/alerts';
+import { explainLedgerEntry, getLedgerEntries, verifyLedgerChain } from '../api/ledger';
 import { searchPatients } from '../api/patients';
 import { createStaff, getAdminActions, searchStaff } from '../api/staff';
 import Modal from '../components/Modal';
 import { WARDS } from '../wards';
-import DashboardShell, { LedgerIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
+import DashboardShell, { AlertIcon, LedgerIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
 import { EventTypeBarChart, LedgerDonutChart3D, LedgerRoleBarChart, ROLES } from './LedgerCharts3D';
 import RoleAvatar from './RoleAvatar';
 
@@ -36,6 +37,9 @@ async function filterEntriesByDuty(entries, dutyFilter, roleFilter) {
 }
 
 const POLL_INTERVAL_MS = 5000;
+// Badge count is much cheaper than the feed and needs no live-feed cadence --
+// same 25s the pending-device dot in DashboardShell already uses.
+const ALERT_COUNT_POLL_MS = 25000;
 
 const EVENT_TYPE_OPTIONS = [
   { value: '', label: 'All events' },
@@ -144,6 +148,49 @@ function LedgerEntriesFeed({ entries, error }) {
  * card) and a date range (right card) -- one shared filter set that narrows
  * `entries`, which already feeds both cards and the live-feed table below,
  * so no other wiring changes were needed. */
+/** "Verify ledger integrity" control (added 2026-09-06, per the user) --
+ * re-walks the whole hash chain server-side (ledger.verification.verify_chain,
+ * which has existed since step 3 but had no way to be run from the UI) and
+ * reports the result. This is what makes the Ledger's tamper-evidence
+ * demonstrable rather than just architectural. */
+function LedgerVerifyControl() {
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const handleVerify = async () => {
+    setChecking(true);
+    setError(null);
+    setResult(null);
+    try {
+      setResult(await verifyLedgerChain());
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="ledger-verify">
+      <button type="button" className="btn-secondary" disabled={checking} onClick={handleVerify}>
+        {checking ? 'Verifying…' : 'Verify ledger integrity'}
+      </button>
+      {error && <span role="alert" className="dev-error">{error}</span>}
+      {result && result.valid && (
+        <span className="ledger-verify-ok">
+          ✓ Chain intact — {result.entries_checked} {result.entries_checked === 1 ? 'entry' : 'entries'} verified
+        </span>
+      )}
+      {result && !result.valid && (
+        <span role="alert" className="ledger-verify-bad">
+          ✕ Tampering detected at entry #{result.bad_sequence}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function LedgerPanel() {
   const [eventType, setEventType] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
@@ -220,7 +267,10 @@ function LedgerPanel() {
       </div>
 
       <section className="panel-card">
-        <h2>Live feed</h2>
+        <div className="ledger-feed-header">
+          <h2>Live feed</h2>
+          <LedgerVerifyControl />
+        </div>
         <LedgerEntriesFeed entries={entries} error={error} />
       </section>
     </>
@@ -414,7 +464,10 @@ function ActivityLookupPanel({
           {selected ? (
             <div className="entity-detail-row">
               <div className="entity-detail-avatar">
-                <RoleAvatar role={cardOne.avatarRole ? cardOne.avatarRole(selected) : selected.role} />
+                <RoleAvatar
+                  role={cardOne.avatarRole ? cardOne.avatarRole(selected) : selected.role}
+                  photoUrl={selected.photo_url}
+                />
               </div>
               <div className="entity-detail-info">{cardOne.renderSelected(selected, entries)}</div>
             </div>
@@ -726,7 +779,7 @@ function AdminsPanel() {
           {selected ? (
             <div className="entity-detail-row">
               <div className="entity-detail-avatar">
-                <RoleAvatar role="admin" />
+                <RoleAvatar role="admin" photoUrl={selected.photo_url} />
               </div>
               <div className="entity-detail-info">
                 <AdminDetailsCard admin={selected} />
@@ -810,8 +863,168 @@ function AdminsPanel() {
   );
 }
 
+const ALERT_TYPE_LABELS = {
+  ACCESS_DENIED: 'Access denied',
+  LOGIN_LOCKOUT: 'Login lockout',
+  STEP_UP_FAILED: 'Step-up failed',
+};
+
+const ALERT_FILTERS = [
+  { value: 'false', label: 'Needs review' },
+  { value: '', label: 'All alerts' },
+  { value: 'true', label: 'Reviewed' },
+];
+
+/** One alert row-card with an inline acknowledge form. Acknowledging is what
+ * turns the audit trail into a governance loop -- CLAUDE.md's band table has
+ * always said a denial "triggers a security alert", but until 2026-09-06
+ * nothing recorded that a human had actually looked at one. */
+function AlertCard({ alert, onAcknowledged }) {
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleAcknowledge = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await acknowledgeAlert(alert.id, note);
+      onAcknowledged();
+    } catch (err) {
+      setError(errorMessage(err));
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className={`alert-card${alert.acknowledged ? ' alert-card-acknowledged' : ''}`}>
+      <div className="alert-card-head">
+        <span className="alert-type">{ALERT_TYPE_LABELS[alert.alert_type] || alert.alert_type}</span>
+        <span className={`badge ${alert.acknowledged ? 'badge-active' : 'badge-open'}`}>
+          {alert.acknowledged ? 'Reviewed' : 'Needs review'}
+        </span>
+        <span className="meta-line">{new Date(alert.raised_at).toLocaleString()}</span>
+      </div>
+
+      <p className="meta-line">
+        {alert.staff_full_name || 'Unknown account'}
+        {alert.staff_id && ` (${alert.staff_id})`}
+        {alert.staff_role && ` · ${formatRole(alert.staff_role)}`}
+        {alert.patient_hospital_number && ` · patient ${alert.patient_hospital_number}`}
+        {alert.ledger_sequence !== null && ` · ledger #${alert.ledger_sequence}`}
+      </p>
+
+      {Object.keys(alert.details || {}).length > 0 && (
+        <details>
+          <summary>Details</summary>
+          <pre className="ledger-detail-json">{JSON.stringify(alert.details, null, 2)}</pre>
+        </details>
+      )}
+
+      {alert.acknowledged ? (
+        <p className="meta-line">
+          <span className="detail-label">Reviewed by:</span> {alert.acknowledged_by_staff_id}
+          {alert.acknowledgement_note && ` — "${alert.acknowledgement_note}"`}
+        </p>
+      ) : (
+        <form className="alert-ack-form" onSubmit={handleAcknowledge}>
+          <input
+            className="form-input"
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="What did you find? (optional)"
+          />
+          <button type="submit" className="btn-primary" disabled={submitting}>
+            {submitting ? 'Saving…' : 'Acknowledge'}
+          </button>
+          {error && <span role="alert" className="dev-error">{error}</span>}
+        </form>
+      )}
+    </div>
+  );
+}
+
+/** The Alerts page (added 2026-09-06). Every denial, lockout, and failed
+ * step-up lands here for a security officer to sign off on. */
+function AlertsPanel({ onCountChange }) {
+  const [alerts, setAlerts] = useState([]);
+  const [acknowledgedFilter, setAcknowledgedFilter] = useState('false');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [error, setError] = useState(null);
+
+  const fetchAlerts = useCallback(async () => {
+    try {
+      setAlerts(await getAlerts({
+        acknowledged: acknowledgedFilter || undefined,
+        alert_type: typeFilter || undefined,
+      }));
+      setError(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, [acknowledgedFilter, typeFilter]);
+
+  useEffect(() => {
+    fetchAlerts();
+    const intervalId = setInterval(fetchAlerts, POLL_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [fetchAlerts]);
+
+  const handleAcknowledged = () => {
+    fetchAlerts();
+    onCountChange();
+  };
+
+  return (
+    <section className="panel-card">
+      <div className="ledger-feed-header">
+        <h2>Security alerts</h2>
+        <div className="ledger-slicers">
+          <select
+            className="slicer-input"
+            value={acknowledgedFilter}
+            onChange={(e) => setAcknowledgedFilter(e.target.value)}
+            aria-label="Filter by review status"
+          >
+            {ALERT_FILTERS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          <select
+            className="slicer-input"
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            aria-label="Filter by alert type"
+          >
+            <option value="">All types</option>
+            {Object.entries(ALERT_TYPE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {error && <p role="alert" className="dev-error">{error}</p>}
+      {alerts.length === 0 && !error && (
+        <p className="meta-line">
+          {acknowledgedFilter === 'false' ? 'Nothing needs review right now.' : 'No alerts.'}
+        </p>
+      )}
+
+      <div className="alert-list">
+        {alerts.map((alert) => (
+          <AlertCard key={alert.id} alert={alert} onAcknowledged={handleAcknowledged} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 const PAGE_TITLES = {
   ledger: 'Security Ledger',
+  alerts: 'Security Alerts',
   staff: 'Staff Activity',
   patients: 'Patient Activity',
   admins: 'Admins',
@@ -823,9 +1036,28 @@ const PAGE_TITLES = {
  * creation (Admin dashboard's own staff creation excludes the admin role). */
 function SecurityDashboard({ staff, onLogout }) {
   const [activePage, setActivePage] = useState('ledger');
+  const [openAlertCount, setOpenAlertCount] = useState(0);
+
+  // Unacknowledged-alert badge, polled on the same cadence DashboardShell
+  // already uses for the pending-device dot (added 2026-09-06).
+  const refreshAlertCount = useCallback(async () => {
+    try {
+      const data = await getUnacknowledgedAlertCount();
+      setOpenAlertCount(data.count);
+    } catch {
+      /* best-effort -- a failed badge poll shouldn't surface an error */
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshAlertCount();
+    const intervalId = setInterval(refreshAlertCount, ALERT_COUNT_POLL_MS);
+    return () => clearInterval(intervalId);
+  }, [refreshAlertCount]);
 
   const navItems = [
     { key: 'ledger', label: 'Ledger', icon: <LedgerIcon /> },
+    { key: 'alerts', label: 'Alerts', icon: <AlertIcon />, badgeCount: openAlertCount },
     { key: 'staff', label: 'Staff', icon: <StaffIcon /> },
     { key: 'patients', label: 'Patients', icon: <PatientsIcon /> },
     { key: 'admins', label: 'Admins', icon: <StaffIcon /> },
@@ -841,6 +1073,7 @@ function SecurityDashboard({ staff, onLogout }) {
       title={PAGE_TITLES[activePage]}
     >
       {activePage === 'ledger' && <LedgerPanel />}
+      {activePage === 'alerts' && <AlertsPanel onCountChange={refreshAlertCount} />}
       {activePage === 'staff' && <StaffActivityPanel />}
       {activePage === 'patients' && <PatientActivityPanel />}
       {activePage === 'admins' && <AdminsPanel />}

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import AccessDecision
+from .models import AccessDecision, StepUpAssistRequest
 
 
 class DecideRequestSerializer(serializers.Serializer):
@@ -39,6 +39,38 @@ class DisasterModeActionSerializer(serializers.Serializer):
     reason = serializers.CharField(min_length=10, trim_whitespace=True)
 
 
+class StepUpAssistRequestSerializer(serializers.ModelSerializer):
+    """A colleague-vouches request (added 2026-09-06), as seen by the
+    approving colleague: enough context (who's asking, for which patient) to
+    make a real judgment call rather than a blind click."""
+
+    requesting_staff_id = serializers.CharField(source="requesting_staff.staff_id", read_only=True)
+    requesting_staff_name = serializers.CharField(source="requesting_staff.full_name", read_only=True)
+    requesting_staff_role = serializers.CharField(source="requesting_staff.role", read_only=True)
+    patient_hospital_number = serializers.CharField(
+        source="decision.patient.hospital_number", read_only=True
+    )
+    resolved_by_staff_id = serializers.CharField(
+        source="resolved_by.staff_id", read_only=True, default=""
+    )
+
+    class Meta:
+        model = StepUpAssistRequest
+        fields = [
+            "id",
+            "decision",
+            "status",
+            "requesting_staff_id",
+            "requesting_staff_name",
+            "requesting_staff_role",
+            "patient_hospital_number",
+            "resolved_by_staff_id",
+            "requested_at",
+            "resolved_at",
+        ]
+        read_only_fields = fields
+
+
 class AccessDecisionSerializer(serializers.ModelSerializer):
     class Meta:
         model = AccessDecision
@@ -54,5 +86,18 @@ class AccessDecisionSerializer(serializers.ModelSerializer):
             "granted_categories",
             "role_rule_path",
             "factor_breakdown",
+            "step_up_verified",
+            "step_up_required",
         ]
         read_only_fields = fields
+
+    # Added 2026-09-06 -- lets the clinical dashboard know, straight off the
+    # decide response, whether it must show the PIN challenge before it can
+    # fetch records (the backend enforces this too -- see PatientRecordView).
+    step_up_required = serializers.SerializerMethodField()
+
+    def get_step_up_required(self, obj):
+        return (
+            obj.decision_type == AccessDecision.DecisionType.REDUCED_ACCESS
+            and not obj.step_up_verified
+        )

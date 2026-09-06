@@ -1,17 +1,35 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
+from access.services import is_locked_out
+
 from .models import AdminActionLog, Staff, Ward
 
 
 class StaffSummarySerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True)
     account_active = serializers.BooleanField(source="user.is_active", read_only=True)
+    photo_url = serializers.SerializerMethodField()
+    # Added 2026-09-06: derived from recent failed LoginAttempts (see
+    # access.services), not a stored field.
+    is_locked_out = serializers.SerializerMethodField()
 
     class Meta:
         model = Staff
-        fields = ["id", "staff_id", "full_name", "role", "ward", "on_duty", "on_call", "username", "account_active"]
+        fields = [
+            "id", "staff_id", "full_name", "role", "ward", "on_duty", "on_call",
+            "username", "account_active", "photo_url", "is_locked_out",
+        ]
         read_only_fields = fields
+
+    def get_photo_url(self, obj):
+        request = self.context.get("request")
+        if not obj.photo or not request:
+            return None
+        return request.build_absolute_uri(obj.photo.url)
+
+    def get_is_locked_out(self, obj):
+        return is_locked_out(obj.user.username)
 
 
 class StaffCreateSerializer(serializers.Serializer):

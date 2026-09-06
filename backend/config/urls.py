@@ -14,6 +14,8 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
@@ -25,4 +27,10 @@ urlpatterns = [
     path('api/staff/', include('staff.urls')),
     path('api/patients/', include('patients.urls')),
     path('api/ledger/', include('ledger.urls')),
+    path('api/alerts/', include('alerts.urls')),
 ]
+
+# Uploaded staff photos (see config/settings.py's MEDIA_URL/MEDIA_ROOT) --
+# dev-only serving; production would need a real static/media server.
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -1,14 +1,21 @@
+import { platformAuthenticatorIsAvailable, startRegistration } from '@simplewebauthn/browser';
 import { useEffect, useState } from 'react';
 
 import {
   approveDevice,
   changePassword,
+  getCurrentSession,
   getPendingDeviceCount,
+  getWebAuthnRegistrationOptions,
   listDevices,
+  registerWebAuthnCredential,
   rejectDevice,
   removeDevice,
+  removeProfilePhoto,
+  uploadProfilePhoto,
 } from '../api/auth';
 import { CLINICAL_ROLES } from '../roles';
+import RoleAvatar from './RoleAvatar';
 
 const PENDING_DEVICE_POLL_MS = 25000;
 
@@ -82,6 +89,15 @@ function DisasterIcon() {
   );
 }
 
+function AlertIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  );
+}
+
 function MenuIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -116,7 +132,7 @@ function ProfileIcon() {
   );
 }
 
-export { SearchIcon, StaffIcon, PatientsIcon, LedgerIcon, OverviewIcon, DisasterIcon };
+export { SearchIcon, StaffIcon, PatientsIcon, LedgerIcon, OverviewIcon, DisasterIcon, AlertIcon };
 
 function formatRole(role) {
   return role.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
@@ -255,14 +271,161 @@ function DevicesPanel() {
   );
 }
 
+/** Collapsible "Step-up verification" section on the Profile page (clinical
+ * roles only) -- added 2026-09-06, replacing a typed PIN the same day with
+ * device biometrics. Self-service and per-device by nature: nobody but the
+ * staff member, sitting at this device, can register its own Face ID/
+ * fingerprint/Windows Hello -- that's inherent to how WebAuthn's security
+ * model works, not a rule this app invents. `available` starts `null`
+ * (checking) so the panel doesn't flash an incorrect state on mount. */
+function StepUpEnrollmentPanel() {
+  const [available, setAvailable] = useState(null);
+  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    platformAuthenticatorIsAvailable().then(setAvailable).catch(() => setAvailable(false));
+  }, []);
+
+  const handleEnroll = async () => {
+    setError(null);
+    setNotice(null);
+    setSubmitting(true);
+    try {
+      const optionsJSON = await getWebAuthnRegistrationOptions();
+      const credential = await startRegistration({ optionsJSON });
+      await registerWebAuthnCredential(credential);
+      setNotice('Step-up verification enabled on this device.');
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <details className="detail-block">
+      <summary>Step-up verification</summary>
+      {available === false && (
+        <p className="meta-line">
+          This device doesn't have a fingerprint reader, Face ID, or Windows Hello set
+          up, so there's nothing to enroll here. If a session ever scores into the
+          reduced-access band on this device, you can ask a logged-in colleague to
+          verify instead.
+        </p>
+      )}
+      {available && (
+        <>
+          <p className="meta-line">
+            Enable your device's own fingerprint, Face ID, or Windows Hello as the
+            second factor for reduced-access sessions (CLAUDE.md's 40–69% band). This
+            is per device -- enroll again if you sign in somewhere new.
+          </p>
+          {error && <p role="alert" className="dev-error">{error}</p>}
+          {notice && <p className="notice">{notice}</p>}
+          <div className="button-row">
+            <button type="button" className="btn-primary" disabled={submitting} onClick={handleEnroll}>
+              {submitting ? 'Waiting for your device…' : 'Enable on this device'}
+            </button>
+          </div>
+        </>
+      )}
+    </details>
+  );
+}
+
+function ProfileField({ label, value }) {
+  return (
+    <p className="meta-line">
+      <span className="detail-label">{label}:</span> {value}
+    </p>
+  );
+}
+
+/** Photo upload/preview/remove section on the left of the profile card --
+ * added 2026-09-05, per the user, so the Security dashboard can show a real
+ * photo instead of RoleAvatar's cartoon once one exists. Clicking the avatar
+ * itself opens the file picker (no separate "Upload photo" button, per the
+ * user) -- a "Remove photo" text link sits underneath once one exists.
+ * `photoUrl`/`onPhotoChange` are lifted to ProfilePanel so the rest of the
+ * card (and the header's own avatar use, if any) stays in sync after an
+ * upload/removal. */
+function ProfilePhotoSection({ role, photoUrl, onPhotoChange }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleFileChange = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const data = await uploadProfilePhoto(file);
+      onPhotoChange(data.photo_url);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await removeProfilePhoto();
+      onPhotoChange(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="profile-detail-photo">
+      <label
+        className={`profile-avatar-upload${busy ? ' profile-avatar-upload-busy' : ''}`}
+        title={photoUrl ? 'Click to change photo' : 'Click to upload a photo'}
+      >
+        <RoleAvatar role={role} photoUrl={photoUrl} />
+        <input
+          type="file"
+          accept="image/*"
+          onChange={handleFileChange}
+          disabled={busy}
+          hidden
+        />
+      </label>
+      {photoUrl && (
+        <button type="button" className="link-button" disabled={busy} onClick={handleRemove}>
+          Remove photo
+        </button>
+      )}
+      {error && <p role="alert" className="dev-error">{error}</p>}
+    </div>
+  );
+}
+
 /** The page a click on the header's profile icon opens, from any dashboard: the
- * caller's own read-only details plus a change-password form (password only --
- * nothing else here is editable). */
+ * caller's own labeled details (name, staff ID, role, and -- for clinical roles
+ * -- live duty/ward/on-call status), a profile photo upload, and a
+ * change-password form (password only -- nothing else here is editable).
+ * Duty/ward/on-call come from getCurrentSession() (live, not the `staff` prop's
+ * login-time snapshot) so the card reflects an admin toggling this staff
+ * member's status elsewhere without needing a fresh login. */
 function ProfilePanel({ staff, onBack }) {
   const [password, setPassword] = useState(PASSWORD_INITIAL);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [session, setSession] = useState(null);
+
+  useEffect(() => {
+    getCurrentSession().then(setSession).catch(() => {});
+  }, []);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -284,6 +447,11 @@ function ProfilePanel({ staff, onBack }) {
     }
   };
 
+  const isClinical = CLINICAL_ROLES.has(staff.role);
+  const dutyLabel = session
+    ? `${session.on_duty ? 'On duty' : 'Off duty'}${session.ward ? ` (${session.ward})` : ''}`
+    : '…';
+
   return (
     <div>
       <button type="button" className="back-link" onClick={onBack}>
@@ -292,9 +460,25 @@ function ProfilePanel({ staff, onBack }) {
 
       <div className="panel-card">
         <h2>My profile</h2>
-        <p className="meta-line">{staff.full_name}</p>
-        <p className="meta-line">{staff.staff_id} · {formatRole(staff.role)}</p>
+        <div className="profile-detail-row">
+          <ProfilePhotoSection
+            role={staff.role}
+            photoUrl={session ? session.photo_url : null}
+            onPhotoChange={(photo_url) => setSession((s) => (s ? { ...s, photo_url } : s))}
+          />
+          <div className="profile-detail-fields">
+            <ProfileField label="Name" value={staff.full_name} />
+            <ProfileField label="Staff ID" value={staff.staff_id} />
+            <ProfileField label="Role" value={formatRole(staff.role)} />
+            {isClinical && <ProfileField label="Duty status" value={dutyLabel} />}
+            {isClinical && <ProfileField label="On call" value={session ? (session.on_call ? 'Yes' : 'No') : '…'} />}
+          </div>
+        </div>
       </div>
+
+      {isClinical && <DevicesPanel />}
+
+      {isClinical && <StepUpEnrollmentPanel />}
 
       <div className="panel-card">
         <h3>Change password</h3>
@@ -340,8 +524,6 @@ function ProfilePanel({ staff, onBack }) {
           </div>
         </form>
       </div>
-
-      {CLINICAL_ROLES.has(staff.role) && <DevicesPanel />}
     </div>
   );
 }
@@ -407,6 +589,10 @@ function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, ti
               >
                 {item.icon}
                 {item.label}
+                {/* Optional red count pill (added 2026-09-06 for unacknowledged
+                    security alerts) -- same "something needs you" language as
+                    the header's .profile-badge-dot. */}
+                {item.badgeCount > 0 && <span className="nav-badge">{item.badgeCount}</span>}
               </button>
             ))}
           </nav>

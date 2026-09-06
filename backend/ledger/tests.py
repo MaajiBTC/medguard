@@ -313,3 +313,75 @@ class LedgerEntryExplainViewTests(APITestCase):
 
         self.assertEqual(resp.status_code, 502)
         self.assertIn("aren't configured", resp.data["detail"])
+
+
+class LedgerVerifyViewTests(APITestCase):
+    """/api/ledger/verify/ -- security-officer-only. Exposes verify_chain()
+    (added 2026-09-06, per the user) so the Ledger's tamper-evidence can
+    actually be demonstrated, not just tested."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(user=user, staff_id=staff_id, full_name=username, role=role)
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_non_security_officer_forbidden(self):
+        _staff, token = self._login("adminVerifyApi", "pw-verify-1", "STF-V900", Staff.Role.ADMIN)
+        resp = self.client.get("/api/ledger/verify/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unauthenticated_forbidden(self):
+        resp = self.client.get("/api/ledger/verify/")
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_intact_chain_reports_valid_with_entry_count(self):
+        _officer, token = self._login("secOfficerVerify", "pw-verify-2", "STF-V901", Staff.Role.SECURITY_OFFICER)
+        doctor = self._login("docVerifyApi", "pw-verify-3", "STF-V902", Staff.Role.DOCTOR)[0]
+
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=doctor)
+        record_event(event_type=LedgerEntry.EventType.ACCESS_DENIED, staff=doctor)
+
+        resp = self.client.get("/api/ledger/verify/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["valid"])
+        self.assertIsNone(resp.data["bad_sequence"])
+        self.assertEqual(resp.data["entries_checked"], 2)
+        self.assertIn("verified_at", resp.data)
+
+    def test_tampered_chain_reports_the_bad_entry(self):
+        """Same raw-SQL tamper as RecordEventChainTests above -- the threat
+        model here is direct database access, not application code."""
+        _officer, token = self._login("secOfficerVerify2", "pw-verify-4", "STF-V903", Staff.Role.SECURITY_OFFICER)
+        doctor = self._login("docVerifyApi2", "pw-verify-5", "STF-V904", Staff.Role.DOCTOR)[0]
+
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=doctor)
+        entry = record_event(event_type=LedgerEntry.EventType.AUDITED_DEVIATION, staff=doctor)
+
+        with connections["ledger"].cursor() as cursor:
+            cursor.execute(
+                "UPDATE ledger_ledgerentry SET details = %s WHERE sequence = %s",
+                ['{"tampered": true}', entry.sequence],
+            )
+
+        resp = self.client.get("/api/ledger/verify/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["valid"])
+        self.assertEqual(resp.data["bad_sequence"], entry.sequence)
+
+    def test_empty_chain_is_valid(self):
+        _officer, token = self._login("secOfficerVerify3", "pw-verify-6", "STF-V905", Staff.Role.SECURITY_OFFICER)
+        resp = self.client.get("/api/ledger/verify/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data["valid"])
+        self.assertEqual(resp.data["entries_checked"], 0)

@@ -6,7 +6,17 @@
       "Bash(git --version)",
       "Bash(py -m pip --version)",
       "PowerShell(winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements)",
-      "Bash(git init *)"
+      "Bash(git init *)",
+      "Bash(py manage.py makemigrations scoring)",
+      "Bash(./venv/Scripts/python.exe manage.py makemigrations scoring)",
+      "Bash(./venv/Scripts/python.exe manage.py migrate)",
+      "Bash(./venv/Scripts/python.exe manage.py test)",
+      "Bash(npm run *)",
+      "Bash(netstat -ano)",
+      "Bash(./venv/Scripts/python.exe manage.py runserver 8000)",
+      "Bash(./venv/Scripts/python.exe manage.py shell -c ' *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

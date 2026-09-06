@@ -6,6 +6,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from access.services import clear_lockout
+
 from .models import AdminActionLog, Staff
 from .permissions import IsAdmin, IsAdminOrSecurityOfficer
 from .serializers import (
@@ -37,7 +39,7 @@ class StaffSearchView(APIView):
             staff = staff.filter(Q(staff_id__icontains=q) | Q(full_name__icontains=q))
         if role:
             staff = staff.filter(role=role)
-        return Response(StaffSummarySerializer(staff[:50], many=True).data)
+        return Response(StaffSummarySerializer(staff[:50], many=True, context={"request": request}).data)
 
 
 class StaffSummaryView(APIView):
@@ -115,7 +117,9 @@ class StaffCreateView(APIView):
                 actor=request.auth.staff, action=AdminActionLog.Action.STAFF_CREATED, target=staff
             )
 
-        return Response(StaffSummarySerializer(staff).data, status=status.HTTP_201_CREATED)
+        return Response(
+            StaffSummarySerializer(staff, context={"request": request}).data, status=status.HTTP_201_CREATED
+        )
 
 
 class StaffDutyWardUpdateView(APIView):
@@ -148,7 +152,7 @@ class StaffDutyWardUpdateView(APIView):
             update_fields.append("on_call")
         staff.save(update_fields=update_fields)
 
-        return Response(StaffSummarySerializer(staff).data)
+        return Response(StaffSummarySerializer(staff, context={"request": request}).data)
 
 
 class StaffDeactivateView(APIView):
@@ -164,7 +168,7 @@ class StaffDeactivateView(APIView):
         record_admin_action(
             actor=request.auth.staff, action=AdminActionLog.Action.STAFF_DEACTIVATED, target=staff
         )
-        return Response(StaffSummarySerializer(staff).data)
+        return Response(StaffSummarySerializer(staff, context={"request": request}).data)
 
 
 class StaffReactivateView(APIView):
@@ -179,7 +183,7 @@ class StaffReactivateView(APIView):
         record_admin_action(
             actor=request.auth.staff, action=AdminActionLog.Action.STAFF_REACTIVATED, target=staff
         )
-        return Response(StaffSummarySerializer(staff).data)
+        return Response(StaffSummarySerializer(staff, context={"request": request}).data)
 
 
 class StaffDeleteView(APIView):
@@ -217,6 +221,28 @@ class StaffDeleteView(APIView):
             actor=request.auth.staff, action=AdminActionLog.Action.STAFF_DELETED, target=staff
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class StaffUnlockView(APIView):
+    """POST /api/staff/<id>/unlock/ -- clears a brute-force lockout early
+    (added 2026-09-06). Without this an admin would have to wait out
+    settings.LOGIN_LOCKOUT_MINUTES; the lock does expire on its own either
+    way (see access.services), this just skips the wait.
+
+    Always returns 200 with the updated row, even if the account wasn't
+    actually locked -- "make sure this account isn't locked" is idempotent by
+    nature, and a 400 here would just be noise for the admin.
+    """
+
+    permission_classes = [IsAdmin]
+
+    def post(self, request, staff_id):
+        staff = get_object_or_404(Staff, pk=staff_id)
+        clear_lockout(staff.user.username)
+        record_admin_action(
+            actor=request.auth.staff, action=AdminActionLog.Action.STAFF_UNLOCKED, target=staff
+        )
+        return Response(StaffSummarySerializer(staff, context={"request": request}).data)
 
 
 class AdminActionListView(APIView):

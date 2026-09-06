@@ -497,6 +497,191 @@ button {
   height: 100%;
 }
 
+.role-avatar-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+/* Profile page: horizontal split (added 2026-09-05, per the user) -- avatar
+   in the left half, labeled fields starting at the card's horizontal
+   midpoint (an explicit two-column grid, not flex, so the fields column
+   always starts exactly at 50% regardless of the photo's own width). */
+.profile-detail-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: flex-start;
+  gap: 24px;
+  margin-top: 12px;
+}
+
+.profile-detail-photo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.profile-detail-photo .role-avatar {
+  width: 110px;
+  max-width: 110px;
+}
+
+.profile-detail-fields {
+  padding-top: 4px;
+  text-align: left;
+  font-size: 1.1rem;
+}
+
+/* Clicking the avatar itself opens the file picker (no separate "Upload
+   photo" button, per the user) -- the hidden <input type=file> lives inside
+   this label. */
+.profile-avatar-upload {
+  cursor: pointer;
+  display: block;
+}
+
+.profile-avatar-upload-busy {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--plum-deep);
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* "Verify ledger integrity" control (added 2026-09-06) -- sits beside the
+   Live feed heading, result message inline next to the button. */
+.ledger-feed-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ledger-feed-header h2 {
+  margin: 0;
+}
+
+.ledger-verify {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ledger-verify-ok {
+  color: #0a7a2f;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ledger-verify-bad {
+  color: #ff0000;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* Security alerts (added 2026-09-06) -- one card per alert, red-striped while
+   it still needs a human to review it. Reuses ACCESS_DENIED's red rather than
+   inventing a new one. */
+.alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.alert-card {
+  border: 1px solid #ece5fa;
+  border-left: 4px solid #ff0000;
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #fff;
+}
+
+.alert-card-acknowledged {
+  border-left-color: #c9c3d8;
+  opacity: 0.75;
+}
+
+.alert-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.alert-type {
+  font-weight: 700;
+  color: var(--plum-deep);
+}
+
+.alert-ack-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.alert-ack-form .form-input {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+}
+
+.badge-open {
+  background: #ffe0e0;
+  color: #9d2f3d;
+}
+
+/* Red count pill on a nav destination (added 2026-09-06) -- same
+   "something needs you" language as .profile-badge-dot in the header. */
+.nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #e11d48;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Step-up verification challenge on the clinical dashboard (added
+   2026-09-06, mechanism replaced device biometrics/colleague-assist the
+   same day -- see CLAUDE.md). */
+.step-up-control {
+  border: 1px solid #ece5fa;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-top: 12px;
+  background: var(--off-white);
+}
+
+/* The "colleagues asking for step-up verification" banner (added
+   2026-09-06) -- a plain panel-card, just with the same red accent the
+   alerts/lockout surfaces already use so it reads as "needs attention". */
+.assist-banner {
+  border-left: 4px solid #ff9300;
+}
+
 /* Live feed: a tinted "tray" holding one white row-card per entry (added
    2026-08-31, per the user) -- distinct cards with gaps between them, not one
    shared table sheet, same "individual card per row" language as .card-row

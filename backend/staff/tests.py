@@ -6,6 +6,7 @@ creation here is standard practice and does not conflict with CLAUDE.md's
 no-placeholder-data rule, which is about the real application database.
 """
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -13,7 +14,9 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Staff, Ward
+from access.services import is_locked_out
+
+from .models import AdminActionLog, Staff, Ward
 
 
 class StaffModelTests(TestCase):
@@ -127,6 +130,8 @@ class StaffApiTests(APITestCase):
         self.assertEqual(search_resp.status_code, status.HTTP_200_OK)
         self.assertEqual(len(search_resp.data), 1)
         self.assertEqual(search_resp.data[0]["staff_id"], "STF-S902")
+        self.assertIn("photo_url", search_resp.data[0])
+        self.assertIsNone(search_resp.data[0]["photo_url"])
 
     def test_admin_can_update_duty_and_ward(self):
         _admin, admin_token = self._login("adminApi2", "pw-staff-api-3", "STF-S903", Staff.Role.ADMIN)
@@ -380,6 +385,77 @@ class StaffApiTests(APITestCase):
         _clerk, token = self._login("clerkSearchApi", "pw-staff-api-28", "STF-S934", Staff.Role.CLERK)
         resp = self.client.get("/api/staff/", **self._auth(token))
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class StaffUnlockTests(APITestCase):
+    """Admin-side unlock control added 2026-09-06 alongside login lockout.
+    (The step-up PIN admin-set control that originally shipped alongside
+    this was retired the same day when step-up moved to device biometrics +
+    peer-assist -- enrollment is self-service now, no admin action left to
+    test here; see access.tests.WebAuthnRegistrationTests instead.)"""
+
+    def _login(self, username, password, staff_id, role):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(user=user, staff_id=staff_id, full_name=username, role=role)
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_admin_can_unlock_a_locked_account(self):
+        _admin, admin_token = self._login("adminUnlock", "pw-unlock-1", "STF-U900", Staff.Role.ADMIN)
+        doctor, _t = self._login("docLocked", "pw-unlock-2", "STF-U901", Staff.Role.DOCTOR)
+
+        for _ in range(settings.LOGIN_MAX_FAILED_ATTEMPTS):
+            self.client.post(
+                "/api/access/login/",
+                {"username": "docLocked", "password": "wrong", "device_id": "device-STF-U901", "device_type": "desktop"},
+                format="json",
+            )
+        self.assertTrue(is_locked_out("docLocked"))
+
+        resp = self.client.post(f"/api/staff/{doctor.id}/unlock/", **self._auth(admin_token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(resp.data["is_locked_out"])
+        self.assertFalse(is_locked_out("docLocked"))
+
+        # And the real password works again immediately.
+        login_resp = self.client.post(
+            "/api/access/login/",
+            {"username": "docLocked", "password": "pw-unlock-2", "device_id": "device-STF-U901", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(login_resp.status_code, status.HTTP_201_CREATED)
+
+    def test_unlock_is_logged_as_an_admin_action(self):
+        admin, admin_token = self._login("adminUnlock2", "pw-unlock-3", "STF-U902", Staff.Role.ADMIN)
+        doctor, _t = self._login("docLocked2", "pw-unlock-4", "STF-U903", Staff.Role.DOCTOR)
+
+        self.client.post(f"/api/staff/{doctor.id}/unlock/", **self._auth(admin_token))
+
+        log = AdminActionLog.objects.filter(action=AdminActionLog.Action.STAFF_UNLOCKED).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.actor_staff_id, admin.staff_id)
+        self.assertEqual(log.target_staff_id, "STF-U903")
+
+    def test_non_admin_cannot_unlock(self):
+        _doctor, token = self._login("docNoUnlock", "pw-unlock-5", "STF-U904", Staff.Role.DOCTOR)
+        target, _t = self._login("docTarget", "pw-unlock-6", "STF-U905", Staff.Role.NURSE)
+        resp = self.client.post(f"/api/staff/{target.id}/unlock/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_search_surfaces_lockout_status(self):
+        _admin, admin_token = self._login("adminPin4", "pw-pin-set-7", "STF-U912", Staff.Role.ADMIN)
+        _nurse, _t = self._login("nurseStatusApi", "pw-pin-set-8", "STF-U913", Staff.Role.NURSE)
+
+        resp = self.client.get("/api/staff/?q=STF-U913", **self._auth(admin_token))
+        self.assertEqual(resp.data[0]["is_locked_out"], False)
 
 
 class StaffDeleteViewTests(APITestCase):

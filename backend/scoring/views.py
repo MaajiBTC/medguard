@@ -1,8 +1,18 @@
+from django.conf import settings
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from webauthn import base64url_to_bytes, generate_authentication_options, verify_authentication_response
+from webauthn.helpers import bytes_to_base64url, options_to_json_dict
+from webauthn.helpers.exceptions import InvalidAuthenticationResponse
+from webauthn.helpers.structs import PublicKeyCredentialDescriptor, UserVerificationRequirement
 
+from access.models import WebAuthnCredential
+from access.services import clear_webauthn_challenge, webauthn_challenge_is_fresh
+from alerts.models import SecurityAlert
+from alerts.services import raise_alert
 from captures.models import ContextualCapture
 from captures.services import compute_patient_assignment_status
 from ledger.models import LedgerEntry
@@ -14,13 +24,19 @@ from staff.permissions import IsAdmin, IsClinicalStaff
 from .baseline import update_baseline
 from .disaster_mode import is_disaster_mode_active
 from .engine import ROLE_CEILINGS, compute_access_decision
-from .models import AccessDecision, BehavioralBaseline, DisasterModeEvent
+from .models import AccessDecision, BehavioralBaseline, DisasterModeEvent, StepUpAssistRequest
 from .serializers import (
     AccessDecisionSerializer,
     DecideRequestSerializer,
     DisasterModeActionSerializer,
     EmergencyOverrideRequestSerializer,
+    StepUpAssistRequestSerializer,
 )
+
+# Shared by both step-up verification paths below -- three wrong biometric
+# attempts, or the decision otherwise going stale, spends it: the clinician
+# has to re-run /decide/ rather than retry indefinitely against one decision.
+STEP_UP_MAX_ATTEMPTS = 3
 
 
 class DecideView(APIView):
@@ -71,7 +87,7 @@ class DecideView(APIView):
             baseline, _ = BehavioralBaseline.objects.get_or_create(staff=session.staff)
             update_baseline(baseline, session)
 
-        record_event(
+        entry = record_event(
             event_type=decision.decision_type,
             staff=session.staff,
             patient=patient,
@@ -85,6 +101,26 @@ class DecideView(APIView):
                 "factor_breakdown": decision.factor_breakdown,
             },
         )
+
+        # "ACCESS_DENIED, security alert triggered" (CLAUDE.md's band table).
+        # The Ledger entry above is the audit record; this is the part that
+        # puts it in front of a human and makes them sign it off (added
+        # 2026-09-06). Linked back to the entry by sequence number, since a
+        # cross-database FK isn't possible.
+        if decision.decision_type == AccessDecision.DecisionType.ACCESS_DENIED:
+            raise_alert(
+                alert_type=SecurityAlert.AlertType.ACCESS_DENIED,
+                staff=session.staff,
+                patient=patient,
+                ledger_sequence=entry.sequence,
+                details={
+                    "gate_passed": decision.gate_passed,
+                    "score": decision.score,
+                    "score_band": decision.score_band,
+                    "role_rule_path": decision.role_rule_path,
+                    "factor_breakdown": decision.factor_breakdown,
+                },
+            )
 
         return Response(AccessDecisionSerializer(decision).data, status=status.HTTP_201_CREATED)
 
@@ -264,6 +300,267 @@ class DisasterModeDeactivateView(APIView):
         )
 
 
+def _get_own_reduced_decision(request, decision_id):
+    """Shared lookup + guards for every step-up endpoint below. Scoped to the
+    caller's own session -- a decision belonging to anyone else's session is
+    a 404, not a 403, so this can't be used to probe which decision IDs
+    exist. Returns (decision, error_response); error_response is None when
+    the decision is a legitimate, still-open step-up target."""
+    decision = get_object_or_404(AccessDecision, pk=decision_id, session=request.auth)
+
+    if decision.decision_type != AccessDecision.DecisionType.REDUCED_ACCESS:
+        return decision, Response(
+            {"detail": "Step-up verification only applies to reduced-access decisions."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if decision.step_up_verified:
+        return decision, Response({"detail": "Already verified.", "step_up_verified": True})
+    if decision.step_up_failed_attempts >= STEP_UP_MAX_ATTEMPTS:
+        return decision, Response(
+            {
+                "detail": "Too many failed attempts. Request access again to retry.",
+                "attempts_remaining": 0,
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return decision, None
+
+
+class StepUpWebAuthnOptionsView(APIView):
+    """POST /api/scoring/decisions/<decision_id>/step-up/webauthn/options/
+
+    First step of verifying with THIS device's enrolled biometric (added
+    2026-09-06, replacing the typed PIN). 400s if this device has no
+    enrolled credential -- the frontend should not even show this button in
+    that case, offering "ask a colleague" (below) instead.
+    """
+
+    permission_classes = [IsClinicalStaff]
+
+    def post(self, request, decision_id):
+        session = request.auth
+        decision, error = _get_own_reduced_decision(request, decision_id)
+        if error:
+            return error
+
+        credential = WebAuthnCredential.objects.filter(
+            staff=session.staff, device__device_id=session.device_id
+        ).first()
+        if not credential:
+            return Response(
+                {
+                    "detail": "No biometric credential enrolled on this device.",
+                    "webauthn_available": False,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        options = generate_authentication_options(
+            rp_id=settings.WEBAUTHN_RP_ID,
+            allow_credentials=[
+                PublicKeyCredentialDescriptor(id=base64url_to_bytes(credential.credential_id))
+            ],
+            user_verification=UserVerificationRequirement.REQUIRED,
+        )
+        session.webauthn_challenge = bytes_to_base64url(options.challenge)
+        session.webauthn_challenge_created_at = timezone.now()
+        session.save(update_fields=["webauthn_challenge", "webauthn_challenge_created_at"])
+
+        return Response(options_to_json_dict(options))
+
+
+class StepUpWebAuthnVerifyView(APIView):
+    """POST /api/scoring/decisions/<decision_id>/step-up/webauthn/verify/ --
+    {credential: <navigator.credentials.get() response>}
+
+    Second step: verifies the browser's response against the enrolled
+    credential's stored public key and the challenge from options/ above. On
+    a genuine cryptographic failure (bad signature, sign-count regression --
+    a real red flag, not "forgot my device") raises a STEP_UP_FAILED alert,
+    same as three wrong PIN guesses used to. A plain browser-side cancel
+    never reaches this endpoint at all, so it never alerts.
+    """
+
+    permission_classes = [IsClinicalStaff]
+
+    def post(self, request, decision_id):
+        session = request.auth
+        staff = session.staff
+        decision, error = _get_own_reduced_decision(request, decision_id)
+        if error:
+            return error
+
+        credential = WebAuthnCredential.objects.filter(
+            staff=staff, device__device_id=session.device_id
+        ).first()
+        if not credential:
+            return Response(
+                {
+                    "detail": "No biometric credential enrolled on this device.",
+                    "webauthn_available": False,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not webauthn_challenge_is_fresh(session):
+            return Response(
+                {"detail": "Verification session expired. Please try again."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            verification = verify_authentication_response(
+                credential=request.data.get("credential"),
+                expected_challenge=base64url_to_bytes(session.webauthn_challenge),
+                expected_rp_id=settings.WEBAUTHN_RP_ID,
+                expected_origin=settings.WEBAUTHN_ORIGIN,
+                credential_public_key=base64url_to_bytes(credential.public_key),
+                credential_current_sign_count=credential.sign_count,
+                require_user_verification=True,
+            )
+        except InvalidAuthenticationResponse as exc:
+            decision.step_up_failed_attempts += 1
+            decision.save(update_fields=["step_up_failed_attempts"])
+            attempts_remaining = max(0, STEP_UP_MAX_ATTEMPTS - decision.step_up_failed_attempts)
+            raise_alert(
+                alert_type=SecurityAlert.AlertType.STEP_UP_FAILED,
+                staff=staff,
+                patient=decision.patient,
+                details={
+                    "method": "webauthn",
+                    "reason": str(exc),
+                    "decision_id": decision.id,
+                    "attempts_remaining": attempts_remaining,
+                    "score": decision.score,
+                    "score_band": decision.score_band,
+                },
+            )
+            return Response(
+                {"detail": "Could not verify.", "attempts_remaining": attempts_remaining},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        finally:
+            clear_webauthn_challenge(session)
+
+        credential.sign_count = verification.new_sign_count
+        credential.last_used_at = timezone.now()
+        credential.save(update_fields=["sign_count", "last_used_at"])
+
+        decision.step_up_verified = True
+        decision.step_up_verified_at = timezone.now()
+        decision.save(update_fields=["step_up_verified", "step_up_verified_at"])
+        return Response({"detail": "Verified.", "step_up_verified": True})
+
+
+class StepUpAssistRequestView(APIView):
+    """POST /api/scoring/decisions/<decision_id>/step-up/assist/request/
+
+    The fallback path (added 2026-09-06) for a device with no biometric, or
+    before the staff member has enrolled theirs: any other logged-in
+    clinical colleague can vouch instead. Mirrors
+    access.PendingDeviceRequest's create -> shared-list -> approve/decline
+    shape. `get_or_create` avoids piling up duplicate pending rows if the
+    clinician clicks more than once.
+    """
+
+    permission_classes = [IsClinicalStaff]
+
+    def post(self, request, decision_id):
+        decision, error = _get_own_reduced_decision(request, decision_id)
+        if error:
+            return error
+
+        assist_request, _created = StepUpAssistRequest.objects.get_or_create(
+            decision=decision,
+            status=StepUpAssistRequest.Status.PENDING,
+            defaults={"requesting_staff": request.auth.staff},
+        )
+        return Response(StepUpAssistRequestSerializer(assist_request).data)
+
+
+class StepUpAssistListView(APIView):
+    """GET /api/scoring/step-up/assist-requests/ -- the shared queue any
+    clinical colleague can act on (added 2026-09-06). Unlike
+    access.DeviceListView (scoped to your own account), this deliberately
+    shows everyone *else's* pending requests -- excludes the caller's own so
+    nobody can approve their own request just by finding it in this list."""
+
+    permission_classes = [IsClinicalStaff]
+
+    def get(self, request):
+        requests = (
+            StepUpAssistRequest.objects.filter(status=StepUpAssistRequest.Status.PENDING)
+            .exclude(requesting_staff=request.auth.staff)
+            .select_related("requesting_staff", "decision", "decision__patient")
+        )
+        return Response(StepUpAssistRequestSerializer(requests, many=True).data)
+
+
+class StepUpAssistApproveView(APIView):
+    """POST /api/scoring/step-up/assist-requests/<id>/approve/ -- the actual
+    point of this endpoint: flips step_up_verified on the linked decision,
+    same as a successful biometric check would."""
+
+    permission_classes = [IsClinicalStaff]
+
+    def post(self, request, request_id):
+        assist_request = get_object_or_404(
+            StepUpAssistRequest, pk=request_id, status=StepUpAssistRequest.Status.PENDING
+        )
+        if assist_request.requesting_staff_id == request.auth.staff.id:
+            return Response(
+                {"detail": "You can't approve your own request."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        assist_request.status = StepUpAssistRequest.Status.APPROVED
+        assist_request.resolved_by = request.auth.staff
+        assist_request.resolved_at = timezone.now()
+        assist_request.save(update_fields=["status", "resolved_by", "resolved_at"])
+
+        decision = assist_request.decision
+        decision.step_up_verified = True
+        decision.step_up_verified_at = timezone.now()
+        decision.save(update_fields=["step_up_verified", "step_up_verified_at"])
+
+        return Response(StepUpAssistRequestSerializer(assist_request).data)
+
+
+class StepUpAssistDeclineView(APIView):
+    """POST /api/scoring/step-up/assist-requests/<id>/decline/ -- unlike a
+    plain timeout (nobody did anything wrong), a colleague explicitly
+    declining to vouch is worth a security officer's attention."""
+
+    permission_classes = [IsClinicalStaff]
+
+    def post(self, request, request_id):
+        assist_request = get_object_or_404(
+            StepUpAssistRequest, pk=request_id, status=StepUpAssistRequest.Status.PENDING
+        )
+        if assist_request.requesting_staff_id == request.auth.staff.id:
+            return Response(
+                {"detail": "You can't decline your own request."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        assist_request.status = StepUpAssistRequest.Status.DECLINED
+        assist_request.resolved_by = request.auth.staff
+        assist_request.resolved_at = timezone.now()
+        assist_request.save(update_fields=["status", "resolved_by", "resolved_at"])
+
+        decision = assist_request.decision
+        raise_alert(
+            alert_type=SecurityAlert.AlertType.STEP_UP_FAILED,
+            staff=assist_request.requesting_staff,
+            patient=decision.patient,
+            details={
+                "method": "assist",
+                "declined_by": request.auth.staff.staff_id,
+                "decision_id": decision.id,
+            },
+        )
+        return Response(StepUpAssistRequestSerializer(assist_request).data)
+
+
 class PatientRecordView(APIView):
     """GET /api/scoring/patients/<patient_id>/records/
 
@@ -298,6 +595,37 @@ class PatientRecordView(APIView):
             return Response(
                 {
                     "detail": "Access denied.",
+                    "score": decision.score,
+                    "score_band": decision.score_band,
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Step-up gate (added 2026-09-06, mechanism updated the same day --
+        # see CLAUDE.md) -- CLAUDE.md's 40-69% band has always required step-up
+        # verification; this is where it's actually enforced. It has to live
+        # here rather than only in the UI: this view is what actually hands
+        # over record content, so gating the React screen alone would leave
+        # the API open to a direct call.
+        #
+        # Unlike the retired PIN (which could fail closed with no path
+        # forward at all), this never truly strands anyone: `webauthn_
+        # available` tells the frontend whether to offer the biometric button
+        # for *this device*, but the colleague-assist path is always open
+        # regardless, so the message stays a single, simple string.
+        if (
+            decision.decision_type == AccessDecision.DecisionType.REDUCED_ACCESS
+            and not decision.step_up_verified
+        ):
+            webauthn_available = WebAuthnCredential.objects.filter(
+                staff=session.staff, device__device_id=session.device_id
+            ).exists()
+            return Response(
+                {
+                    "detail": "Step-up verification required for reduced-access sessions.",
+                    "step_up_required": True,
+                    "webauthn_available": webauthn_available,
+                    "decision_id": decision.id,
                     "score": decision.score,
                     "score_band": decision.score_band,
                 },

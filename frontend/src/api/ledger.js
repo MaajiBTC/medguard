@@ -20,4 +20,12 @@ function explainLedgerEntry(sequence) {
   return request(`/ledger/entries/${sequence}/explain/`, { method: 'POST' });
 }
 
-export { getLedgerEntries, explainLedgerEntry };
+/** GET /api/ledger/verify/ — security-officer-only. Re-walks the whole
+ * hash chain and reports whether it's intact. Returns
+ * `{ valid, bad_sequence, entries_checked, verified_at }` — `bad_sequence`
+ * is null when valid, otherwise the first entry that failed. */
+function verifyLedgerChain() {
+  return request('/ledger/verify/');
+}
+
+export { getLedgerEntries, explainLedgerEntry, verifyLedgerChain };

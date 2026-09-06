@@ -31,6 +31,16 @@ class AccessSession(models.Model):
     user_agent = models.CharField(max_length=512, blank=True)
     network_segment = models.CharField(max_length=128, blank=True, default="unknown")
 
+    # WebAuthn challenge storage (added 2026-09-06) -- the pending challenge
+    # between a registration or step-up authentication ceremony's two calls
+    # (options -> browser ceremony -> verify). Stored on the session row
+    # itself rather than Django's cache framework: the default LocMemCache is
+    # per-process, which would break under Render's multi-worker gunicorn --
+    # a DB row needs no new infrastructure and is trivially consistent.
+    # Overwritten on every new ceremony; cleared after a successful verify.
+    webauthn_challenge = models.TextField(blank=True, default="")
+    webauthn_challenge_created_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ["-started_at"]
 
@@ -66,6 +76,40 @@ class Device(models.Model):
     def __str__(self):
         role = "primary" if self.is_primary else "device"
         return f"{role}({self.staff}, {self.device_type or 'unknown'})"
+
+
+class WebAuthnCredential(models.Model):
+    """One device's enrolled biometric/platform-authenticator credential for
+    step-up verification (added 2026-09-06, replacing the typed PIN). Self-
+    enrolled only -- nobody but the staff member, sitting at this device, can
+    create one; that's inherent to how WebAuthn's security model works, not
+    a rule this app invents.
+
+    A separate model from Device on purpose: being an *approved* device and
+    being *biometric-enrolled for step-up* are related but distinct facts --
+    a device can be perfectly approved for login and still have no step-up
+    credential (nothing needed it yet, or this device has no platform
+    authenticator at all). `OneToOneField` -- re-enrolling replaces whatever
+    was there rather than accumulating rows.
+
+    credential_id/public_key are stored as the base64url strings the
+    `webauthn` library already produces at its own encode/decode boundary
+    (bytes_to_base64url/base64url_to_bytes) -- plain TextFields, not binary
+    columns, for portability between SQLite locally and Postgres on Render.
+    """
+
+    staff = models.ForeignKey(
+        "staff.Staff", on_delete=models.CASCADE, related_name="webauthn_credentials"
+    )
+    device = models.OneToOneField(Device, on_delete=models.CASCADE, related_name="webauthn_credential")
+    credential_id = models.TextField(unique=True)
+    public_key = models.TextField()
+    sign_count = models.PositiveBigIntegerField(default=0)
+    registered_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"WebAuthnCredential({self.staff}, device={self.device_id})"
 
 
 class PendingDeviceRequest(models.Model):
@@ -106,3 +150,38 @@ class PendingDeviceRequest(models.Model):
 
     def __str__(self):
         return f"PendingDeviceRequest({self.staff}, {self.status})"
+
+
+class LoginAttempt(models.Model):
+    """One row per login attempt, successful or not (added 2026-09-06, per the
+    user) -- the basis for brute-force lockout, and an audit trail in its own
+    right.
+
+    Keyed by the submitted `username` rather than a Staff foreign key on
+    purpose: an attempt against a username that doesn't exist is exactly the
+    kind of thing worth recording, and there's no Staff row to point at in
+    that case. Nothing here is routed through the Security Ledger, same
+    reasoning as PendingDeviceRequest above -- "someone typed the wrong
+    password" isn't one of the Ledger's five pinned event types.
+
+    Lockout state is *derived* from these rows rather than stored (see
+    access.services.is_locked_out): an account is locked while it has at
+    least settings.LOGIN_MAX_FAILED_ATTEMPTS failures inside the last
+    settings.LOGIN_LOCKOUT_MINUTES. That makes auto-unlock free -- old
+    failures simply age out of the window -- with no scheduled job needed,
+    and an admin can clear a lockout early by deleting the recent failures
+    (access.services.clear_lockout).
+    """
+
+    username = models.CharField(max_length=150, db_index=True)
+    succeeded = models.BooleanField(default=False)
+    device_id = models.CharField(max_length=255, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    attempted_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-attempted_at"]
+
+    def __str__(self):
+        outcome = "success" if self.succeeded else "failure"
+        return f"LoginAttempt({self.username}, {outcome}, {self.attempted_at:%Y-%m-%d %H:%M})"

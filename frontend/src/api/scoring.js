@@ -45,10 +45,60 @@ function deactivateDisasterMode(reason) {
   return request('/scoring/disaster-mode/deactivate/', { method: 'POST', body: { reason } });
 }
 
+/** POST /api/scoring/decisions/<id>/step-up/webauthn/options/ — first step of
+ * verifying with THIS device's enrolled biometric (CLAUDE.md's 40–69% band).
+ * 400s with {webauthn_available: false} if this device has no credential —
+ * the caller should fall back to requestStepUpAssist() in that case. */
+function getStepUpWebAuthnOptions(decisionId) {
+  return request(`/scoring/decisions/${decisionId}/step-up/webauthn/options/`, { method: 'POST' });
+}
+
+/** POST /api/scoring/decisions/<id>/step-up/webauthn/verify/ — {credential}.
+ * Second step: verifies @simplewebauthn/browser's startAuthentication()
+ * response. Three failures spend the decision and the clinician has to call
+ * decide() again. */
+function verifyStepUpWebAuthn(decisionId, credential) {
+  return request(`/scoring/decisions/${decisionId}/step-up/webauthn/verify/`, {
+    method: 'POST',
+    body: { credential },
+  });
+}
+
+/** POST /api/scoring/decisions/<id>/step-up/assist/request/ — the fallback
+ * for a device with no biometric, or before one's enrolled: asks any other
+ * logged-in clinical colleague to vouch. */
+function requestStepUpAssist(decisionId) {
+  return request(`/scoring/decisions/${decisionId}/step-up/assist/request/`, { method: 'POST' });
+}
+
+/** GET /api/scoring/step-up/assist-requests/ — every *other* clinical
+ * colleague's pending assist requests (never the caller's own), for the
+ * approve/decline banner. */
+function getStepUpAssistRequests() {
+  return request('/scoring/step-up/assist-requests/');
+}
+
+/** POST /api/scoring/step-up/assist-requests/<id>/approve/ — vouches for a
+ * colleague's reduced-access session, flipping its step_up_verified. */
+function approveStepUpAssist(requestId) {
+  return request(`/scoring/step-up/assist-requests/${requestId}/approve/`, { method: 'POST' });
+}
+
+/** POST /api/scoring/step-up/assist-requests/<id>/decline/ */
+function declineStepUpAssist(requestId) {
+  return request(`/scoring/step-up/assist-requests/${requestId}/decline/`, { method: 'POST' });
+}
+
 export {
   decide,
   getPatientRecords,
   emergencyOverride,
+  getStepUpWebAuthnOptions,
+  verifyStepUpWebAuthn,
+  requestStepUpAssist,
+  getStepUpAssistRequests,
+  approveStepUpAssist,
+  declineStepUpAssist,
   getDisasterModeStatus,
   activateDisasterMode,
   deactivateDisasterMode,

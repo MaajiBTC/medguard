@@ -12,5 +12,6 @@ urlpatterns = [
     path("<int:staff_id>/deactivate/", views.StaffDeactivateView.as_view(), name="deactivate"),
     path("<int:staff_id>/reactivate/", views.StaffReactivateView.as_view(), name="reactivate"),
     path("<int:staff_id>/delete/", views.StaffDeleteView.as_view(), name="delete"),
+    path("<int:staff_id>/unlock/", views.StaffUnlockView.as_view(), name="unlock"),
     path("admin-actions/", views.AdminActionListView.as_view(), name="admin-actions"),
 ]

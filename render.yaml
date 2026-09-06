@@ -1,0 +1,65 @@
+# Render blueprint for the MedGuard backend (added 2026-09-06).
+#
+# Two databases on purpose: the Security Ledger is deliberately kept separate
+# from the main application database, so a compromised app can't rewrite its
+# own audit trail (see CLAUDE.md's Security Ledger section and
+# backend/ledger/db_router.py). Ideally the ledger lives with a *different*
+# provider entirely; two Render instances is still a meaningful separation of
+# credentials and is what this blueprint sets up.
+#
+# The build step migrates BOTH connections -- `migrate` alone only touches the
+# default one, which would leave the ledger tables missing.
+
+databases:
+  - name: medguard-db
+    databaseName: medguard
+    plan: free
+
+  - name: medguard-ledger-db
+    databaseName: medguard_ledger
+    plan: free
+
+services:
+  - type: web
+    name: medguard-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: >-
+      pip install -r requirements.txt &&
+      python manage.py collectstatic --noinput &&
+      python manage.py migrate --noinput &&
+      python manage.py migrate --database=ledger --noinput
+    startCommand: gunicorn config.wsgi:application
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: medguard-db
+          property: connectionString
+      - key: LEDGER_DATABASE_URL
+        fromDatabase:
+          name: medguard-ledger-db
+          property: connectionString
+      # Generated once by Render and then held constant.
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      # WebAuthn step-up verification (added 2026-09-06) -- MUST be the real
+      # Vercel frontend domain once deployed, not this service's own Render
+      # domain. Placeholders here on purpose so a first deploy doesn't
+      # silently ship a broken value; update both after the frontend has a
+      # real URL.
+      - key: WEBAUTHN_RP_ID
+        value: "REPLACE-WITH-YOUR-VERCEL-DOMAIN.vercel.app"
+      - key: WEBAUTHN_ORIGIN
+        value: "https://REPLACE-WITH-YOUR-VERCEL-DOMAIN.vercel.app"
+      # Set these in the Render dashboard, not here -- they're secrets.
+      # STAFF_LOGIN_PASSWORD is only needed if you run create_staff_account
+      # to bootstrap the first admin account.
+      - key: STAFF_LOGIN_PASSWORD
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

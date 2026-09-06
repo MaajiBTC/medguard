@@ -1,4 +1,5 @@
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -7,6 +8,7 @@ from staff.permissions import IsSecurityOfficer
 from .gemini import GeminiError, explain_entry
 from .models import LedgerEntry
 from .serializers import LedgerEntrySerializer
+from .verification import verify_chain
 
 PAGE_SIZE = 50
 
@@ -77,3 +79,34 @@ class LedgerEntryExplainView(APIView):
         except GeminiError as exc:
             return Response({"detail": str(exc)}, status=502)
         return Response({"explanation": explanation})
+
+
+class LedgerVerifyView(APIView):
+    """GET /api/ledger/verify/ -- security-officer-only. Re-walks the entire
+    hash chain via verification.verify_chain() and reports whether it's
+    intact (added 2026-09-06, per the user).
+
+    verify_chain() has existed and been tested since step 3 but was
+    unreachable from outside the test suite -- which meant the Ledger's whole
+    tamper-evidence property couldn't actually be shown to anyone. This is a
+    thin wrapper over it: computes fresh on every call and persists nothing
+    (same posture as LedgerEntryExplainView above -- a verification result is
+    an observation about the Ledger, not part of it).
+
+    `entries_checked` is counted separately rather than returned by
+    verify_chain(), so that already-tested function's signature stays exactly
+    as it was.
+    """
+
+    permission_classes = [IsSecurityOfficer]
+
+    def get(self, request):
+        valid, bad_sequence = verify_chain()
+        return Response(
+            {
+                "valid": valid,
+                "bad_sequence": bad_sequence,
+                "entries_checked": LedgerEntry.objects.using("ledger").count(),
+                "verified_at": timezone.now(),
+            }
+        )

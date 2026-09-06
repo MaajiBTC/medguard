@@ -53,6 +53,12 @@ function getAdminActions(actorStaffId) {
   return request(`/staff/admin-actions/?actor_staff_id=${encodeURIComponent(actorStaffId)}`);
 }
 
+/** POST /api/staff/<id>/unlock/ — admin-only. Clears a brute-force lockout
+ * early; the lock also expires on its own after the lockout window. */
+function unlockStaff(staffId) {
+  return request(`/staff/${staffId}/unlock/`, { method: 'POST' });
+}
+
 export {
   searchStaff,
   getStaffSummary,
@@ -62,4 +68,5 @@ export {
   reactivateStaff,
   deleteStaff,
   getAdminActions,
+  unlockStaff,
 };

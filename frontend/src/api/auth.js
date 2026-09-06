@@ -62,6 +62,33 @@ function changePassword(currentPassword, newPassword) {
   });
 }
 
+/** POST /api/access/webauthn/registration-options/ — self-service, first
+ * step of enrolling THIS device's biometric (Face ID/fingerprint/Windows
+ * Hello) as a step-up credential. Returns WebAuthn creation options for
+ * @simplewebauthn/browser's startRegistration(). */
+function getWebAuthnRegistrationOptions() {
+  return request('/access/webauthn/registration-options/', { method: 'POST' });
+}
+
+/** POST /api/access/webauthn/register/ — second step: verifies
+ * startRegistration()'s response and enrolls this device's credential. */
+function registerWebAuthnCredential(credential) {
+  return request('/access/webauthn/register/', { method: 'POST', body: { credential } });
+}
+
+/** POST /api/access/profile/photo/ (multipart) — uploads/replaces the caller's own
+ * profile photo. Returns {photo_url}. */
+function uploadProfilePhoto(file) {
+  const formData = new FormData();
+  formData.append('photo', file);
+  return request('/access/profile/photo/', { method: 'POST', body: formData });
+}
+
+/** DELETE /api/access/profile/photo/ — removes the caller's own profile photo. */
+function removeProfilePhoto() {
+  return request('/access/profile/photo/', { method: 'DELETE' });
+}
+
 /** GET /api/access/devices/ — the caller's own approved devices + pending requests
  * (Profile > Devices panel). */
 function listDevices() {
@@ -97,6 +124,10 @@ export {
   logout,
   getCurrentSession,
   changePassword,
+  getWebAuthnRegistrationOptions,
+  registerWebAuthnCredential,
+  uploadProfilePhoto,
+  removeProfilePhoto,
   listDevices,
   getPendingDeviceCount,
   approveDevice,

@@ -779,11 +779,332 @@ through the existing error state.
    correctly, a value round-trips through a full page reload, Allergies
    renders its own distinct two fields — test values cleared back to empty
    afterward.
+
+   **Amended (2026-09-05, advanced Profile page + staff photo upload):** the
+   shared Profile page (`DashboardShell.jsx`'s `ProfilePanel`, opened via the
+   header's profile icon, same component for every role) gained real
+   labeled fields and a profile photo, per the user, who wanted it "more
+   advanced... more professional" than the old two bare lines. New
+   `Staff.photo` (`ImageField`, `upload_to="staff_photos/"`, migration
+   `staff/0006_staff_photo.py`, applied to the real dev database) — local
+   disk storage, confirmed via `AskUserQuestion` ("Local disk for now
+   (recommended for the hackathon)"): fine for local dev/a single demo
+   session, but Render's free-tier disk is ephemeral, so an uploaded photo
+   won't survive a backend redeploy there without swapping in real object
+   storage later (documented on the field's own `help_text` too). New
+   `MEDIA_URL`/`MEDIA_ROOT` in `config/settings.py`, served via
+   `config/urls.py`'s `static()` helper in `DEBUG` only. Self-service
+   `ProfilePhotoView` (`POST` multipart to upload/replace, `DELETE` to
+   remove, `/api/access/profile/photo/`) follows the same
+   any-authenticated-staff-acts-on-themselves pattern as
+   `ChangePasswordView`/`CurrentSessionView`; a shared `_photo_url(request,
+   staff)` helper returns an absolute URL via `request.build_absolute_uri()`
+   so the frontend never needs to know the backend host separately from the
+   API base. `CurrentSessionView` gained `on_call` (previously missing
+   despite `on_duty`/`ward` already being live-read there) and `photo_url`;
+   `StaffSummarySerializer` gained a `photo_url` `SerializerMethodField`
+   (needs `request` in context — added to all 5 call sites in
+   `staff/views.py`: search, create, duty-update, deactivate, reactivate).
+   Frontend: `client.js`'s `request()` now detects a `FormData` body and
+   skips both the JSON `Content-Type` header and `JSON.stringify` so the
+   browser can set its own multipart boundary; `RoleAvatar.jsx` accepts an
+   optional `photoUrl` prop and renders the real photo instead of the
+   cartoon mascot when one exists (patients are unaffected — no `photoUrl`
+   is ever passed for them); `SecurityDashboard.jsx` threads
+   `photoUrl={selected.photo_url}` into both existing `<RoleAvatar>` call
+   sites (Staff/Patients' `ActivityLookupPanel` and `AdminsPanel`) so a
+   Security Officer sees a staff member's or admin's real photo the moment
+   one's uploaded. `ProfilePanel`'s "My profile" card now renders Name,
+   Staff ID, Role, and — clinical roles only (`CLINICAL_ROLES`, matching
+   `NO_WARD_DUTY_ROLES` everywhere else in this app) — a live Duty status
+   line (`On duty (ward)`/`Off duty (ward)`, or just `On duty`/`Off duty`
+   with no ward) and an On call (Yes/No) line, all sourced from
+   `getCurrentSession()` rather than the `staff` prop's login-time snapshot,
+   so the card reflects a change an admin makes elsewhere without needing a
+   fresh login. A new `ProfilePhotoSection` sits at the top of the card —
+   Devices-then-Change-password ordering underneath is unchanged. Along the
+   way, found and fixed a real pre-existing gap unrelated to this feature's
+   own code but which this feature's tests surfaced: `config/settings.py`'s
+   `STORAGES` setting had no `'default'` entry (only `'staticfiles'`), so
+   *any* `ImageField`/`FileField` save raised `InvalidStorageError` — added
+   a `FileSystemStorage` default. 187/187 backend tests passing (4 new,
+   `access.ProfilePhotoViewTests`).
+
+   **Amended again (2026-09-05, same day — horizontal split + click-the-
+   avatar-to-upload):** two follow-up corrections, per the user, to the
+   layout/interaction just shipped above. First, the "My profile" card is
+   now a horizontal split (`.profile-detail-row` in `App.css`): the photo on
+   the left (`.profile-detail-photo`, fixed ~110px), the labeled Name/Staff
+   ID/Role/Duty status/On call fields on the right (`.profile-detail-fields`,
+   flexes to fill the rest) — previously the photo sat in its own row above
+   all the fields, full-width. Second, `ProfilePhotoSection`'s separate
+   "Upload photo"/"Replace photo" button is gone — the avatar image itself
+   is now the trigger: it's wrapped in a `<label className="profile-avatar-
+   upload">` holding the hidden `<input type="file">`, so clicking directly
+   on the avatar opens the file picker (`title` attribute reads "Click to
+   upload a photo" / "Click to change photo" depending on whether one
+   already exists). A small "Remove photo" text link (new `.link-button`
+   style) sits underneath the avatar in the left column, shown only once a
+   photo exists — unchanged in behavior, just restyled to fit the narrower
+   left column. Verified live in-browser against the real doctor account
+   (282828): clicking the avatar directly opens the picker and uploads
+   correctly (no separate button in the way), removal reverts to the
+   cartoon mascot (the fields stay stacked vertically, one per line -- a
+   same-day attempt to lay them out horizontally in a row was tried and
+   immediately reverted, per the user; text within that column is
+   left-aligned, `text-align: left` -- an in-session right-aligned attempt
+   was corrected back to left the same day, per the user). `.profile-detail-
+   row` is an explicit two-column CSS grid (`grid-template-columns: 1fr
+   1fr`), not flex, so the fields column always starts exactly at the
+   card's horizontal midpoint regardless of the photo's own width (per the
+   user: "the details start from the middle of the card"), and
+   `.profile-detail-fields` got a bumped `font-size: 1.1rem` (per the user:
+   "make the text a little bit big"). Verified live in-browser against the
+   real doctor account (282828, who by this point had uploaded their own
+   real profile photo through the running dev server, confirming the
+   feature works end-to-end for a real user, not just my own test
+   uploads) -- fields start at the card's midpoint, text reads noticeably
+   larger, no console errors.
 5. ✅ **Done (2026-08-28).** Emergency Override ("Break the Glass" / BTG in the UI — see the Emergency Override section above for naming and scope decisions). New `POST /api/scoring/emergency-override/` (`scoring.views.EmergencyOverrideView`, `IsClinicalStaff`-gated): takes `{patient_id, reason}` (reason min 10 chars), grants the caller's full role ceiling (`ROLE_CEILINGS[staff.role]`) regardless of the hard gate/score band/Nurse rule, writes an `AccessDecision` row (`decision_type=EMERGENCY_OVERRIDE`; `gate_passed`/`score`/`score_band` now nullable on that model — an override never ran the scoring pipeline, so "not applicable" is more honest than a sentinel score) and an `EMERGENCY_OVERRIDE` Ledger entry (`reason` in `details`). Does not check `contextual.target_patient_id` the way `DecideView` does (must still work if capture/contextual state is missing or itself the reason normal access failed) and does not reinforce the behavioral baseline (an override is by definition an abnormal session). `scoring.views.PatientRecordView` needed no changes — it already treats any non-`ACCESS_DENIED` decision type the same way. Frontend: `ClinicalDashboard.jsx` gained a "Break the Glass" button in the patient-view section (always visible once a patient is selected, not gated behind a denial) that reveals an inline reason textarea before submitting — no native `confirm()` dialog. `SecurityDashboard.jsx` needed no changes (its event-type filter/severity coloring/drill-down already handled `EMERGENCY_OVERRIDE` rows from step 4). 105/105 backend tests passing (8 new); verified end-to-end via direct API calls against the real dev database using the real Admin and doctor accounts (Chrome browser extension wasn't connected for a live UI click-through) — confirmed the full round trip (override → granted all 13 categories → records endpoint returns content → a correctly hash-chained `EMERGENCY_OVERRIDE` Ledger entry with the reason). The temporary QA patient and sessions were deleted afterward; the Ledger entry itself was left in place since it's append-only by design.
 
    **Amended 2026-08-29** (after a live demo surfaced a real gap): added the Doctor rule (see Role → category access above) and BTG's own availability gate (see Emergency Override above). `AccessDecision.nurse_path` renamed to `role_rule_path` (now used by both roles' rule paths; migration `scoring/0003_rename_nurse_path_to_role_rule_path.py`). New `captures/services.py` (`compute_patient_assignment_status`) extracted from `captures.views.TargetPatientView` so both the normal capture flow and BTG's fresh gate check share one implementation instead of two.
 
    **Amended again 2026-08-29** (same-day follow-up, real-world refinement of the above): added `Staff.on_call`/`ContextualCapture.on_call_at_login` (treated as equivalent to on-duty everywhere the Doctor rule/BTG gate check duty status — see Contextual module and Emergency Override above), BTG's `reason_category` field (`clinical_emergency`/`cross_coverage`/`other` — `cross_coverage` self-attests through the off-duty+unconnected block), and Disaster/Mass Casualty Mode (`scoring.DisasterModeEvent`, `scoring.disaster_mode.is_disaster_mode_active()`, `IsAdmin`-gated `POST /api/scoring/disaster-mode/activate|deactivate/`, Admin-dashboard-only `DisasterModePanel` — see Emergency Override above for full scope/reasoning, including why it's audited outside the Security Ledger). Frontend: `ClinicalDashboard.jsx`'s BTG form gained a required category `<select>` above the existing reason textarea; `AdminDashboard.jsx`'s `StaffPanel` gained an "On call" checkbox alongside "On duty".
+5b. ✅ **Done (2026-09-06).** Five hackathon-hardening features, chosen by the
+   user from a full-system review that surfaced six gaps (they picked all but
+   the sixth — demo enrollment data, which is theirs to supply per the
+   Enrollment data rule). Planned via Plan Mode; the three design forks were
+   settled with `AskUserQuestion`. Numbered here as 5b because these harden
+   steps 1–5 rather than extending the build order.
+
+   **(a) Step-up verification — closes a spec/code gap.** CLAUDE.md's band
+   table has said "40–69% → Reduced access **+ step-up verification
+   required**" since step 2, and `ClinicalDashboard.jsx` even printed that
+   sentence to the user, but nothing enforced it: `openPatient()` fetched and
+   rendered records immediately for any non-denied decision. Now real. The
+   second factor is a **separate step-up PIN** (`Staff.step_up_pin_hash`,
+   4–8 digits, hashed with `django.contrib.auth.hashers`, never stored or
+   returned in clear) rather than password re-entry — confirmed via
+   `AskUserQuestion`, on the grounds that re-typing the login password isn't
+   genuinely a second factor. New `AccessDecision.step_up_verified` /
+   `step_up_verified_at` / `step_up_failed_attempts` **are** the audit record
+   for step-up (deliberately not a sixth Ledger event type — the Ledger stays
+   pinned to five). Enforced in `scoring.views.PatientRecordView`, **not just
+   the UI**: that view is what actually hands over record content, so gating
+   only the React screen would leave the API open to a direct call; it now
+   403s with `step_up_required: true` until verified. New
+   `POST /api/scoring/decisions/<id>/step-up/` (`StepUpVerifyView`,
+   `IsClinicalStaff`, scoped to the caller's own session — someone else's
+   decision is a 404, not a 403, so decision IDs can't be probed); three wrong
+   PINs spend the decision and force a re-`/decide/`, and every failure raises
+   a `STEP_UP_FAILED` alert. Admin sets the initial PIN
+   (`POST /api/staff/<id>/step-up-pin/`, rejected for admin/security officer,
+   who never score at all); the staff member changes it themselves from
+   Profile (`POST /api/access/step-up-pin/`), so an admin isn't left knowing
+   someone else's second factor. **Fails closed:** no PIN set means step-up
+   can never succeed and reduced-band records stay hidden — deliberate, but it
+   means PINs must be set before demoing. `StaffSummarySerializer` exposes
+   `has_step_up_pin` (never the hash) so the Admin UI shows who still needs one.
+
+   **(b) Ledger integrity verification — exposing what already existed.**
+   `ledger.verification.verify_chain()` had been implemented and tested since
+   step 3 but was unreachable outside the test suite, which meant the Ledger's
+   entire tamper-evidence property couldn't be shown to anyone. New
+   `GET /api/ledger/verify/` (`LedgerVerifyView`, `IsSecurityOfficer`) returns
+   `{valid, bad_sequence, entries_checked, verified_at}`; computes fresh and
+   persists nothing (same posture as `LedgerEntryExplainView` — a verification
+   result is an observation *about* the Ledger, not part of it).
+   `entries_checked` is counted separately so `verify_chain()`'s already-tested
+   signature stays untouched. Frontend: a "Verify ledger integrity" button
+   beside the Live feed heading (`LedgerVerifyControl` in
+   `SecurityDashboard.jsx`) showing "Chain intact — N entries verified" or
+   "Tampering detected at entry #N".
+
+   **(c) Login brute-force lockout.** There was none at all. New
+   `access.LoginAttempt` (one row per attempt, success or failure, with
+   `ip_address` — not captured anywhere before this). **Lockout state is
+   derived, not stored**: an account is locked while it has
+   `settings.LOGIN_MAX_FAILED_ATTEMPTS` (5) failures inside
+   `LOGIN_LOCKOUT_MINUTES` (15), both env-overridable — so auto-unlock is free
+   (failures age out of the window, no scheduled job), and an admin clearing it
+   early is just deleting those rows. Confirmed via `AskUserQuestion`:
+   auto-expiry *and* admin unlock, specifically so a demo can never be
+   permanently bricked. Checked in `LoginView.post()` **before**
+   `authenticate()`, returning 429 — so a correct password during a lockout is
+   still refused and an attacker who finally guesses right gets no signal.
+   A successful login resets the count. Unknown usernames can lock out too
+   (worth recording in its own right). Crossing the threshold raises a
+   `LOGIN_LOCKOUT` alert. Admin unlock:
+   `POST /api/staff/<id>/unlock/` (`IsAdmin`), logged via the existing
+   `record_admin_action()` with a new `AdminActionLog.Action.STAFF_UNLOCKED`
+   (a new `STEP_UP_PIN_SET` action was added the same day for (a)).
+   `StaffSummarySerializer` exposes `is_locked_out`.
+
+   **(d) Security alerts with an acknowledge workflow — closes the other
+   spec/code gap.** CLAUDE.md's band table has always said sub-40% means
+   "`ACCESS_DENIED`, **security alert triggered**", but a denial only ever
+   wrote a Ledger row that scrolled past in a feed with nothing recording that
+   anyone had reviewed it. New **`alerts` app** (`SecurityAlert`): three types
+   — `ACCESS_DENIED`, `LOGIN_LOCKOUT`, `STEP_UP_FAILED` — each starting
+   unacknowledged, with `acknowledged_at`/`acknowledged_by_staff_id`/
+   `acknowledgement_note`. Confirmed via `AskUserQuestion` (full workflow, not
+   just a visual counter), because logging something nobody reads isn't
+   accountability. Denormalized actor fields, no FK — same reasoning as
+   `ledger.LedgerEntry`/`staff.AdminActionLog`: deleting a staff member must
+   not delete the evidence of what they did; `staff_id` is blank for a lockout
+   against a username matching no account. `ledger_sequence` links a denial
+   alert back to its Ledger entry (a plain int, since that row lives on a
+   different database). Deliberately **not** a sixth Ledger event type and not
+   hash-chained — it's a workflow record, not the access trail; same precedent
+   as `scoring.DisasterModeEvent`. Single writer,
+   `alerts.services.raise_alert()`. Endpoints (`IsSecurityOfficer`):
+   `GET /api/alerts/`, `GET /api/alerts/unacknowledged-count/` (cheap badge
+   poll, mirroring `DevicePendingCountView`), `POST /api/alerts/<id>/acknowledge/`
+   (first acknowledgement wins — re-acknowledging won't overwrite who
+   reviewed it). Frontend: a 5th Security-dashboard destination, **Alerts**,
+   with a red count pill on the nav item (new optional `navItems[].badgeCount`
+   on `DashboardShell`, polled every 25s like the pending-device dot).
+
+   **(e) README + deploy config.** There was no root README at all (judges'
+   first document) and no deploy config despite Render+Vercel being the chosen
+   hosting since step 1 — `gunicorn`/`whitenoise` sat in `requirements.txt`
+   with nothing invoking them. Added `README.md` (the problem, the Nigerian
+   legal mapping, how decisions are made, architecture, local setup, tests,
+   deployment, and a scripted demo path), `render.yaml` (both databases, and a
+   build step that migrates **both** connections — `migrate` alone would leave
+   the ledger tables missing), `frontend/vercel.json` (SPA rewrite; this app
+   routes via `useState`, not a router), and replaced `frontend/README.md`'s
+   untouched Vite boilerplate.
+
+   228/228 backend tests passing (41 new across `ledger`/`access`/`scoring`/
+   `staff`/`alerts`); migrations applied to the real dev database (default
+   connection — only the `ledger` app needs `--database=ledger`).
+
+   **Verified live** (Claude-in-Chrome, real security-officer account
+   `SS0001`): the Verify-integrity button reported "Chain intact — 16 entries
+   verified" against the real ledger database; a deliberate lockout (5 failed
+   logins against a deliberately non-existent username, so no real account was
+   locked) returned 429 with the remaining-minutes message, raised a
+   `LOGIN_LOCKOUT` alert that appeared on the new Alerts page with the red
+   nav-badge count, rendered correctly as "Unknown account" (no matching
+   `Staff` row), and acknowledged cleanly — moving out of "Needs review" and
+   into "Reviewed by: SS0001" with the note attached. The QA login attempts
+   and that alert were deleted from the dev database afterwards. No console
+   errors. **Not yet verified in-browser** (needs the admin and clinical
+   logins, which weren't the account signed in at the time): the Admin Staff
+   panel's Unlock/Set-step-up-PIN controls, the Profile page's Step-up PIN
+   section, and the clinical dashboard's PIN challenge — all covered by
+   backend tests, but the UI itself is unconfirmed.
+
+   **Amended the same day (2026-09-06, step-up PIN replaced with device
+   biometrics + peer-assist):** a few hours after 5b(a) shipped, the user
+   asked to replace the typed PIN with the device's own Face ID/fingerprint/
+   Windows Hello, "depending on the verification method of the device of the
+   user." Confirmed via two `AskUserQuestion` rounds: the PIN is **retired
+   entirely**, not kept as a fallback (Break the Glass already covers the
+   "nobody's available at all" edge case); the fallback for a device with no
+   biometric (or before one's enrolled) is **any other logged-in clinical
+   colleague vouching from their own device**, unrestricted by role or duty
+   status.
+
+   The mechanism is **WebAuthn** — a website never sees the fingerprint or
+   face, only a cryptographic proof the device's own biometric unlock
+   approved it. Explicitly a different thing from the planned MedGuard
+   Identity bonus layer (patient identification via a scanned fingerprint,
+   SourceAFIS) — no overlap. Libraries: backend `webauthn` (py_webauthn,
+   Duo Labs, pinned `3.0.0`), frontend `@simplewebauthn/browser` (`13.3.0`)
+   — sibling projects speaking the same JSON shapes, confirmed by reading
+   the installed packages' own source directly rather than trusting
+   recalled API shapes (the docs site didn't resolve to version-pinned
+   pages during research).
+
+   **What was retired:** `Staff.step_up_pin_hash` (migration
+   `staff/0008_remove_staff_step_up_pin_hash_and_more.py`),
+   `StaffStepUpPinView`/`ChangeStepUpPinView` and their serializers/URLs,
+   the PIN-checking body of the old `StepUpVerifyView`, `has_step_up_pin` on
+   `StaffSummarySerializer`, and the Admin dashboard's "Set/Reset step-up
+   PIN" button. `AdminActionLog.Action.STEP_UP_PIN_SET` stays defined but
+   unused (no migration needed to drop a choice; no real PIN was ever set,
+   so nothing historical is lost). **What survived unchanged:**
+   `AccessDecision.step_up_verified`/`step_up_verified_at`/
+   `step_up_failed_attempts` and `PatientRecordView`'s gate — that
+   bookkeeping never cared *how* verification happened, only *whether*.
+
+   **New in `access`:** `AccessSession.webauthn_challenge`/
+   `webauthn_challenge_created_at` (the pending challenge between a
+   ceremony's two calls, stored on the session row rather than Django's
+   cache framework — `LocMemCache` is per-process and wouldn't survive
+   Render's multi-worker gunicorn); `WebAuthnCredential` (one per device,
+   `OneToOneField(Device)` — being an *approved* device and being
+   *biometric-enrolled* are related but distinct facts); shared
+   `access.services.webauthn_challenge_is_fresh()`/`clear_webauthn_challenge()`
+   (both `access.views` and `scoring.views` need the identical freshness
+   check, since both ceremonies use the same session field);
+   `POST /api/access/webauthn/registration-options/` +
+   `.../register/` (self-service enrollment, `IsClinicalStaff`,
+   `AuthenticatorSelectionCriteria(authenticator_attachment=PLATFORM)` is
+   what restricts to the device's own built-in authenticator rather than
+   also offering a USB security key).
+
+   **New in `scoring`:** `StepUpAssistRequest` (`decision`/`requesting_staff`/
+   `resolved_by` FKs, `pending`/`approved`/`declined`) — lives here rather
+   than mirroring `PendingDeviceRequest`'s home in `access`, because it must
+   FK to `AccessDecision` and `access` sits *before* `scoring` in this
+   project's one-way app dependency order. `POST /decisions/<id>/step-up/
+   webauthn/options/` + `.../verify/` (mirrors the access-app registration
+   pair; a genuine cryptographic failure — bad signature, sign-count
+   regression — raises a `STEP_UP_FAILED` alert same as 3 wrong PINs used
+   to, but a plain browser-side cancel never reaches the server at all, so
+   it never alerts). `POST /decisions/<id>/step-up/assist/request/` +
+   `GET /step-up/assist-requests/` (every *other* clinical colleague's
+   pending requests — deliberately not scoped to "your own account" the way
+   `DeviceListView` is) + `.../approve/` + `.../decline/` (decline also
+   raises `STEP_UP_FAILED` — unlike a timeout, a colleague explicitly
+   refusing to vouch is worth a security officer's attention). The
+   requester's own "waiting for a colleague" screen polls the **existing**
+   `PatientRecordView` rather than a new endpoint, since it already starts
+   returning 200 the instant `step_up_verified` flips.
+
+   New settings `WEBAUTHN_RP_ID`/`WEBAUTHN_RP_NAME`/`WEBAUTHN_ORIGIN`
+   (default to `localhost` locally). **The one deployment detail that's easy
+   to get wrong:** these must match the **frontend's** real domain (Vercel)
+   in production, not this backend's Render domain — WebAuthn ties a
+   credential to the origin the *browser* believes it's on, even though
+   verification happens server-side. `render.yaml` ships obvious
+   placeholder values on purpose so a first deploy can't silently ship a
+   broken value unnoticed.
+
+   Frontend: `DashboardShell.jsx`'s Profile-page `StepUpPinPanel` became
+   `StepUpEnrollmentPanel` (checks
+   `platformAuthenticatorIsAvailable()` before even offering the button, so
+   a device with no biometric hardware sees an explanation instead of a
+   button that would just fail). `ClinicalDashboard.jsx`'s PIN form became
+   two paths shown together — "Verify with your device" (only shown when
+   `session.has_webauthn_credential` for *this* device, itself a new field
+   on `CurrentSessionView`) and "Ask a colleague to verify" (always
+   available) — plus a new `AssistRequestsBanner` at the top of the
+   dashboard, independent of whatever patient is open, polling every 10s for
+   *other* colleagues' pending requests (matching the pending-device-badge
+   cadence already used elsewhere). The Admin dashboard's Staff panel lost
+   its PIN button entirely — nothing left for an admin to do here, since
+   enrollment is unavoidably self-service.
+
+   234/234 backend tests passing (rewrote the PIN-specific tests into
+   `access.WebAuthnRegistrationTests`, `scoring.StepUpVerificationTests`, and
+   a new `scoring.StepUpAssistTests` — real biometric ceremonies can't be
+   produced in a test, so `verify_registration_response`/
+   `verify_authentication_response` are mocked, same convention already
+   used for `ledger.gemini.explain_entry`; the colleague-assist flow is
+   fully real, no mocking needed). `npm run lint` clean. Confirmed the app
+   loads with no console errors, but **could not verify the authenticated
+   screens live** this round — the session active earlier in this work
+   session had logged out by the time the code was ready, and only one real
+   clinical account (`282828`) exists in the dev database, which isn't
+   enough to exercise the colleague-assist flow (needs two). Also
+   **structurally unable to verify the real biometric prompt itself** via
+   browser automation regardless of login state — same category of
+   limitation as a native file-picker dialog — that part needs the user's
+   own physical device.
 6. Offline Mode (wraps steps 1–5)
 7. Bonus: MedGuard Identity — fingerprint matching, emergency/offline lookup only
 

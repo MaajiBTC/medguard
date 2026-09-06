@@ -68,11 +68,74 @@ class AccessDecision(models.Model):
     role_rule_path = models.CharField(max_length=32, blank=True, default="")
     factor_breakdown = models.JSONField(default=dict, blank=True)
 
+    # Step-up verification (added 2026-09-06) -- CLAUDE.md's band table has
+    # always required it for the 40-69% REDUCED_ACCESS band, but nothing
+    # enforced it until now. These three fields ARE the audit record for
+    # step-up: deliberately not a sixth Ledger event type (the Ledger is
+    # pinned to five), and they live alongside the decision they gate rather
+    # than in a separate table, since they describe this one decision.
+    #
+    # Mechanism-agnostic on purpose: originally flipped by a typed PIN, now by
+    # either device biometrics (WebAuthn, StepUpWebAuthnVerifyView) or a
+    # colleague vouching (StepUpAssistRequest below) -- these fields only
+    # track *whether* a decision has been step-up-verified, never *how*.
+    #
+    # Only meaningful when decision_type == REDUCED_ACCESS; every other band
+    # ignores them (see scoring.views.PatientRecordView).
+    step_up_verified = models.BooleanField(default=False)
+    step_up_verified_at = models.DateTimeField(null=True, blank=True)
+    step_up_failed_attempts = models.PositiveSmallIntegerField(default=0)
+
     def __str__(self):
         return (
             f"AccessDecision(session={self.session_id}, patient={self.patient_id}, "
             f"{self.decision_type}, score={self.score:.1f})"
         )
+
+
+class StepUpAssistRequest(models.Model):
+    """A colleague-vouches request (added 2026-09-06) -- the fallback path
+    for step-up verification on a device with no fingerprint/Face ID/Windows
+    Hello, or before the staff member has enrolled theirs. Mirrors
+    access.PendingDeviceRequest's request -> poll/list -> approve/reject
+    shape, but lives here rather than in `access` because it must FK to
+    AccessDecision, and `access` sits *before* `scoring` in this project's
+    one-way app dependency order (config/settings.py) -- access can't import
+    from scoring.
+
+    Unlike device approval (only the account's own primary-device owner can
+    approve), this is a shared queue: any other logged-in clinical staff
+    member can approve, per the user's explicit choice. `approved_by` is a
+    real FK (not denormalized) since, unlike the Ledger/alerts, this lives on
+    the same default database throughout and isn't a tamper-evident trail.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        DECLINED = "declined", "Declined"
+
+    decision = models.ForeignKey(
+        AccessDecision, on_delete=models.CASCADE, related_name="assist_requests"
+    )
+    requesting_staff = models.ForeignKey(
+        "staff.Staff", on_delete=models.CASCADE, related_name="step_up_assist_requests_made"
+    )
+    # Whoever approved OR declined this request -- named for "who resolved
+    # it" rather than "approved_by" since it's set either way.
+    resolved_by = models.ForeignKey(
+        "staff.Staff", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="step_up_assist_requests_resolved",
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-requested_at"]
+
+    def __str__(self):
+        return f"StepUpAssistRequest(decision={self.decision_id}, {self.status})"
 
 
 class DisasterModeEvent(models.Model):

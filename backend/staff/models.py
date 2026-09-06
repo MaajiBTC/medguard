@@ -72,6 +72,17 @@ class Staff(models.Model):
             "availability gate (see scoring app, added 2026-08-29). Never computed."
         ),
     )
+    photo = models.ImageField(
+        upload_to="staff_photos/",
+        blank=True,
+        null=True,
+        help_text=(
+            "Self-uploaded profile photo (added 2026-09-05, per the user). Local disk "
+            "storage -- fine for local dev/a single demo session, but Render's free "
+            "tier disk is ephemeral, so this won't survive a backend redeploy there "
+            "without swapping in real object storage later."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -108,6 +119,15 @@ class AdminActionLog(models.Model):
         STAFF_DEACTIVATED = "staff_deactivated", "Deactivated"
         STAFF_REACTIVATED = "staff_reactivated", "Reactivated"
         STAFF_DELETED = "staff_deleted", "Deleted"
+        # Added 2026-09-06 alongside login lockout -- clearing someone's lock
+        # early is an admin acting on a staff account, so it belongs in the
+        # same lifecycle trail as the four above.
+        STAFF_UNLOCKED = "staff_unlocked", "Unlocked"
+        # Added 2026-09-06, retired the same day when step-up moved to device
+        # biometrics + peer-assist (self-service enrollment, no admin action
+        # left to log). Left defined rather than migrated away -- no real PIN
+        # was ever set, so there's no historical data at stake either way.
+        STEP_UP_PIN_SET = "step_up_pin_set", "Step-up PIN set (retired)"
 
     actor_staff_id = models.CharField(max_length=64)
     actor_full_name = models.CharField(max_length=255)
