@@ -870,6 +870,30 @@ through the existing error state.
    **Amended 2026-08-29** (after a live demo surfaced a real gap): added the Doctor rule (see Role → category access above) and BTG's own availability gate (see Emergency Override above). `AccessDecision.nurse_path` renamed to `role_rule_path` (now used by both roles' rule paths; migration `scoring/0003_rename_nurse_path_to_role_rule_path.py`). New `captures/services.py` (`compute_patient_assignment_status`) extracted from `captures.views.TargetPatientView` so both the normal capture flow and BTG's fresh gate check share one implementation instead of two.
 
    **Amended again 2026-08-29** (same-day follow-up, real-world refinement of the above): added `Staff.on_call`/`ContextualCapture.on_call_at_login` (treated as equivalent to on-duty everywhere the Doctor rule/BTG gate check duty status — see Contextual module and Emergency Override above), BTG's `reason_category` field (`clinical_emergency`/`cross_coverage`/`other` — `cross_coverage` self-attests through the off-duty+unconnected block), and Disaster/Mass Casualty Mode (`scoring.DisasterModeEvent`, `scoring.disaster_mode.is_disaster_mode_active()`, `IsAdmin`-gated `POST /api/scoring/disaster-mode/activate|deactivate/`, Admin-dashboard-only `DisasterModePanel` — see Emergency Override above for full scope/reasoning, including why it's audited outside the Security Ledger). Frontend: `ClinicalDashboard.jsx`'s BTG form gained a required category `<select>` above the existing reason textarea; `AdminDashboard.jsx`'s `StaffPanel` gained an "On call" checkbox alongside "On duty".
+
+   **Amended a third time (2026-09-08, hide the button once there's nothing
+   left for it to do):** per the user, the BTG button was showing even when
+   it made no sense to — once a session already had full role-permitted
+   access (`STANDARD_ACCESS`/`AUDITED_DEVIATION`, both grant the complete
+   role ceiling per the Scoring Engine's band table) or had already used
+   BTG for this patient (`EMERGENCY_OVERRIDE`). `ClinicalDashboard.jsx` now
+   derives `hideBreakGlass` (`decision` exists and its `decision_type` is
+   one of those three) and hides the whole `override-control` block when
+   true — `REDUCED_ACCESS`, `ACCESS_DENIED`, and no-decision-yet all still
+   show it, since those are exactly the cases BTG exists to rescue. This is
+   a frontend-only simplification, not a backend security change — CLAUDE.md
+   still requires the override endpoint itself to remain "always available
+   regardless of score or role match"; `EmergencyOverrideView` is untouched
+   and would still grant access if called directly. Verified live in-browser
+   against the real doctor account (`282828`) and the one real patient: a
+   genuine 60% score landed in `REDUCED_ACCESS` and correctly still showed
+   the button; triggering a real Break the Glass (`clinical_emergency`, a
+   real reason) granted all 13 categories and correctly made the button
+   disappear afterward, with no console errors. That real
+   `EMERGENCY_OVERRIDE` decision and its Ledger entry were left in place
+   (same reasoning as step 5's original entry above — the Ledger is
+   append-only by design and this was a genuine audited event, not
+   fabricated test data).
 5b. ✅ **Done (2026-09-06).** Five hackathon-hardening features, chosen by the
    user from a full-system review that surfaced six gaps (they picked all but
    the sixth — demo enrollment data, which is theirs to supply per the
@@ -1105,6 +1129,28 @@ through the existing error state.
    browser automation regardless of login state — same category of
    limitation as a native file-picker dialog — that part needs the user's
    own physical device.
+
+   **Follow-up live verification (2026-09-07):** once the user logged back
+   in as the real doctor account (`282828`), picked the session up and
+   confirmed the parts that were previously unverified. Profile page: the
+   new "Step-up verification" section sits correctly between Devices and
+   Change password, and — since this particular machine has no platform
+   authenticator configured — correctly showed the no-hardware explanation
+   rather than a button that would just fail (`platformAuthenticatorIsAvailable()`
+   returning `false` renders as intended). Clinical dashboard: opening the
+   one real patient produced a genuine, unprompted 50% score landing in the
+   REDUCED_ACCESS band — not a constructed test case — and correctly showed
+   only "Ask a colleague to verify" (no biometric on this device), with the
+   exact explanatory copy and Break the Glass still available underneath,
+   untouched. Clicking it created a real `StepUpAssistRequest` row
+   (confirmed directly against the dev database), flipped the UI to the
+   "Waiting for a colleague…" state, and Cancel correctly reverted it. No
+   console errors throughout. The test assist request was deleted
+   afterward; the real `AccessDecision` it hung off is genuine scoring
+   output, not test data, so it was left alone. Still outstanding, and
+   still needs a second real clinical account or the user's own device:
+   the colleague-approve/decline side of the assist flow, and the real
+   biometric ceremony itself.
 6. Offline Mode (wraps steps 1–5)
 7. Bonus: MedGuard Identity — fingerprint matching, emergency/offline lookup only
 

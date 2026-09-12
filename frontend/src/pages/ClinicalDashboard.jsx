@@ -18,6 +18,10 @@ import { useContextualCapture } from '../capture/contextual/useContextualCapture
 import DashboardShell, { PatientsIcon, SearchIcon } from './DashboardShell';
 
 const ASSIGNMENT_ROLES = new Set(['doctor', 'nurse']);
+// Decision types where the session already has everything Break the Glass
+// could possibly add -- STANDARD_ACCESS/AUDITED_DEVIATION already grant full
+// role-permitted access, and EMERGENCY_OVERRIDE means it was already used.
+const FULL_ACCESS_DECISION_TYPES = new Set(['STANDARD_ACCESS', 'AUDITED_DEVIATION', 'EMERGENCY_OVERRIDE']);
 // Any-other-colleague's pending assist requests -- same cadence
 // DashboardShell already uses for the pending-device badge.
 const ASSIST_BANNER_POLL_MS = 10000;
@@ -269,6 +273,13 @@ function ClinicalDashboard({ staff, onLogout }) {
     }
   };
 
+  // Break the Glass makes no sense once the session already has everything
+  // it's going to get: STANDARD_ACCESS/AUDITED_DEVIATION already grant full
+  // role-permitted access, and EMERGENCY_OVERRIDE means BTG was already used
+  // for this session/patient. Only REDUCED_ACCESS and ACCESS_DENIED (or no
+  // decision yet) leave something for it to actually rescue.
+  const hideBreakGlass = decision && FULL_ACCESS_DECISION_TYPES.has(decision.decision_type);
+
   return (
     <DashboardShell
       navItems={[{ key: 'patients', label: 'Patients', icon: <PatientsIcon /> }]}
@@ -446,71 +457,73 @@ function ClinicalDashboard({ staff, onLogout }) {
             </p>
           )}
 
-          <div className="override-control">
-            {!overrideOpen ? (
-              <button type="button" className="override-button" onClick={() => setOverrideOpen(true)}>
-                Break the Glass (Emergency Override)
-              </button>
-            ) : (
-              <form className="override-form" onSubmit={handleEmergencyOverride}>
-                <label className="form-label" htmlFor="override-category">
-                  Reason category (required)
-                  <select
-                    id="override-category"
-                    className="form-input"
-                    value={overrideCategory}
-                    onChange={(e) => setOverrideCategory(e.target.value)}
-                    required
-                  >
-                    <option value="" disabled>
-                      Select a reason category…
-                    </option>
-                    <option value="clinical_emergency">Clinical emergency / direct patient care</option>
-                    <option value="cross_coverage">Cross-coverage (covering an unrostered shift)</option>
-                    <option value="other">Other</option>
-                  </select>
-                </label>
-                <label className="form-label" htmlFor="override-reason">
-                  Reason detail (required, min 10 characters)
-                  <textarea
-                    id="override-reason"
-                    className="form-input"
-                    value={overrideReason}
-                    onChange={(e) => setOverrideReason(e.target.value)}
-                    rows={3}
-                    required
-                    minLength={10}
-                  />
-                </label>
-                {overrideError && (
-                  <p role="alert" className="dev-error">
-                    {overrideError.detail || 'Could not grant emergency access.'}
-                  </p>
-                )}
-                <div className="button-row">
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={overrideSubmitting || !overrideCategory || overrideReason.trim().length < 10}
-                  >
-                    {overrideSubmitting ? 'Granting…' : 'Confirm Break the Glass'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      setOverrideOpen(false);
-                      setOverrideCategory('');
-                      setOverrideReason('');
-                      setOverrideError(null);
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
+          {!hideBreakGlass && (
+            <div className="override-control">
+              {!overrideOpen ? (
+                <button type="button" className="override-button" onClick={() => setOverrideOpen(true)}>
+                  Break the Glass (Emergency Override)
+                </button>
+              ) : (
+                <form className="override-form" onSubmit={handleEmergencyOverride}>
+                  <label className="form-label" htmlFor="override-category">
+                    Reason category (required)
+                    <select
+                      id="override-category"
+                      className="form-input"
+                      value={overrideCategory}
+                      onChange={(e) => setOverrideCategory(e.target.value)}
+                      required
+                    >
+                      <option value="" disabled>
+                        Select a reason category…
+                      </option>
+                      <option value="clinical_emergency">Clinical emergency / direct patient care</option>
+                      <option value="cross_coverage">Cross-coverage (covering an unrostered shift)</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </label>
+                  <label className="form-label" htmlFor="override-reason">
+                    Reason detail (required, min 10 characters)
+                    <textarea
+                      id="override-reason"
+                      className="form-input"
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      rows={3}
+                      required
+                      minLength={10}
+                    />
+                  </label>
+                  {overrideError && (
+                    <p role="alert" className="dev-error">
+                      {overrideError.detail || 'Could not grant emergency access.'}
+                    </p>
+                  )}
+                  <div className="button-row">
+                    <button
+                      type="submit"
+                      className="btn-primary"
+                      disabled={overrideSubmitting || !overrideCategory || overrideReason.trim().length < 10}
+                    >
+                      {overrideSubmitting ? 'Granting…' : 'Confirm Break the Glass'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => {
+                        setOverrideOpen(false);
+                        setOverrideCategory('');
+                        setOverrideReason('');
+                        setOverrideError(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
 
           {records && (
             <div className="category-list">
