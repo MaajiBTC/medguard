@@ -4,6 +4,7 @@ import './App.css';
 import { getCurrentSession, logout as apiLogout } from './api/auth';
 import { getToken, setToken } from './api/client';
 import { useBehavioralCapture } from './capture/behavioral/useBehavioralCapture';
+import { ensureSigningKeyRegistered } from './offline/syncManager';
 import AdminDashboard from './pages/AdminDashboard';
 import ClinicalDashboard from './pages/ClinicalDashboard';
 import LoginPage from './pages/LoginPage';
@@ -37,6 +38,20 @@ function AuthenticatedShell({ initialStaff, onLoggedOut }) {
         onLoggedOut();
       });
   }, [staff, onLoggedOut]);
+
+  // Offline Mode (build step 6) -- registers this device's signing key once
+  // per device (clinical roles only -- RegisterSyncKeyView needs an
+  // approved Device row, which admin/security_officer never get). Safe to
+  // call on every login: getOrCreateSigningKeyPair() reuses whatever key
+  // pair is already in this device's IndexedDB rather than generating a
+  // new one, so this just re-confirms the same public key server-side.
+  useEffect(() => {
+    if (!staff || !CLINICAL_ROLES.has(staff.role)) return;
+    ensureSigningKeyRegistered().catch(() => {
+      // Best-effort -- if this fails (offline right at login, say), Offline
+      // Mode simply can't sync yet until it succeeds on a later login.
+    });
+  }, [staff]);
 
   const handleLogout = useCallback(async () => {
     flushNow();

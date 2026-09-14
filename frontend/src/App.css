@@ -1150,6 +1150,14 @@ button {
   color: #9d2f3d;
 }
 
+/* Offline Mode (build step 6) -- header status pill, shown while
+   disconnected or while queued offline events haven't synced yet. */
+.badge-offline {
+  background: #fde3c4;
+  color: #8a5a12;
+  margin-left: 10px;
+}
+
 /* Buttons */
 
 .btn-primary,
@@ -1373,6 +1381,18 @@ button {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px;
+}
+
+/* Clinical dashboard's "Assigned to you" list, moved below the ward tiles
+   (added 2026-09-12, per the user) -- shown by default alongside the tiles,
+   not gated behind picking a ward first. */
+.assigned-to-you {
+  margin-top: 24px;
+}
+
+.assigned-to-you h3 {
+  margin: 0 0 12px;
+  color: var(--plum-deep);
 }
 
 /* No sub-breakdown here (just a label + count), so it stays a single solid

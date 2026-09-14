@@ -14,6 +14,11 @@ class DeviceSerializer(serializers.ModelSerializer):
         fields = ["id", "device_type", "user_agent", "is_primary", "approved_at", "last_seen_at"]
 
 
+class RegisterSyncKeySerializer(serializers.Serializer):
+    device_id = serializers.CharField(max_length=255)
+    public_key = serializers.CharField()
+
+
 class PendingDeviceRequestSerializer(serializers.ModelSerializer):
     """Deliberately excludes poll_token/session_token -- this is what the account
     owner's own Devices panel sees, and neither value is theirs to know: poll_token

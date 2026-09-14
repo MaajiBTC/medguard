@@ -3,6 +3,7 @@ and `ledger` get their own temporary test databases) -- no real enrollment data,
 CLAUDE.md.
 """
 
+import datetime
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -58,6 +59,34 @@ class RecordEventChainTests(TestCase):
         ok, bad_sequence = verify_chain()
         self.assertTrue(ok)
         self.assertIsNone(bad_sequence)
+
+    def test_explicit_non_utc_occurred_at_still_verifies(self):
+        """Regression test for a real bug (found 2026-09-14 via Offline Mode
+        live testing): a caller passing an explicit, non-UTC-offset but
+        timezone-AWARE `occurred_at` (e.g. DRF's DateTimeField, which
+        converts an incoming timestamp to Django's configured local
+        timezone -- settings.TIME_ZONE is 'Africa/Lagos', +01:00) used to
+        get hashed using that local-offset ISO string, but the SAME field
+        read back from the database later always comes back in UTC --
+        two different valid string representations of the same instant,
+        so the stored entry_hash would never re-verify. record_event() now
+        normalizes occurred_at to UTC once, before it's used for both the
+        hash and the saved row, so this can't happen regardless of what
+        timezone the caller's datetime happens to carry."""
+        staff = self._make_staff()
+        lagos_offset = timezone.get_fixed_timezone(60)  # +01:00, matching settings.TIME_ZONE
+        occurred_at = timezone.now().astimezone(lagos_offset)
+
+        entry = record_event(
+            event_type=LedgerEntry.EventType.REDUCED_ACCESS, staff=staff, occurred_at=occurred_at
+        )
+
+        ok, bad_sequence = verify_chain()
+        self.assertTrue(ok)
+        self.assertIsNone(bad_sequence)
+        # The saved value is the same instant, just re-expressed in UTC.
+        self.assertEqual(entry.occurred_at, occurred_at)
+        self.assertEqual(entry.occurred_at.utcoffset(), datetime.timedelta(0))
 
     def test_tampering_via_raw_update_is_detected(self):
         staff = self._make_staff()

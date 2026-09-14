@@ -480,6 +480,67 @@ class BaselineReinforcementAndAPITests(ScoringTestBase):
             self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
 
+class MyBaselineViewTests(APITestCase):
+    """Offline Mode (build step 6) -- the self-service baseline snapshot the
+    frontend caches for offline scoring. See offline_sync app for the sync
+    side of this feature."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(user=user, staff_id=staff_id, full_name=username, role=role)
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_creates_empty_baseline_on_first_call(self):
+        _staff, token = self._login("docBaseline1", "pw-baseline-1", "STF-BL1", Staff.Role.DOCTOR)
+        resp = self.client.get("/api/scoring/my-baseline/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["sample_count"], 0)
+        self.assertEqual(resp.data["keystroke_stats"], {})
+        self.assertIn("disaster_mode_active", resp.data)
+        self.assertFalse(resp.data["disaster_mode_active"])
+
+    def test_reflects_reinforced_baseline(self):
+        user = User.objects.create_user(username="docBaseline2", password="pw-baseline-2")
+        staff = Staff.objects.create(
+            user=user, staff_id="STF-BL2", full_name="docBaseline2", role=Staff.Role.DOCTOR, on_duty=True
+        )
+        login = self.client.post(
+            "/api/access/login/",
+            {"username": "docBaseline2", "password": "pw-baseline-2", "device_id": "device-STF-BL2", "device_type": "desktop"},
+            format="json",
+        )
+        token = login.data["token"]
+        patient = Patient.objects.create(hospital_number="HN-BL2", full_name="P")
+        self.client.post(
+            "/api/captures/contextual/target-patient/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+        self.client.post("/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token))
+
+        resp = self.client.get("/api/scoring/my-baseline/", **self._auth(token))
+        self.assertEqual(resp.data["sample_count"], 1)
+        self.assertIn(f"device-STF-BL2", resp.data["known_device_ids"])
+
+    def test_non_clinical_role_forbidden(self):
+        _staff, token = self._login("adminBaseline", "pw-baseline-3", "STF-BL3", Staff.Role.ADMIN)
+        resp = self.client.get("/api/scoring/my-baseline/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unauthenticated_rejected(self):
+        resp = self.client.get("/api/scoring/my-baseline/")
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
 class PatientRecordViewTests(APITestCase):
     """Exercises /api/scoring/patients/<id>/records/, which is only reachable after a
     decision already exists (same precedent DecideView sets for target-patient)."""

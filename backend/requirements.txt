@@ -12,3 +12,4 @@ whitenoise==6.9.0
 requests==2.34.2
 Pillow==12.3.0
 webauthn==3.0.0
+cryptography==50.0.1

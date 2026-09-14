@@ -885,3 +885,52 @@ class DeviceManagementViewTests(APITestCase):
             f"/api/access/devices/{other_device.id}/remove/", **self._auth_header()
         )
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class RegisterSyncKeyViewTests(APITestCase):
+    """Offline Mode (build step 6) -- registering a device's signing public
+    key. See offline_sync/tests.py for the actual sync-batch verification
+    that depends on this having happened first."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="drSync", password="pw-sync-123")
+        self.staff = Staff.objects.create(
+            user=self.user, staff_id="STF-600", full_name="Dr Sync", role=Staff.Role.DOCTOR
+        )
+        login = self.client.post(
+            "/api/access/login/",
+            {"username": "drSync", "password": "pw-sync-123", "device_id": "sync-device-1", "device_type": "desktop"},
+            format="json",
+        )
+        self.token = login.data["token"]
+
+    def _auth_header(self):
+        return {"HTTP_AUTHORIZATION": f"Bearer {self.token}"}
+
+    def test_registers_key_on_own_device(self):
+        resp = self.client.post(
+            "/api/access/devices/register-signing-key/",
+            {"device_id": "sync-device-1", "public_key": "ZmFrZS1wdWJsaWMta2V5"},
+            format="json",
+            **self._auth_header(),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        device = Device.objects.get(staff=self.staff, device_id="sync-device-1")
+        self.assertEqual(device.sync_public_key, "ZmFrZS1wdWJsaWMta2V5")
+
+    def test_unknown_device_is_404(self):
+        resp = self.client.post(
+            "/api/access/devices/register-signing-key/",
+            {"device_id": "never-logged-in-device", "public_key": "ZmFrZQ=="},
+            format="json",
+            **self._auth_header(),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_unauthenticated_rejected(self):
+        resp = self.client.post(
+            "/api/access/devices/register-signing-key/",
+            {"device_id": "sync-device-1", "public_key": "ZmFrZQ=="},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)

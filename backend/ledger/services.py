@@ -4,6 +4,7 @@ calls into this rather than touching LedgerEntry.objects.create() directly, so t
 chain-linking logic lives in exactly one place.
 """
 
+import datetime
 import hashlib
 import json
 
@@ -41,7 +42,20 @@ def record_event(*, event_type, staff, patient=None, session=None, details=None,
     ForeignKey to them.
     """
     details = details or {}
-    occurred_at = occurred_at or timezone.now()
+    # Normalized to UTC here, once, before it's used for BOTH the hash and
+    # the saved row: any timezone-aware datetime represents the same
+    # instant regardless of its offset, but _compute_entry_hash's
+    # isoformat()-based payload is a STRING, so two equally-valid
+    # representations of the same instant (e.g. "+01:00" vs "+00:00")
+    # would hash differently. Only ever surfaced for an explicitly-passed
+    # occurred_at (offline_sync backdating a queued event) -- the default
+    # path already always used timezone.now(), which is already UTC.
+    # Found via a real hash-mismatch bug: a value arriving through DRF's
+    # DateTimeField gets converted to Django's configured local timezone
+    # (settings.TIME_ZONE) at parse time, but the same field read back
+    # from the database later comes back in UTC -- two different strings,
+    # same instant, different hash, without this normalization.
+    occurred_at = (occurred_at or timezone.now()).astimezone(datetime.timezone.utc)
 
     with transaction.atomic(using="ledger"):
         last = LedgerEntry.objects.using("ledger").select_for_update().order_by("-sequence").first()

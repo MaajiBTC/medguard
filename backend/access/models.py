@@ -67,6 +67,14 @@ class Device(models.Model):
     approved_at = models.DateTimeField(auto_now_add=True)
     last_seen_at = models.DateTimeField(auto_now=True)
 
+    # Offline Mode (build step 6, added 2026-09-12): this device's ECDSA
+    # P-256 public key (base64 SPKI), registered once via
+    # RegisterSyncKeyView so the private key never leaves the device.
+    # Blank until the device has actually registered one -- OfflineSyncView
+    # rejects a sync batch from a device with no key here, per CLAUDE.md's
+    # "unsigned/unregistered device batches are rejected at sync."
+    sync_public_key = models.TextField(blank=True, default="")
+
     class Meta:
         ordering = ["-is_primary", "-last_seen_at"]
         constraints = [

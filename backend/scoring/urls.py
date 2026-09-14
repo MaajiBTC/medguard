@@ -34,6 +34,7 @@ urlpatterns = [
         name="step-up-assist-decline",
     ),
     path("patients/<int:patient_id>/records/", views.PatientRecordView.as_view(), name="patient-records"),
+    path("my-baseline/", views.MyBaselineView.as_view(), name="my-baseline"),
     path("disaster-mode/", views.DisasterModeView.as_view(), name="disaster-mode"),
     path("disaster-mode/activate/", views.DisasterModeActivateView.as_view(), name="disaster-mode-activate"),
     path("disaster-mode/deactivate/", views.DisasterModeDeactivateView.as_view(), name="disaster-mode-deactivate"),

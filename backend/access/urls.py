@@ -20,6 +20,11 @@ urlpatterns = [
     path("devices/pending-count/", views.DevicePendingCountView.as_view(), name="device-pending-count"),
     path("devices/<int:device_pk>/remove/", views.DeviceRemoveView.as_view(), name="device-remove"),
     path(
+        "devices/register-signing-key/",
+        views.RegisterSyncKeyView.as_view(),
+        name="device-register-signing-key",
+    ),
+    path(
         "device-requests/<str:poll_token>/poll/",
         views.DeviceRequestPollView.as_view(),
         name="device-request-poll",

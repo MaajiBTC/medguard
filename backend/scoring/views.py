@@ -230,6 +230,39 @@ class EmergencyOverrideView(APIView):
         return Response(AccessDecisionSerializer(decision).data, status=status.HTTP_201_CREATED)
 
 
+class MyBaselineView(APIView):
+    """GET /api/scoring/my-baseline/ -- Offline Mode (build step 6). The
+    caller's own frozen behavioral baseline snapshot plus the current
+    Disaster Mode flag, cached client-side (frontend/src/offline/db.js) so
+    ClinicalDashboard.jsx's offline scoring path (scoringEngine.js) can
+    reproduce compute_access_decision()'s weighted math without a server --
+    see the approved plan's design decision #5: offline decisions read this
+    frozen snapshot and never write one back; Welford reinforcement only
+    happens back online, through the normal /decide/ path.
+
+    Self-service (always request.auth.staff, no staff_id in the URL), same
+    pattern as ChangePasswordView -- there's nothing here a staff member
+    isn't already implicitly trusted with, since it's their own behavioral
+    profile driving their own sessions' scores.
+    """
+
+    permission_classes = [IsClinicalStaff]
+
+    def get(self, request):
+        baseline, _ = BehavioralBaseline.objects.get_or_create(staff=request.auth.staff)
+        return Response(
+            {
+                "sample_count": baseline.sample_count,
+                "keystroke_stats": baseline.keystroke_stats,
+                "mouse_stats": baseline.mouse_stats,
+                "known_device_ids": baseline.known_device_ids,
+                "login_hour_stats": baseline.login_hour_stats,
+                "known_network_segments": baseline.known_network_segments,
+                "disaster_mode_active": is_disaster_mode_active(),
+            }
+        )
+
+
 class DisasterModeView(APIView):
     """GET /api/scoring/disaster-mode/ -- current status. Admin-only, matching the
     Admin-dashboard-only UI for this feature."""

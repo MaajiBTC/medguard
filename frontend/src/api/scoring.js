@@ -28,6 +28,14 @@ function emergencyOverride(patientId, reasonCategory, reason) {
   });
 }
 
+/** GET /api/scoring/my-baseline/ — Offline Mode: the caller's own frozen
+ * behavioral baseline snapshot + the current Disaster Mode flag, cached
+ * client-side (see frontend/src/offline/) so decisions can still be
+ * computed locally when the network drops mid-session. */
+function getMyBaseline() {
+  return request('/scoring/my-baseline/');
+}
+
 /** GET /api/scoring/disaster-mode/ — {active, last_event}. Admin-only. */
 function getDisasterModeStatus() {
   return request('/scoring/disaster-mode/');
@@ -92,6 +100,7 @@ function declineStepUpAssist(requestId) {
 export {
   decide,
   getPatientRecords,
+  getMyBaseline,
   emergencyOverride,
   getStepUpWebAuthnOptions,
   verifyStepUpWebAuthn,

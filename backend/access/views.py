@@ -24,7 +24,12 @@ from staff.models import Staff
 from staff.permissions import IsClinicalStaff
 
 from .models import AccessSession, Device, PendingDeviceRequest, WebAuthnCredential
-from .serializers import ChangePasswordSerializer, DeviceSerializer, PendingDeviceRequestSerializer
+from .serializers import (
+    ChangePasswordSerializer,
+    DeviceSerializer,
+    PendingDeviceRequestSerializer,
+    RegisterSyncKeySerializer,
+)
 from .services import (
     clear_webauthn_challenge,
     create_session,
@@ -311,6 +316,34 @@ class DeviceRemoveView(APIView):
         ).update(is_active=False, ended_at=timezone.now())
         device.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RegisterSyncKeyView(APIView):
+    """POST /api/access/devices/register-signing-key/ -- Offline Mode (build
+    step 6). Self-service, same "acts on the caller's own Device row"
+    pattern as DeviceListView -- {device_id, public_key} where public_key is
+    this device's ECDSA P-256 public key (base64 SPKI), generated and kept
+    client-side (the private key never leaves the device, non-extractable in
+    IndexedDB). Registering it here is what lets OfflineSyncView later trust
+    a signed batch from this device; a device with no key registered here
+    can never sync (CLAUDE.md: "unsigned/unregistered device batches are
+    rejected"). 404, not 403, if this isn't already an approved device for
+    the caller -- same probing-defense pattern used elsewhere in this app.
+    """
+
+    permission_classes = [IsClinicalStaff]
+
+    def post(self, request):
+        serializer = RegisterSyncKeySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        device = get_object_or_404(
+            Device,
+            staff=request.auth.staff,
+            device_id=serializer.validated_data["device_id"],
+        )
+        device.sync_public_key = serializer.validated_data["public_key"]
+        device.save(update_fields=["sync_public_key"])
+        return Response({"detail": "Signing key registered."})
 
 
 class LogoutView(APIView):

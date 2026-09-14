@@ -92,6 +92,10 @@ INSTALLED_APPS = [
     # Security dashboard. Depends on nothing (denormalized fields, no FKs), so it
     # sits at the end of the order above.
     'alerts',
+    # Offline Mode (build step 6, added 2026-09-12) -- merges signed offline
+    # event batches into the Ledger and raises alerts for denials found in
+    # them, so it sits after both of those.
+    'offline_sync',
 ]
 
 MIDDLEWARE = [

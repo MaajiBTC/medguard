@@ -328,7 +328,16 @@ class PatientApiTests(APITestCase):
         self.assertEqual(resp.data["by_ward"]["surgical"], 0)
         self.assertEqual(resp.data["by_ward"]["unassigned"], 1)
 
-    def test_non_admin_cannot_read_patient_summary(self):
-        _staff, token = self._login("clerkSummaryDeniedApi", "pw-patient-api-15", "STF-P914", Staff.Role.CLERK)
+    def test_any_authenticated_staff_can_read_patient_summary(self):
+        """Widened 2026-09-12 for the Clinical dashboard's own ward-browsing
+        tiles -- this endpoint only ever returns aggregate counts, never
+        patient identities, so there's nothing sensitive in opening it up."""
+        Patient.objects.create(hospital_number="HN-P917", full_name="D", ward=Ward.EMERGENCY)
+        _staff, token = self._login("clerkSummaryApi", "pw-patient-api-15", "STF-P914", Staff.Role.CLERK)
         resp = self.client.get("/api/patients/summary/", **self._auth(token))
-        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["by_ward"]["emergency"], 1)
+
+    def test_unauthenticated_cannot_read_patient_summary(self):
+        resp = self.client.get("/api/patients/summary/")
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)

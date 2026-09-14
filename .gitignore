@@ -13,6 +13,8 @@ ledger.sqlite3-journal
 media/
 staticfiles/
 .env
+backend_detached.log
+backend_detached_err.log
 
 # Node / React
 node_modules/

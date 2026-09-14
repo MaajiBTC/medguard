@@ -865,6 +865,138 @@ through the existing error state.
    feature works end-to-end for a real user, not just my own test
    uploads) -- fields start at the card's midpoint, text reads noticeably
    larger, no console errors.
+
+   **Amended (2026-09-12, browse patients by ward, not just search):** the
+   Clinical Dashboard (shared by all 5 clinical roles) previously had exactly
+   one way to find a patient -- free-text search, plus "Assigned to you" for
+   doctors/nurses. Per the user, acting as their own product owner ("how it
+   should suppose to be a doctor dashboard... not only by searching, you can
+   also select ward"), planned via Plan Mode. Rather than inventing new UI,
+   this mirrors `AdminDashboard.jsx`'s `PatientPanel` ward-tile pattern
+   exactly (`.category-grid`/`.category-tile`, already used identically for
+   Staff-by-role and Patients-by-ward there) -- same
+   `selectedWard`/`wardCounts` state shape, same
+   `selectWardCategory`/`backToWards`/`showingWards` logic, same "search
+   scopes to whichever ward you're in" behavior, just without the admin-only
+   Manage/Add-Patient actions. "Search patients" is renamed "Find a patient"
+   since search and ward-browsing are now two entry points into the same
+   list, not separate features.
+
+   One backend permission widened: `GET /api/patients/summary/`
+   (`PatientSummaryView`) was `IsAdmin`-gated, but it only ever returns
+   aggregate ward counts, never patient identities -- same reasoning already
+   used once before to widen `StaffSearchView` from `IsAdmin` to
+   `IsAdminOrSecurityOfficer`. Its `permission_classes` override was removed
+   entirely, falling back to the project default `IsAuthenticated`, so any
+   logged-in staff member (not just Admin) can now read it.
+   `test_non_admin_cannot_read_patient_summary` became
+   `test_any_authenticated_staff_can_read_patient_summary` (now asserting
+   200 + correct counts instead of 403), plus a new
+   `test_unauthenticated_cannot_read_patient_summary` confirming the
+   endpoint still isn't open to the entire internet. Everything else needed
+   zero backend changes -- `GET /api/patients/?q=&ward=` was already
+   ward-filterable and already open to any authenticated staff;
+   `ClinicalDashboard.jsx`'s search just wasn't passing the `ward` argument
+   yet. 26/26 `patients` app tests passing.
+
+   **Real bug found during the user's own live testing, fixed the same
+   day:** after viewing a patient from within a ward's list, clicking "←
+   Back to wards" returned to the ward tiles but left the patient's detail
+   panel (decision/records/step-up/BTG, all of it) still rendered
+   underneath -- `backToWards()` only ever reset the ward-browsing state
+   (`selectedWard`/`query`/`results`), never the separate patient-detail
+   state, since nothing had previously needed to close that panel from
+   outside `openPatient()` itself. New `closePatientDetail()` resets every
+   field `openPatient()` resets when it *opens* a new patient (minus the
+   fields only a live fetch needs), called from `backToWards`,
+   `selectWardCategory`, and `handleSearch` alike -- any action that changes
+   what's shown in the Find-a-patient results area now also closes a stale
+   detail view underneath it, not just the one path the user happened to
+   hit first. Verified live in-browser against the real doctor account
+   (282828) and the one real patient: ward tiles show the correct real
+   count (Surgical Ward: 1), drilling in and clicking View opens a genuine
+   48% reduced-access decision, and clicking "← Back to wards" now returns
+   to a clean tile grid with no leftover panel. No console errors.
+
+   **Amended the same day (2026-09-12, "Assigned to you" moved below the
+   ward tiles):** per the user, this section (doctor/nurse only) moved from
+   its own place above "Find a patient" to directly underneath the
+   `.category-grid` ward tiles, inside that same section's default
+   (`showingWards`) view -- shown by default alongside the tiles, per the
+   user, not only once a ward's picked. Purely a JSX relocation: the
+   `assignedPatients` fetch, its `.map()` row rendering, and the `View`
+   button's call into `openPatient()` are all unchanged, just wrapped in a
+   new `.assigned-to-you` spacing div and rendered one level deeper.
+   Verified live against the real doctor account (282828): since that
+   account genuinely has zero active patient assignments right now, a real
+   (not fabricated) `PatientAssignment` row was created directly against
+   the one real patient specifically to confirm the section's new position
+   renders correctly -- it appeared directly below the ward tiles exactly
+   as intended, no console errors -- then deleted immediately afterward,
+   confirmed back to zero active assignments for that account.
+
+   **Amended a third time the same day (2026-09-12, "Unassigned" tile
+   removed):** per the user, a ward-browsing category inviting anyone to
+   pull up every patient with no ward on file read as an unnecessary
+   temptation toward misuse, not a useful feature -- removed from
+   `ClinicalDashboard.jsx`'s ward-tile grid entirely (the four real wards
+   remain). `handleSearch`/`selectWardCategory`'s `'unassigned'`
+   special-casing (a client-side `!p.ward` filter, since that value never
+   existed as a real backend `ward`) was dead code once the only button
+   that could ever set `selectedWard` to `'unassigned'` was gone, so it was
+   removed too, not just hidden. A patient with no ward is still findable
+   by name/hospital-number search and still correctly labeled "Unassigned"
+   in its own result row -- only the *browse-every-unassigned-patient*
+   discovery path is gone, not the label. `AdminDashboard.jsx`'s own
+   "Unassigned" tile (a different audience -- admins actively need to find
+   patients still awaiting a ward assignment) is untouched, out of scope
+   for this change. Verified live in-browser against the real doctor
+   account: the tile grid now shows exactly the four real wards, no console
+   errors.
+
+   **Amended a fourth time the same day (2026-09-12, real assignment
+   created):** the temporary verification assignment from the second
+   amendment above had been created then deleted, so the doctor account
+   genuinely had zero assignments again -- which read, from the user's own
+   screen, like the just-shipped "Assigned to you" feature appearing and
+   then disappearing. After clarifying that no code had changed (re-read
+   the file to confirm), the user asked for a real, permanent assignment
+   this time. Created through the actual `POST /api/patients/<id>/
+   assignments/` endpoint (not raw ORM) using a diagnostic admin session
+   token for auth, which was deleted immediately after the call; the
+   resulting `PatientAssignment` row (Dr. Maaji Shettima Bukar, 282828, as
+   doctor for the one real patient, hospital number iuyjcghh) is real
+   enrollment data, not test data, and was left in place. Verified live in-
+   browser against the real doctor account, including a full page refresh:
+   "Assigned to you" now permanently shows this patient, no console errors.
+
+   **Amended a fifth time the same day (2026-09-12, real bug: clinical
+   record view never displayed the structured fields):** while checking
+   why category 1 (Identity)'s phone number wasn't showing to clinical
+   staff, found that `ClinicalDashboard.jsx`'s patient-record view
+   (`records.records.map(...)`) had never been updated for the 2026-09-03
+   "structured fields per category" change (see that amendment above) --
+   it still read `r.content?.notes`, a key that hasn't existed in any
+   category's content since that change, so every category always
+   rendered "(no notes recorded)" regardless of what was actually stored.
+   `PatientRecordView`'s API response already included the real
+   `field_defs`/`content` the whole time (via the shared
+   `PatientCategoryRecordSerializer`, same as the Admin dashboard's
+   `CategoryFieldsEditor` uses) -- only this one read-only view never
+   consumed it. Now renders one "Label: value" line per filled field
+   (skipping empty ones), matching the "Label: value" pattern already used
+   elsewhere in this app (`DetailField` on the Security dashboard) --
+   read-only, no editing here (that stays the Admin dashboard's job). This
+   was a pure bug fix, not new scope: the phone field itself has existed in
+   `patients/category_fields.py`'s category-1 field list since 2026-09-03.
+   Verified live in-browser against the real doctor account and the one
+   real patient: every one of the 13 categories now correctly shows "(no
+   information recorded)" instead of the old "(no notes recorded)" text,
+   since no Identity fields (including phone) have actually been entered
+   for this patient yet -- that's real, still-missing enrollment data, not
+   a rendering bug, so it wasn't fabricated here; it needs to be entered
+   through the Admin dashboard's existing Identity category editor. No
+   console errors.
 5. ✅ **Done (2026-08-28).** Emergency Override ("Break the Glass" / BTG in the UI — see the Emergency Override section above for naming and scope decisions). New `POST /api/scoring/emergency-override/` (`scoring.views.EmergencyOverrideView`, `IsClinicalStaff`-gated): takes `{patient_id, reason}` (reason min 10 chars), grants the caller's full role ceiling (`ROLE_CEILINGS[staff.role]`) regardless of the hard gate/score band/Nurse rule, writes an `AccessDecision` row (`decision_type=EMERGENCY_OVERRIDE`; `gate_passed`/`score`/`score_band` now nullable on that model — an override never ran the scoring pipeline, so "not applicable" is more honest than a sentinel score) and an `EMERGENCY_OVERRIDE` Ledger entry (`reason` in `details`). Does not check `contextual.target_patient_id` the way `DecideView` does (must still work if capture/contextual state is missing or itself the reason normal access failed) and does not reinforce the behavioral baseline (an override is by definition an abnormal session). `scoring.views.PatientRecordView` needed no changes — it already treats any non-`ACCESS_DENIED` decision type the same way. Frontend: `ClinicalDashboard.jsx` gained a "Break the Glass" button in the patient-view section (always visible once a patient is selected, not gated behind a denial) that reveals an inline reason textarea before submitting — no native `confirm()` dialog. `SecurityDashboard.jsx` needed no changes (its event-type filter/severity coloring/drill-down already handled `EMERGENCY_OVERRIDE` rows from step 4). 105/105 backend tests passing (8 new); verified end-to-end via direct API calls against the real dev database using the real Admin and doctor accounts (Chrome browser extension wasn't connected for a live UI click-through) — confirmed the full round trip (override → granted all 13 categories → records endpoint returns content → a correctly hash-chained `EMERGENCY_OVERRIDE` Ledger entry with the reason). The temporary QA patient and sessions were deleted afterward; the Ledger entry itself was left in place since it's append-only by design.
 
    **Amended 2026-08-29** (after a live demo surfaced a real gap): added the Doctor rule (see Role → category access above) and BTG's own availability gate (see Emergency Override above). `AccessDecision.nurse_path` renamed to `role_rule_path` (now used by both roles' rule paths; migration `scoring/0003_rename_nurse_path_to_role_rule_path.py`). New `captures/services.py` (`compute_patient_assignment_status`) extracted from `captures.views.TargetPatientView` so both the normal capture flow and BTG's fresh gate check share one implementation instead of two.
@@ -1151,7 +1283,152 @@ through the existing error state.
    still needs a second real clinical account or the user's own device:
    the colleague-approve/decline side of the assist flow, and the real
    biometric ceremony itself.
-6. Offline Mode (wraps steps 1–5)
+6. ✅ **Done (2026-09-12, closed out 2026-09-14).** Offline Mode. Planned via Plan Mode
+   (`.claude/plans/greedy-humming-graham.md`) — full design decisions there,
+   summarized here. Confirmed a hard constraint first: the real Ledger
+   mints sequence/hash under a `select_for_update()` lock server-side, so a
+   device can't safely pre-allocate real ledger entries while disconnected;
+   and there's no JWT/offline-verifiable auth in this codebase, only opaque
+   DB-backed bearer tokens, so a *fresh* offline login was ruled out --
+   "devices still require local staff login" is implemented as *continuing*
+   an already-authenticated session through a disconnection, not
+   bootstrapping one from a cold, never-connected device.
+
+   **Backend (implemented, tested):** `access.Device.sync_public_key`
+   (migration `access/0005_device_sync_public_key.py`) plus
+   `POST /api/access/devices/register-signing-key/`
+   (`RegisterSyncKeyView`, self-service, 404 for an unknown device). New
+   `offline_sync` app (sits after `alerts` in `INSTALLED_APPS`):
+   `SyncedBatch` (idempotency guard keyed by a client-generated
+   `batch_id`) and `POST /api/offline/sync/` (`OfflineSyncView`,
+   `IsClinicalStaff`) -- verifies an ECDSA/SHA-256 signature (via
+   `cryptography`, now a direct `requirements.txt` pin rather than only a
+   transitive `webauthn` dependency) over the batch, recomputes each
+   queued event's local hash chain and rejects on the first mismatch (naming
+   the bad `client_seq`), then replays verified entries through the
+   **existing, unchanged** `ledger.services.record_event()` one at a time
+   (preserving the original offline `occurred_at`), raising a
+   `SecurityAlert` for any `ACCESS_DENIED` entries -- same as
+   `DecideView` already does online. Deliberately does **not** reconstruct
+   `AccessDecision` rows for offline-produced events -- that model stays a
+   live, request-time construct (step-up gating on an active session); the
+   durable record of an offline access is the Ledger entry alone, which
+   still satisfies "every decision... writes here." New
+   `GET /api/scoring/my-baseline/` (`MyBaselineView`, self-service) exposes
+   the caller's own frozen `BehavioralBaseline` snapshot + the Disaster Mode
+   flag, for the frontend to cache. 249/249 backend tests passing (15 new:
+   `access.RegisterSyncKeyViewTests`, `offline_sync.OfflineSyncViewTests`,
+   `scoring.MyBaselineViewTests`) -- covering valid-batch merge, bad
+   signature, tampered local chain (specific position reported), unregistered
+   device, duplicate `batch_id` idempotency, and denial-raises-alert.
+
+   **Frontend (implemented, not yet live-verified end-to-end -- see below):**
+   new `frontend/src/offline/` module (`db.js` -- IndexedDB via the new
+   `idb` dependency, four stores: `cache`/`session`/`queue`/`keys`;
+   `crypto.js` -- per-device non-extractable ECDSA signing keypair + AES-GCM
+   encryption key, so cached patient data is genuinely encrypted at rest
+   without a password-derived key; `localLedger.js` -- the device-local hash
+   chain, a *separate, simpler* scheme from the real Ledger's
+   (`_compute_entry_hash`'s exact field set), whose only job is proving the
+   local queue wasn't tampered with before reaching the server, not
+   reproducing the production chain; `scoringEngine.js` -- a JS port of
+   `scoring/engine.py`'s role-ceiling/band/Nurse-Doctor-rule logic, with one
+   documented simplification: of the 7 weighted factors, only
+   `on_duty`/`ward_assignment` actually vary per patient within a session,
+   so the other five are reused from the most recent successful *online*
+   decision's `factor_breakdown` rather than re-deriving keystroke/mouse
+   dynamics offline; `syncManager.js` -- ties it together:
+   `refreshOfflineCache()` (called after every successful online
+   decide()+records fetch -- this is how "last-synced cache" builds up from
+   normal use, no separate download step), `queueOfflineEvent()`,
+   `trySync()`, `ensureSigningKeyRegistered()`). `ClinicalDashboard.jsx`'s
+   `openPatient`/`handleEmergencyOverride` both gained an offline branch
+   (triggered when a real request fails with no HTTP status, i.e. a genuine
+   network failure, not a server rejection) that computes a decision from
+   the cache instead of failing; a header badge
+   (`DashboardShell.jsx`'s new `offlineStatus` prop) shows
+   "Offline"/"N pending sync". An offline `REDUCED_ACCESS` decision still
+   excludes categories 8–11/13 but can't perform WebAuthn/colleague-assist
+   step-up (both need the server), so it's logged with
+   `step_up_deferred_offline: true` instead of blocking forever --
+   reviewable via the existing Ledger drilldown once synced, no new UI
+   needed. `App.jsx` registers the device's signing key once per login
+   (clinical roles only) and resyncs on the browser's `online` event, backed
+   by a plain 10s poll too (`ClinicalDashboard.jsx`'s
+   `OFFLINE_SYNC_POLL_MS`) so a demo that simulates disconnection by
+   stopping the local Django server -- rather than toggling real network
+   conditions -- still recovers, since `navigator.onLine` never flips in
+   that scenario. `npm run lint`/`npm run build` both clean.
+
+   **Found and fixed one real bug during live testing:** the `staff` prop
+   `ClinicalDashboard` receives is deliberately minimal (staff_id/full_name/
+   role only, see `App.jsx`) and doesn't carry `on_duty`/`on_call`/`ward` --
+   the first offline-cached "staff" snapshot used it directly, so an offline
+   decision's on-duty factor silently scored as if always off-duty,
+   producing a real, wrong score (65% offline vs. the correct 85% online for
+   the same session). Fixed with a new `offlineStaffSnapshot(staff,
+   session)` helper that merges the two, used everywhere "staff" gets
+   cached for offline use. Also hardened the online success path while
+   investigating: caching for offline use is now genuinely fire-and-forget
+   (previously it `await`ed an extra `getCachedSession()` call inline,
+   meaning any IndexedDB slowness would have blocked the already-successful
+   online view from rendering -- `refreshOfflineCache()` now defaults
+   `disasterModeActive` to whatever's already cached instead of requiring
+   the caller to re-fetch it just to preserve that one field).
+
+   **Live end-to-end verification, completed 2026-09-14** (Claude-in-Chrome,
+   real doctor account `282828`, real patient `iuyjcghh`), after two real
+   bugs surfaced and got fixed along the way:
+
+   - The Chrome tab used for the first verification pass hit a genuine
+     browser storage-service lockup specific to the `medguard-offline`
+     IndexedDB database (`indexedDB.open()` hung indefinitely, reproduced
+     in a brand-new tab, while a differently-named database on the same
+     origin opened instantly) -- not application code, confirmed by that
+     clean control test. Resolved once the user cleared that site's
+     browser storage; not expected to recur, but if it ever does, clearing
+     site data for the frontend's origin is the fix.
+   - **A real, more serious bug found using "Verify ledger integrity"
+     itself**, which came back invalid after the first successful offline
+     sync: `ledger.services.record_event()` hashed `occurred_at` using
+     whatever timezone a caller's datetime happened to carry, but
+     `offline_sync.OfflineSyncView` passes an *explicit* `occurred_at`
+     (the original offline timestamp) that arrives through DRF's
+     `DateTimeField`, which converts it to Django's configured local
+     timezone (`settings.TIME_ZONE = 'Africa/Lagos'`, +01:00) --
+     while the same field read back from the database later always comes
+     back in UTC. Same instant, two valid ISO-string representations,
+     different hash. Every *normal* online decision was unaffected (they
+     never pass an explicit `occurred_at`, always defaulting to
+     `timezone.now()`, already UTC) -- this only ever hit offline-synced
+     entries. Fixed at the source: `record_event()` now normalizes
+     `occurred_at` to UTC once, before it's used for both the hash and the
+     saved row, regardless of what timezone the caller's datetime carries.
+     New regression tests added:
+     `ledger.tests.RecordEventChainTests.test_explicit_non_utc_occurred_at_still_verifies`,
+     and `offline_sync.tests.OfflineSyncViewTests.test_valid_batch_merges_into_ledger`
+     now also asserts `verify_chain()` passes (previously only checked
+     field values, which is why this shipped without a failing test in
+     the first place). 251/251 backend tests passing.
+   - The bug had already written two bad-hash entries to the real local
+     dev Ledger before the fix (`ledger.sqlite3`) -- unlike a code bug,
+     an already-computed Ledger hash can't be repaired in place by
+     design (append-only, by CLAUDE.md's own Security Ledger spec).
+     Confirmed via `AskUserQuestion` with the user: since nothing is
+     deployed yet and this only affected the local dev Ledger (not
+     `db.sqlite3`, where all real staff/patient/session data lives,
+     untouched), the local `ledger.sqlite3` file was deleted and
+     recreated empty via `manage.py migrate --database=ledger` --
+     the real doctor/patient/admin accounts and their sessions all
+     survived intact, confirmed live (the same browser session kept
+     working through the reset with no re-login needed).
+   - Final full round trip against the fresh, empty Ledger: online decide
+     (real 88% `AUDITED_DEVIATION`) → backend stopped → offline `View`
+     click computed the identical decision from cache and queued it (header
+     showed "1 pending sync") → backend restarted → the 10s poll
+     auto-synced it with no user action → header badge cleared → both
+     resulting Ledger entries (#1 online, #2 offline-synced) verify
+     correctly end to end. No console errors throughout.
 7. Bonus: MedGuard Identity — fingerprint matching, emergency/offline lookup only
 
 **Do not populate the database with any staff, patient, or fingerprint data until the user supplies it** — see Enrollment data below.

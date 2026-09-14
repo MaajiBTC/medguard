@@ -41,9 +41,14 @@ class PatientSearchView(APIView):
 
 class PatientSummaryView(APIView):
     """GET /api/patients/summary/ -- real counts for the Admin dashboard's overview
-    page and ward-category tiles (not the 50-row search cap)."""
+    page and ward-category tiles (not the 50-row search cap).
 
-    permission_classes = [IsAdmin]
+    Open to any authenticated staff (default IsAuthenticated, no override --
+    widened 2026-09-12 for the Clinical dashboard's own ward-browsing tiles,
+    same reasoning as StaffSearchView's earlier IsAdmin -> IsAdminOrSecurityOfficer
+    widening): this only ever returns aggregate counts, never patient identities,
+    so there's nothing sensitive being exposed to a wider audience.
+    """
 
     def get(self, request):
         by_ward = {ward: 0 for ward, _ in Ward.choices}

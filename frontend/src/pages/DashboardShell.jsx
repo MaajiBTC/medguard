@@ -538,7 +538,7 @@ function ProfilePanel({ staff, onBack }) {
  * dashboard has active, so it works the same from all three. Uses the fixed
  * light brand palette (--plum/--plum-deep/--lavender/--off-white), same as the
  * login page. */
-function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, title, children }) {
+function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, title, offlineStatus, children }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [hasPendingDevices, setHasPendingDevices] = useState(false);
@@ -616,6 +616,7 @@ function DashboardShell({ navItems, activeItem, onNavChange, staff, onLogout, ti
               <MenuIcon />
             </button>
             <h1 className="shell-header-page-label">{title}</h1>
+            {offlineStatus && <span className="badge badge-offline">{offlineStatus}</span>}
           </div>
 
           <div className="brand-mark">
