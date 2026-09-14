@@ -29,6 +29,7 @@ urlpatterns = [
     path('api/ledger/', include('ledger.urls')),
     path('api/alerts/', include('alerts.urls')),
     path('api/offline/', include('offline_sync.urls')),
+    path('api/identity/', include('identity.urls')),
 ]
 
 # Uploaded staff photos (see config/settings.py's MEDIA_URL/MEDIA_ROOT) --

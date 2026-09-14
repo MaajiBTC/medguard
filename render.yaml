@@ -27,6 +27,7 @@ services:
     rootDir: backend
     buildCommand: >-
       pip install -r requirements.txt &&
+      pip install fingerprint-feature-extractor==0.0.10 --no-deps &&
       python manage.py collectstatic --noinput &&
       python manage.py migrate --noinput &&
       python manage.py migrate --database=ledger --noinput
@@ -62,4 +63,18 @@ services:
       - key: STAFF_LOGIN_PASSWORD
         sync: false
       - key: GEMINI_API_KEY
+        sync: false
+      # MedGuard Identity (added 2026-09-14) -- generate with
+      # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+      # and set in the Render dashboard, not here. Losing/rotating this key
+      # makes every already-enrolled fingerprint template unreadable.
+      - key: FINGERPRINT_TEMPLATE_KEY
+        sync: false
+      # Patient SMS notifications (added 2026-09-14) -- get these from
+      # https://console.twilio.com. Set in the Render dashboard, not here.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
         sync: false

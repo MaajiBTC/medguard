@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import uuid
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -155,6 +156,31 @@ class OfflineSyncViewTests(APITestCase):
         alert = SecurityAlert.objects.get(staff_id="STF-700")
         self.assertEqual(alert.alert_type, SecurityAlert.AlertType.ACCESS_DENIED)
         self.assertIsNotNone(alert.ledger_sequence)
+
+    def test_non_standard_entry_notifies_patient(self):
+        """Patient SMS notifications (added 2026-09-14) -- same four trigger
+        types as the online DecideView, mocked at the point of use
+        (offline_sync.views.notify_patient) so this never makes a real
+        network call."""
+        payload = self._build_batch(
+            [(LedgerEntry.EventType.REDUCED_ACCESS, "HN-OFFLINE-1", {"score": 55})]
+        )
+        with patch("offline_sync.views.notify_patient") as mocked:
+            resp = self.client.post("/api/offline/sync/", payload, format="json", **self._auth_header())
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        mocked.assert_called_once()
+        call_kwargs = mocked.call_args.kwargs
+        self.assertEqual(call_kwargs["event_type"], LedgerEntry.EventType.REDUCED_ACCESS)
+        self.assertEqual(call_kwargs["patient"], self.patient)
+
+    def test_standard_access_entry_does_not_notify_patient(self):
+        payload = self._build_batch(
+            [(LedgerEntry.EventType.STANDARD_ACCESS, "HN-OFFLINE-1", {"score": 95})]
+        )
+        with patch("offline_sync.views.notify_patient") as mocked:
+            resp = self.client.post("/api/offline/sync/", payload, format="json", **self._auth_header())
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        mocked.assert_not_called()
 
     def test_bad_signature_rejected(self):
         payload = self._build_batch([(LedgerEntry.EventType.STANDARD_ACCESS, "HN-OFFLINE-1", {})])

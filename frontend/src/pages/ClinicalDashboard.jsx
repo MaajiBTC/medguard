@@ -2,6 +2,7 @@ import { startAuthentication } from '@simplewebauthn/browser';
 import { useCallback, useEffect, useState } from 'react';
 
 import { getCurrentSession } from '../api/auth';
+import { identifyFingerprint } from '../api/identity';
 import { getMyAssignedPatients, getPatientSummary, searchPatients } from '../api/patients';
 import {
   approveStepUpAssist,
@@ -85,6 +86,80 @@ function timeAgo(isoString) {
   if (minutes < 1) return 'just now';
   if (minutes === 1) return '1 minute ago';
   return `${minutes} minutes ago`;
+}
+
+/** MedGuard Identity (CLAUDE.md bonus, step 7, added 2026-09-14) --
+ * identifies an *unknown* patient (unconscious, or otherwise unable to give
+ * their hospital number) from a fingerprint photo. This is a scan-to-find
+ * step, not gated behind an existing patient selection -- it doubles as
+ * one, via `onView`. Deliberately doesn't try to work offline: real
+ * minutiae extraction/matching needs image-processing that has no ready
+ * client-side port (see the approved plan) -- this only ever calls the
+ * server.
+ *
+ * Rendering is controlled by the parent (a button beside Search toggles
+ * `open`, added 2026-09-14 per the user -- previously this owned its own
+ * <details> toggle sitting above the whole "Find a patient" section; moved
+ * to live inside it, right next to the normal search entry point, since
+ * this is really just a second way into the same "find a patient" job).
+ *
+ * A match (the backend's best-scoring enrolled template above
+ * settings.FINGERPRINT_MATCH_THRESHOLD -- not literally 100%, whatever the
+ * closest real match is) opens the patient's record automatically and
+ * closes this dropdown, same day, per the user -- no separate "View full
+ * record" click needed. */
+function FingerprintLookup({ open, onView, onClose }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+
+  if (!open) return null;
+
+  const handleFile = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const data = await identifyFingerprint(file);
+      setResult(data);
+      if (data.matched) {
+        onView(data.patient);
+        onClose();
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="panel-card assist-banner">
+      <p className="meta-line">
+        For a patient who can't otherwise be identified (unconscious, or the
+        network's down and they aren't already cached). Scans against every
+        enrolled fingerprint and opens their record automatically on a
+        match, using a minimal emergency summary until the full record loads.
+      </p>
+      <label className="btn-secondary file-label">
+        {busy ? 'Identifying…' : 'Scan / upload fingerprint'}
+        <input type="file" accept="image/*" onChange={handleFile} disabled={busy} hidden />
+      </label>
+
+      {error && <p role="alert" className="dev-error">{error}</p>}
+
+      {/* A match closes this dropdown and opens the record immediately
+          (see handleFile above) -- so by the time a render could show a
+          "matched" card here, this component has already unmounted. Only
+          the no-match case is ever actually seen. */}
+      {result && !result.matched && (
+        <p className="meta-line">No match found (best score: {result.score}%).</p>
+      )}
+    </div>
+  );
 }
 
 /** Any *other* clinical colleague's pending step-up assist requests (added
@@ -176,6 +251,10 @@ function ClinicalDashboard({ staff, onLogout }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  // MedGuard Identity's fingerprint lookup dropdown (added 2026-09-14,
+  // moved beside Search per the user -- was its own always-visible section
+  // above "Find a patient").
+  const [fingerprintOpen, setFingerprintOpen] = useState(false);
   // Browse-by-ward (added 2026-09-12), same pattern as AdminDashboard.jsx's
   // PatientPanel -- ward tiles by default, drill into a ward's patient list,
   // search scoped to whichever ward (if any) is currently selected.
@@ -658,7 +737,20 @@ function ClinicalDashboard({ staff, onLogout }) {
           <button type="button" className="btn-primary" onClick={handleSearch} disabled={searching}>
             {searching ? 'Searching…' : 'Search'}
           </button>
+          <button
+            type="button"
+            className="btn-secondary btn-outline-bold"
+            onClick={() => setFingerprintOpen((open) => !open)}
+          >
+            Search by fingerprint
+          </button>
         </div>
+
+        <FingerprintLookup
+          open={fingerprintOpen}
+          onView={openPatient}
+          onClose={() => setFingerprintOpen(false)}
+        />
 
         {wardCountsError && <p role="alert" className="dev-error">{wardCountsError}</p>}
 

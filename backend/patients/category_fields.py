@@ -34,6 +34,15 @@ CATEGORY_FIELDS = {
         {"name": "blood_pressure", "label": "Blood pressure", "type": "text"},
         {"name": "temperature_c", "label": "Temperature (°C)", "type": "number"},
         {"name": "pulse_bpm", "label": "Pulse (bpm)", "type": "number"},
+        # Added 2026-09-14 for MedGuard Identity's emergency summary (CLAUDE.md
+        # names "blood type" explicitly in that feature's example output, and
+        # nothing existing carried it).
+        {
+            "name": "blood_type",
+            "label": "Blood type",
+            "type": "select",
+            "options": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+        },
     ],
     4: [  # Diagnosis & Medical History
         {"name": "current_diagnoses", "label": "Current diagnoses", "type": "textarea"},

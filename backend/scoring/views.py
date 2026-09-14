@@ -17,6 +17,7 @@ from captures.models import ContextualCapture
 from captures.services import compute_patient_assignment_status
 from ledger.models import LedgerEntry
 from ledger.services import record_event
+from notifications.services import notify_patient
 from patients.models import Patient, PatientCategoryRecord
 from patients.serializers import PatientCategoryRecordSerializer
 from staff.permissions import IsAdmin, IsClinicalStaff
@@ -122,6 +123,14 @@ class DecideView(APIView):
                 },
             )
 
+        # Patient SMS notification (added 2026-09-14, the user's own idea) --
+        # the same four non-silent event types the Ledger/Security Dashboard
+        # already treat as noteworthy. A clean STANDARD_ACCESS stays silent.
+        # Never breaks this response even if Twilio itself fails (see
+        # notifications.services.notify_patient).
+        if decision.decision_type != AccessDecision.DecisionType.STANDARD_ACCESS:
+            notify_patient(patient=patient, event_type=decision.decision_type, staff=session.staff)
+
         return Response(AccessDecisionSerializer(decision).data, status=status.HTTP_201_CREATED)
 
 
@@ -226,6 +235,11 @@ class EmergencyOverrideView(APIView):
                 "granted_categories": granted_categories,
             },
         )
+
+        # Patient SMS notification (added 2026-09-14) -- every Break the
+        # Glass is one of the four trigger types already, so this always
+        # fires here, unconditionally.
+        notify_patient(patient=patient, event_type=LedgerEntry.EventType.EMERGENCY_OVERRIDE, staff=session.staff)
 
         return Response(AccessDecisionSerializer(decision).data, status=status.HTTP_201_CREATED)
 

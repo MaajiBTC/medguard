@@ -569,6 +569,56 @@ Claude-in-Chrome extension against a real Ledger entry and the real
 security officer account, including a real Gemini 429 rendering correctly
 through the existing error state.
 
+## Patient SMS Notifications (added 2026-09-14, the user's own idea)
+
+Not originally in this file's spec — the user's own extension once the core
+system was built, tying back to the competition's own title ("Safe Access
+to Patient Records"): the patient is part of securing their own data too,
+not just staff/security officers. When a patient's record is accessed in
+any way CLAUDE.md's own scoring bands already treat as noteworthy
+(`AUDITED_DEVIATION`, `REDUCED_ACCESS`, `ACCESS_DENIED`,
+`EMERGENCY_OVERRIDE`), the patient gets a real SMS via Twilio. A clean,
+silent `STANDARD_ACCESS` stays silent for the patient too, matching the
+Scoring Engine's own existing "silent unless something's off" convention.
+
+New `notifications` app: `PatientNotification` (real FK to `Patient` — this
+app lives on the default database, not a separate one the way `ledger`
+does) records every *attempt*, sent or not — kept even when Twilio isn't
+configured or the patient has no phone on file, so the feature is honestly
+demoable before real credentials exist, and doubles as its own lightweight
+audit trail after. `notifications.services.notify_patient()` is the single
+writer (same convention as `ledger.services.record_event()`/
+`alerts.services.raise_alert()`), looks up the patient's phone from their
+own category 1 structured `phone` field (no new patient field needed), and
+POSTs directly to Twilio's REST API via `requests` (no SDK, same precedent
+`ledger/gemini.py` already set for Gemini) — **deliberately never raises**,
+unlike `gemini.explain_entry`: this runs as a background side effect of an
+access decision, not a user-initiated action, so a missing config, a
+missing phone number, or an unreachable Twilio must never break the
+clinician's actual decision response. Every outcome is still recorded.
+Called from the exact three places that already call `record_event()` for
+these event types: `scoring.views.DecideView`, `scoring.views.
+EmergencyOverrideView` (unconditionally — every BTG is a trigger type
+already), and `offline_sync.views.OfflineSyncView`'s merge loop (fires when
+the device reconnects and syncs, not backdated to the original offline
+timestamp). New settings `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/
+`TWILIO_FROM_NUMBER` (all optional, unset by default — friendly "not
+configured" fallback). A Twilio trial account can only text numbers
+verified in the Twilio console, and prefixes every message with "Sent from
+your Twilio trial account" — expected trial behavior, not a bug.
+
+10 new backend tests (5 in `notifications` app's own suite, 5 integration
+checks added to `scoring`/`offline_sync`), `requests.post` always mocked so
+the suite never makes a real network call. Verified live against the real doctor
+account and the one real patient: a genuine 70% `AUDITED_DEVIATION`
+decision correctly triggered `notify_patient()`, which correctly recorded
+"no phone number on file" (Identity category 1 is still empty for this
+patient — real missing data, not a bug) without affecting the clinician's
+own decision response at all. **Still needed:** the user supplying a real
+phone number for the real patient (via the Admin dashboard's existing
+Identity category editor) and real Twilio credentials, to verify an actual
+SMS arrives.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.
@@ -1429,7 +1479,109 @@ through the existing error state.
      auto-synced it with no user action → header badge cleared → both
      resulting Ledger entries (#1 online, #2 offline-synced) verify
      correctly end to end. No console errors throughout.
-7. Bonus: MedGuard Identity — fingerprint matching, emergency/offline lookup only
+7. ✅ **Done (2026-09-14), with one scope gap flagged below.** Bonus:
+   MedGuard Identity — fingerprint matching, emergency/offline lookup only.
+   Planned via Plan Mode after two real hardware constraints got worked
+   through with the user (confirmed via `AskUserQuestion`, multiple rounds):
+
+   - The user's phone, then laptop (Windows Hello), were both proposed as
+     the capture method — both ruled out on hard technical grounds, not
+     preference. Every consumer platform fingerprint sensor (phone or
+     laptop) locks the scan in a hardware secure enclave and will only ever
+     answer "same owner, yes/no" for unlocking that one device — the same
+     mechanism the step-up WebAuthn feature (5b) already relies on. This
+     feature needs the opposite: *identification* mode (whose record is
+     this, out of everyone enrolled), which requires actually seeing the
+     fingerprint pattern to compare against a database. No web app, this
+     one included, can ever get that out of a phone/laptop sensor — it's a
+     deliberate security boundary, not a gap to code around. Settled on
+     real fingerprint *images* (a photo/scan of an actual finger) instead.
+   - **SourceAFIS, the library CLAUDE.md names, has no official Python
+     port** (verified via `WebSearch` — only Java and .NET, under
+     robertvazan's GitHub org). Rather than shelling out to a Java
+     subprocess, substituted a real, comparable pure-Python pipeline,
+     confirmed with the user: `fingerprint-feature-extractor` (PyPI, MIT)
+     for minutiae extraction — read its actual source before committing to
+     it; it's the standard textbook algorithm (ridge skeletonization via
+     `skimage.morphology.skeletonize`, then real crossing-number minutiae
+     detection), not a toy. It has no matching component, and a second
+     candidate package found during research (`fingerprints-matching`) was
+     downloaded and rejected after reading its source — its "matching"
+     never aligns the two minutiae sets before comparing raw coordinates,
+     which only works if both images happen to already be identically
+     framed, not legitimate for two independent scans. Matching
+     (`identity/matching.py`) is hand-written instead: the standard
+     simplified minutiae-pair rigid-alignment technique (try every
+     same-type probe/template minutia pair as a candidate rotation+
+     translation, count how many other minutiae land in tolerance under
+     that transform, keep the best) — real point-pattern matching, just
+     simpler than SourceAFIS's own approach, in the same "deliberately
+     simple, explainable... appropriate for a hackathon demo" spirit
+     CLAUDE.md's Scoring Engine section already uses for its own matching.
+
+   New `identity` Django app: `FingerprintTemplate` (`OneToOneField` to
+   `Patient` — re-enrolling replaces the template, same pattern
+   `access.WebAuthnCredential` already uses), `encrypted_template` (Fernet/
+   AES, `identity/crypto.py`, keyed by a new `settings.FINGERPRINT_
+   TEMPLATE_KEY`) — never the raw image, which is decoded and processed
+   entirely in memory (`identity/extraction.py`, OpenCV) and discarded, not
+   even written to a temp file. `POST /api/identity/enroll/` (`IsAdmin`,
+   multipart `{patient_id, image}`, rejects images yielding fewer than 5
+   minutiae as unusable) and `POST /api/identity/identify/`
+   (`IsClinicalStaff`, multipart `{image}`, deliberately no `patient_id`)
+   — the latter scores the probe against every enrolled template and
+   returns the best match above `settings.FINGERPRINT_MATCH_THRESHOLD`
+   (default 40) or a plain "no match" (an expected outcome, not an error).
+   A match returns a MINIMAL emergency summary assembled from existing
+   category data (blood type, allergies, current meds, current diagnoses,
+   next of kin) — not the full 13-category record, matching CLAUDE.md's own
+   example wording exactly. One small schema addition:
+   `patients/category_fields.py` category 3 gained `blood_type` (CLAUDE.md's
+   own example names it; nothing existing carried it). Not routed through
+   the Security Ledger and no new audit table — same precedent as
+   `DisasterModeEvent`/`PendingDeviceRequest`, kept bounded as the bonus
+   feature. `opencv-python-headless` used instead of the extractor
+   package's declared desktop `opencv-python` (same `cv2` API, no GUI
+   bindings a server needs); the extractor itself is installed with
+   `--no-deps` (`render.yaml`'s `buildCommand` extended accordingly) so a
+   plain `pip install -r requirements.txt` never pulls the heavier desktop
+   build in alongside it.
+
+   Frontend: Admin dashboard's Patient panel gained an "Enroll / replace
+   fingerprint" file upload (same click-a-label-to-open-the-picker pattern
+   `ProfilePhotoSection` already uses). Clinical dashboard gained a new
+   "Emergency fingerprint lookup" collapsible section at the top of the
+   page (same visual weight as the existing assist-requests banner) —
+   deliberately not gated behind selecting a patient first, since this *is*
+   the patient-selection step for this flow; a match's "View full record"
+   button feeds the found patient straight into the normal `openPatient`
+   access-decision flow.
+
+   16 new backend tests (`identity/tests.py`): matching tested directly
+   against synthetic minutiae (identical sets score 100; a known rotation+
+   translation still scores ~100, proving the alignment step actually
+   works, not just trivial self-comparison; unrelated sets score low; empty
+   sets score 0) — no real images needed for this part. Extraction tested
+   against a synthetic ridge-like test image (deterministic — same bytes
+   always extract the same minutiae, which the enroll-then-identify-the-
+   same-photo view test relies on rather than hardcoding expected minutiae
+   counts). View tests cover the full enroll→identify round trip, no-match
+   cases, admin/clinical-only role gates, re-enrollment replacing rather
+   than accumulating, and that raw image bytes never persist anywhere.
+
+   **Scope gap, flagged deliberately rather than half-built: online only.**
+   CLAUDE.md's own wording says "emergency or offline lookup." Real
+   extraction+matching client-side (mirroring Offline Mode's JS scoring-
+   engine port) would need ridge skeletonization and image processing
+   ported to JS with no ready library for it — a genuinely large separate
+   lift, not attempted here. This covers the "emergency, unconscious
+   patient" half of the use case as long as there's connectivity; true
+   network-down fingerprint lookup remains a known, documented gap, not a
+   silently-missed one.
+
+   **Not yet live-verified against a real fingerprint** — CLAUDE.md's
+   Enrollment data rule means that needs the user's own real finger, not
+   synthetic test data; pending once supplied.
 
 **Do not populate the database with any staff, patient, or fingerprint data until the user supplies it** — see Enrollment data below.
 

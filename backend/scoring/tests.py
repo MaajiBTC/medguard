@@ -431,6 +431,47 @@ class BaselineReinforcementAndAPITests(ScoringTestBase):
         self.assertEqual(baseline.sample_count, 1)
         self.assertIn(f"device-STF-901", baseline.known_device_ids)
 
+    def test_standard_access_does_not_notify_patient(self):
+        """Patient SMS notifications (added 2026-09-14) -- a clean,
+        silent decision stays silent for the patient too. notify_patient
+        is mocked at the point of use (scoring.views.notify_patient) so
+        this never makes a real network call."""
+        _staff, token = self._login("docNotifyStd", "pw-notify-std", "STF-NSTD", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-NSTD", full_name="P", ward="Ward A")
+        self.client.post(
+            "/api/captures/contextual/target-patient/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+
+        with patch("scoring.views.notify_patient") as mocked:
+            resp = self.client.post(
+                "/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token)
+            )
+
+        self.assertEqual(resp.data["decision_type"], AccessDecision.DecisionType.STANDARD_ACCESS)
+        mocked.assert_not_called()
+
+    def test_denied_decision_notifies_patient(self):
+        """A nurse neither assigned nor on the patient's ward is a
+        deterministic hard ACCESS_DENIED (CLAUDE.md's Nurse rule) --
+        reliable to trigger through the real view, unlike score-band
+        cases."""
+        _staff, token = self._login("nurseNotifyDenied", "pw-notify-denied", "STF-NDEN", Staff.Role.NURSE, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-NDEN", full_name="P", ward="Ward B")
+        self.client.post(
+            "/api/captures/contextual/target-patient/", {"patient_id": patient.id}, format="json", **self._auth(token)
+        )
+
+        with patch("scoring.views.notify_patient") as mocked:
+            resp = self.client.post(
+                "/api/scoring/decide/", {"patient_id": patient.id}, format="json", **self._auth(token)
+            )
+
+        self.assertEqual(resp.data["decision_type"], AccessDecision.DecisionType.ACCESS_DENIED)
+        mocked.assert_called_once()
+        call_kwargs = mocked.call_args.kwargs
+        self.assertEqual(call_kwargs["event_type"], AccessDecision.DecisionType.ACCESS_DENIED)
+        self.assertEqual(call_kwargs["patient"], patient)
+
     def test_baseline_not_reinforced_by_denied_decision(self):
         staff = self._make_staff("nurseDenied", "STF-902", Staff.Role.NURSE, ward="Ward A", on_duty=True)
         session = self._make_session(staff)
@@ -1141,6 +1182,27 @@ class EmergencyOverrideTests(ScoringTestBase):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data["granted_categories"], [1, 2])
+
+    def test_override_notifies_patient(self):
+        """Patient SMS notifications (added 2026-09-14) -- every Break the
+        Glass is unconditionally one of the four trigger types."""
+        staff, token = self._login("docBtgNotify", "pw-btg-notify", "STF-BTGN", Staff.Role.DOCTOR, ward="Ward A")
+        patient = Patient.objects.create(hospital_number="HN-BTGN", full_name="P", ward="Ward A")
+
+        with patch("scoring.views.notify_patient") as mocked:
+            resp = self.client.post(
+                "/api/scoring/emergency-override/",
+                {"patient_id": patient.id, "reason_category": "clinical_emergency", "reason": "Patient unresponsive, need immediate chart access"},
+                format="json",
+                **self._auth(token),
+            )
+
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        mocked.assert_called_once()
+        call_kwargs = mocked.call_args.kwargs
+        self.assertEqual(call_kwargs["event_type"], AccessDecision.DecisionType.EMERGENCY_OVERRIDE)
+        self.assertEqual(call_kwargs["patient"], patient)
+        self.assertEqual(call_kwargs["staff"], staff)
 
     def test_override_bypasses_hard_behavioral_gate(self):
         """Same wildly-mismatched-typing setup as EngineFactorTests' hard-gate test

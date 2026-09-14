@@ -12,6 +12,7 @@ import {
   updatePatientCategory,
   updatePatientWard,
 } from '../api/patients';
+import { enrollFingerprint } from '../api/identity';
 import {
   activateDisasterMode,
   deactivateDisasterMode,
@@ -599,6 +600,7 @@ function PatientPanel() {
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [fingerprintBusy, setFingerprintBusy] = useState(false);
 
   const [newPatient, setNewPatient] = useState({ hospital_number: '', full_name: '', ward: WARDS[0].value });
 
@@ -713,6 +715,27 @@ function PatientPanel() {
     }
   };
 
+  // MedGuard Identity (CLAUDE.md bonus, step 7, added 2026-09-14) --
+  // enrolls/replaces this patient's fingerprint template. The raw image
+  // never leaves this one request; only the derived, encrypted minutiae
+  // template is stored server-side (identity.extraction/identity.crypto).
+  const handleEnrollFingerprint = async (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    if (!file || !selected) return;
+    setError(null);
+    setNotice(null);
+    setFingerprintBusy(true);
+    try {
+      const data = await enrollFingerprint(selected.id, file);
+      setNotice(`Fingerprint enrolled (${data.minutiae_count} minutiae detected).`);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setFingerprintBusy(false);
+    }
+  };
+
   const handleCreate = async (event) => {
     event.preventDefault();
     setError(null);
@@ -820,6 +843,18 @@ function PatientPanel() {
             </select>
             <button type="submit" className="btn-secondary">Assign</button>
           </form>
+
+          <h4>Fingerprint (MedGuard Identity)</h4>
+          <p className="meta-line">
+            Used for emergency/offline patient lookup when a patient can't be
+            identified another way. Re-enrolling replaces the existing
+            template. The uploaded photo itself is never stored — only the
+            derived, encrypted fingerprint template is.
+          </p>
+          <label className="btn-secondary file-label">
+            {fingerprintBusy ? 'Enrolling…' : 'Enroll / replace fingerprint'}
+            <input type="file" accept="image/*" onChange={handleEnrollFingerprint} disabled={fingerprintBusy} hidden />
+          </label>
 
           <h4>Categories</h4>
           {categoryRecords.map((r) => (

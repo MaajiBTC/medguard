@@ -13,3 +13,14 @@ requests==2.34.2
 Pillow==12.3.0
 webauthn==3.0.0
 cryptography==50.0.1
+
+# MedGuard Identity (fingerprint matching, CLAUDE.md bonus step 7).
+# fingerprint-feature-extractor is intentionally NOT listed here -- its
+# declared dependency on desktop `opencv-python` would pull in GUI bindings
+# this server never needs alongside `opencv-python-headless` below (same
+# `cv2` API). It's installed separately with --no-deps -- see render.yaml's
+# buildCommand and backend/README's local setup step.
+numpy==2.5.3
+scipy==1.18.1
+scikit-image==0.26.0
+opencv-python-headless==5.0.0.93

@@ -9,6 +9,7 @@ from alerts.models import SecurityAlert
 from alerts.services import raise_alert
 from ledger.models import LedgerEntry
 from ledger.services import record_event
+from notifications.services import notify_patient
 from patients.models import Patient
 from staff.permissions import IsClinicalStaff
 
@@ -122,6 +123,15 @@ class OfflineSyncView(APIView):
                         ledger_sequence=ledger_entry.sequence,
                         details={**entry["details"], "synced_from_offline": True},
                     )
+
+                # Patient SMS notification (added 2026-09-14) -- same four
+                # trigger types as DecideView/EmergencyOverrideView, fired
+                # "now" (when the device finally reconnects), not backdated
+                # to the original offline occurred_at. `patient` can be None
+                # here (a hospital_number that didn't resolve to a real
+                # patient) -- nothing to notify in that case.
+                if patient and entry["event_type"] != LedgerEntry.EventType.STANDARD_ACCESS:
+                    notify_patient(patient=patient, event_type=entry["event_type"], staff=staff)
 
             batch.entries_synced = merged
             batch.save(update_fields=["entries_synced"])

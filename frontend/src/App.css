@@ -547,6 +547,23 @@ button {
   opacity: 0.6;
 }
 
+/* A .btn-primary/.btn-secondary rendered as a <label> wrapping a hidden
+   file input (MedGuard Identity's fingerprint enrollment, added
+   2026-09-14) -- same "click the visible control to open the file picker"
+   pattern .profile-avatar-upload already uses, just inline-block since
+   this one sits among other inline buttons rather than alone. */
+.file-label {
+  display: inline-block;
+}
+
+/* A bolder, plum-bordered variant of .btn-secondary (added 2026-09-14, per
+   the user, for the Clinical dashboard's "Search by fingerprint" button --
+   same border color as .btn-primary's own fill, so the two search entry
+   points beside each other read as a matched pair). */
+.btn-outline-bold {
+  border: 2px solid var(--plum);
+}
+
 .link-button {
   background: none;
   border: none;

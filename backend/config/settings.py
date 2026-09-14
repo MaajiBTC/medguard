@@ -68,6 +68,30 @@ WEBAUTHN_RP_ID = os.environ.get('WEBAUTHN_RP_ID', 'localhost')
 WEBAUTHN_RP_NAME = os.environ.get('WEBAUTHN_RP_NAME', 'MedGuard')
 WEBAUTHN_ORIGIN = os.environ.get('WEBAUTHN_ORIGIN', 'http://localhost:5173')
 
+# MedGuard Identity (CLAUDE.md bonus, step 7, added 2026-09-14) -- Fernet key
+# encrypting enrolled fingerprint templates at rest (identity/crypto.py).
+# Must be set in backend/.env for real use (generate with
+# `Fernet.generate_key()`); the fallback below is dev-only, same posture as
+# SECRET_KEY's own insecure fallback above -- never rely on it past local dev.
+FINGERPRINT_TEMPLATE_KEY = os.environ.get(
+    'FINGERPRINT_TEMPLATE_KEY', 'EYsrTL8AHPQdUuGcQ_cftHChtnB1V6H8g0mXS1fMy18='
+)
+# Minimum similarity score (0-100, identity.matching.similarity_score) to
+# count as a match -- env-overridable, same "tunable threshold" convention
+# as LOGIN_MAX_FAILED_ATTEMPTS/the Scoring Engine's HARD_GATE_THRESHOLD.
+FINGERPRINT_MATCH_THRESHOLD = int(os.environ.get('FINGERPRINT_MATCH_THRESHOLD', '40'))
+
+# Patient SMS notifications (notifications/services.py, added 2026-09-14 --
+# the user's own idea). Left unset locally means notify_patient() records
+# why it couldn't send (PatientNotification.error_detail) instead of
+# actually calling Twilio -- same "friendly, non-fatal, not configured yet"
+# posture as GEMINI_API_KEY above. A Twilio trial account can only text
+# numbers you've verified in the Twilio console, and prefixes every message
+# with "Sent from your Twilio trial account" -- expected, not a bug.
+TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN')
+TWILIO_FROM_NUMBER = os.environ.get('TWILIO_FROM_NUMBER')
+
 
 # Application definition
 
@@ -96,6 +120,12 @@ INSTALLED_APPS = [
     # event batches into the Ledger and raises alerts for denials found in
     # them, so it sits after both of those.
     'offline_sync',
+    # MedGuard Identity (bonus, step 7, added 2026-09-14) -- fingerprint
+    # patient lookup. Depends only on `patients` and `staff`.
+    'identity',
+    # Patient SMS notifications (added 2026-09-14) -- depends only on
+    # `patients` and `ledger` (for event-type labels).
+    'notifications',
 ]
 
 MIDDLEWARE = [
