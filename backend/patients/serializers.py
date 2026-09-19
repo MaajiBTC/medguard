@@ -3,7 +3,7 @@ from rest_framework import serializers
 from staff.models import Ward
 
 from .category_fields import CATEGORY_FIELDS
-from .models import Patient, PatientAssignment, PatientCategoryRecord
+from .models import Patient, PatientAssignment, PatientCategoryRecord, PatientStatus
 
 
 class PatientSummarySerializer(serializers.ModelSerializer):
@@ -11,7 +11,7 @@ class PatientSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Patient
-        fields = ["id", "hospital_number", "full_name", "ward"]
+        fields = ["id", "hospital_number", "full_name", "ward", "status"]
         read_only_fields = fields
 
 
@@ -23,6 +23,10 @@ class PatientCreateSerializer(serializers.ModelSerializer):
 
 class PatientWardUpdateSerializer(serializers.Serializer):
     ward = serializers.ChoiceField(choices=Ward.choices, allow_blank=True)
+
+
+class PatientStatusUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=PatientStatus.choices, allow_blank=True)
 
 
 class PatientCategoryRecordSerializer(serializers.ModelSerializer):

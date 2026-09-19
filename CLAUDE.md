@@ -619,6 +619,362 @@ phone number for the real patient (via the Admin dashboard's existing
 Identity category editor) and real Twilio credentials, to verify an actual
 SMS arrives.
 
+## Visual + Navigation Redesign (added 2026-09-18)
+
+Not part of this file's original spec — the user asked for the whole
+frontend to "look professional," confirmed via `AskUserQuestion` to include
+layout/navigation restructuring, not just a CSS polish pass. Planned via
+Plan Mode after three parallel research passes read every frontend file in
+full (rather than guessing at structure) and the `ui-ux-pro-max` skill's
+`--design-system` search grounded the direction in real guidance: a first
+query skewed toward marketing/wellness patterns and was discarded per the
+skill's own "verify fit" instruction; a retry with "internal admin
+dashboard SaaS data-dense B2B tool" returned a genuine match — **Data-Dense
+Dashboard** style (grid layouts, KPI cards, tight tables) with **Fira Sans /
+Fira Code** typography. Brand colors (`--plum #6528d9`, `--plum-deep
+#2a0f5c`, `--lavender #c4b5fd`, `--off-white #faf7ff`) are unchanged —
+every hex value is byte-for-byte identical to before.
+
+The research found `App.css` (1574 lines, the single shared stylesheet for
+the whole app) had exactly 4 custom properties total, all color — zero
+spacing/radius/typography tokens, every other value a hand-picked literal
+repeated inconsistently. Fixed across 5 phases, each lint/build-verified:
+
+**Phase 1 — tokens + typography.** Added semantic aliases on top of the 4
+existing brand colors (`--color-primary`/`--color-surface`/`--color-text`/
+`--color-border`/etc.), named the 3 alert-color families that already
+existed as scattered literals (`--color-danger`/`--color-warning`/
+`--color-notice`/`--color-override`), and named the Security Ledger's 5
+exact severity hexes as `--severity-*` (values unchanged — CLAUDE.md pins
+these to an exact user-specified palette; `LedgerCharts3D.jsx`'s three.js
+color map can't consume a CSS var, so it stays its own literal JS constant,
+now documented as the one place these 5 values must be kept in sync by
+hand if they ever changed). Added a 4/8-based spacing scale and a radius
+scale naming values the literals already clustered around. Added
+`--font-sans` (Fira Sans, loaded via `index.html`'s Google Fonts `<link>` —
+the app previously had no font-family declared anywhere, pure browser
+default) as the base body font, and `--font-mono` (Fira Code) applied to
+code-like UI: the step-up `.assist-code-display`/`.assist-code-input` and
+the Ledger drilldown's raw-JSON `<pre>`. Converted all 37 `font-size`
+declarations from px to rem (base 16px) — the file previously mixed px and
+rem with no rule.
+
+**Phase 2 — unified card/heading/status-banner patterns.** Aligned
+`.panel-card`/`.card-row`/`.detail-block`/`.ledger-chart-card`'s
+radius/padding to the new scale (previously each had drifted to its own
+nearby-but-different pixel values); `.ledger-chart-card` deliberately keeps
+its own bolder plum border as an intentional second tier for
+data-visualization cards, not flattened into the others. Fixed
+`SecurityDashboard.jsx`'s `AdminsPanel` card-2 header (was a bare `<h3>`
+with no `.ledger-chart-card-header` wrapper, unlike every other
+chart-card header in the app). Gave the 4 decision-outcome classes
+(`.access-denied/.access-reduced/.access-audited/.access-override` —
+previously bare colored text with no box at all) a shared banner treatment
+(tint background + left accent bar via `currentColor`) — deliberately NOT
+applied to `.dev-error`/`.notice`, which are also used for small inline
+field-level errors where a full banner box would be too heavy.
+`.btn-danger` now composes off the same shared base selector
+`.btn-primary`/`.btn-secondary` already used instead of re-declaring it
+(this also fixed a real small gap: `.btn-danger:disabled` had no style at
+all before). `RoleAvatar.jsx`'s `AdminIcon` — the only mascot using brand
+colors for its outfit — now reads `var(--plum-deep)`/`var(--lavender)`/
+`var(--plum)` for its 3 fills instead of repeating the hex directly in SVG
+markup (same rendered color, one source instead of two).
+
+**Phase 3 — navigation restructure.** The one dashboard with a real gap:
+`ClinicalDashboard.jsx` previously passed `DashboardShell` a single static
+nav item with a no-op `onNavChange`, making the sidebar decorative for 5 of
+6 roles, while the old `AssistRequestsBanner` (colleague step-up requests)
+rendered inline at the top of every page load whether or not there was
+anything to see. Now a real 2-page nav — **Patients** (default, today's
+find-a-patient/ward-browse/record flow, unchanged) and **Colleague
+Requests** (the same banner's content, now its own page) — mirroring the
+`navItems`/`badgeCount` pattern `SecurityDashboard.jsx` already established
+for its own Alerts page. The polling/fetch state that used to live inside
+the banner component now lives in `ClinicalDashboard` itself (renamed
+`ColleagueRequestsPanel`, now a pure presentational component) so the
+pending-request count can drive the nav badge regardless of which page is
+active — same reasoning `SecurityDashboard.jsx`'s `openAlertCount` already
+uses. Unlike the old banner, the new page doesn't self-hide when
+empty — it shows "No pending requests right now" instead, since it's a
+real page now, not a conditional banner.
+
+**Phase 4 — responsive pass.** CLAUDE.md scopes this app to hospital
+desktop workstations ("no GPS; hospital desktops"), not a mobile target, so
+this was a modest tablet/small-desktop pass, not full mobile-first
+coverage. `.category-grid`/`.overview-grid` were already gracefully
+responsive via `repeat(auto-fit, minmax(...))` and needed no change,
+confirmed by inspection rather than assumed. Added a 720px breakpoint
+(reusing the exact value already established twice elsewhere in the file,
+for `.ledger-drilldown-split` and `.shell-header`, rather than introducing
+a new one-off number) that stacks `.entity-detail-row` (Staff/Patients/
+Admins' avatar-beside-details layout) and `.profile-detail-row` (the
+Profile page's photo-beside-fields layout) to a single column — both
+previously fixed-width layouts with zero breakpoint at all.
+
+**Phase 5 — verification pass.** Found and fixed one real accessibility
+gap while auditing focus-visible coverage: `.search-bar input` removed the
+browser's default focus outline (`outline: none`) with nothing replacing
+it, so a keyboard user tabbing into any search box in the app got zero
+visual feedback that it was focused. Fixed with a `.search-bar:focus-within`
+border-color change, same visual language `.login-form input:focus`
+already used elsewhere for the same "outline removed, replaced with a
+visible border" pattern. `LoginScene.jsx`'s existing `prefers-reduced-motion`
+handling was confirmed unaffected (untouched by this pass).
+**Not fixed, flagged instead:** `LedgerDonutChart3D`'s pop-in/pulse
+animations have no `prefers-reduced-motion` check — a pre-existing gap,
+not something this pass introduced, left alone since it's animation logic
+inside a three.js scene that's already had many rounds of careful prior
+tuning (see the Security Dashboard section's amendment history above) —
+out of scope for a visual/navigation redesign pass specifically.
+
+`npm run lint`/`npm run build` clean after every phase. **Live-verified**
+in-browser (Claude-in-Chrome, real admin/doctor accounts): Login, Admin
+(Overview/Staff/Patients), and Clinical (Patients page, the new Colleague
+Requests nav page, decision/record views) all confirmed — no console
+errors, no visual regressions, `.search-bar:focus-within` and the new
+navigation both render and behave correctly.
+
+**Amended the same day (2026-09-18, elevation + motion pass):** the user
+pushed back directly after the first pass — "why is the ui looking so
+static like ai made" — and they were right. Root cause, found by grepping
+rather than guessing: **zero `box-shadow` declarations anywhere in the
+1600+ line stylesheet**, and only a handful of `transition`s, all flat
+background-color swaps with no shadow/transform motion at all. Added a
+`--shadow-sm`/`--shadow-md`/`--shadow-lg` scale (plum-tinted rather than
+pure black, matching the brand instead of looking generic) and a shared
+`--ease` timing curve, then applied them across every major surface:
+`.panel-card`/`.card-row`/`.ledger-chart-card`/`.detail-block`/`.modal` all
+got resting shadows; `.card-row` and all 3 button variants
+(`.btn-primary`/`.btn-secondary`/`.btn-danger`) got a hover lift
+(`translateY` + bigger shadow) plus a proper `transition` (buttons
+previously had none at all — hover was instant). The single biggest fix:
+`.category-tile` (the plum ward/role browse tiles — the first thing on
+most list-heavy pages) went from a **flat single-color fill with a
+`filter: brightness(0.97)` hover** (barely perceptible) to a plum-to-
+plum-deep gradient (reusing the same gradient language `.login-brand-panel`
+already established) with real resting elevation and a visible hover lift
+— confirmed live, the hovered tile visibly separates from its flat
+neighbors. `.stat-card-top`/`.stat-card-bottom` (Overview page) got the
+same gradient + shadow treatment. Added a blanket
+`@media (prefers-reduced-motion: reduce)` rule collapsing every transition/
+animation added in this pass to near-zero duration, rather than gating each
+one individually. `npm run lint`/`npm run build` clean; live-verified
+against the real admin account — the Overview stat cards and Staff page's
+"Doctor" tile both show the gradient/shadow/lift clearly against their
+flat-before screenshots, no console errors.
+
+**Amended a third time (2026-09-18, charts added to Admin's Staff/Patients
+panels):** the user asked for the donut+bar chart pattern Security's
+dashboard already has, but on the **Admin dashboard's** Staff/Patients
+panels instead — confirmed via `AskUserQuestion` that this was a genuinely
+new addition (Admin's panels had no charts before this; only Security's
+`ActivityLookupPanel`/`AdminsPanel` did). A second `AskUserQuestion`
+resolved a real architecture conflict before writing any code: Security's
+donut is three.js, but CLAUDE.md scopes three.js to exactly two places
+(Security's own visualization, and the login page) and keeps every other
+screen plain React — confirmed the new Admin donut should be a real flat
+SVG chart, not three.js, keeping that rule intact rather than silently
+breaking it to match Security's look.
+
+Data-wise, these charts read from `getStaffSummary()`/`getPatientSummary()`
+— already fetched into `roleCounts`/`wardCounts` state for the existing
+category tiles, so no backend changes were needed. New
+`frontend/src/pages/DonutChart2D.jsx`: a generic plain-SVG donut over the
+same `rows: [{key, label, count, color}]` shape `LedgerCharts3D.jsx`'s
+`HorizontalBarChart` already uses (per-segment `<circle>` with
+`stroke-dasharray`/`stroke-dashoffset`, rotated -90° so segments start at
+12 o'clock, a center total label, and a `.ledger-chart-legend`-styled
+legend reusing the exact class names Security's donut legend already
+established). `HorizontalBarChart`/`heatColor` (previously internal to
+`LedgerCharts3D.jsx`) are now also exported for reuse. `StaffPanel` gets
+"Staff by Role" (bar, same heat-scale-by-busyness coloring Security's own
+role bar uses) + "Duty Status" (donut: on duty vs. off duty, both counts
+derived from `on_duty_by_role`/`by_role` summed over `STAFF_BROWSE_ROLES`
+only — deliberately excluding admin/security_officer, consistent with
+Staff-browsing already being scoped to the 5 clinical roles elsewhere in
+this panel; on-call isn't broken out as its own segment since there's no
+clinical-role-scoped on-call count available without a backend change, and
+this didn't seem worth one). `PatientPanel` gets "Patients by Ward" (bar)
++ "Ward Distribution" (donut) — deliberately the *same* `by_ward` data
+shown two ways (bar for magnitude, donut for proportion) since ward is the
+only real second dimension `getPatientSummary()` currently exposes; a new
+fixed `WARD_CHART_COLORS` palette (plum-family shades + gray for
+unassigned) keeps these visually distinct from the 5 pinned Ledger
+severity hues, which mean something different.
+
+**Amended a fourth time (2026-09-18, chart-then-tiles-then-search
+ordering):** per the user, both panels' default (nothing selected/
+searched) view now orders chart → category tiles → search bar, reversing
+the original search-bar-on-top layout. The search bar and error/notice
+feedback were extracted into local `searchRow`/`feedback` JSX variables
+(not duplicated markup) and conditionally placed: below the tiles in the
+default view, back above the results list once a role/ward is picked or a
+search is active (there's no chart to lead with there). `npm run lint`/
+`npm run build` clean. Verified functionally via direct DOM inspection
+(`document.body.innerText`, checked for real rendered `<circle>` elements
+with non-zero data) rather than a visual screenshot — the browser window
+was intermittently unresponsive/minimized (0×0 viewport) during this pass,
+unrelated to the app itself; confirmed both panels' default view reads
+chart → tiles → "+ Add Staff"/"+ Add Patient" in that order, and the
+drill-down view correctly reverts to search-bar-first with no console
+errors.
+
+**Amended a fifth time (2026-09-19, on-call segment + role/duty slicers +
+full roster list on the Staff panel):** three related asks from the user
+in one message. (1) The "Duty Status" donut gained a third "On call"
+segment (was on duty/off duty only) — uses the top-level `roleCounts.
+on_duty`/`on_call` fields directly rather than a role-scoped breakdown:
+admin/security_officer are `Staff.NO_WARD_DUTY_ROLES` and always `False`
+for both, so these two top-level counts are already effectively
+clinical-only in practice, and this is the exact same `on_duty`/`on_call`
+pair the Overview page's own "Total Staff" card has always shown — no
+backend change needed, and consistent with a real pre-existing data
+quirk already visible there (`on_duty` sometimes reads higher than the
+`on_duty_by_role` sum for the 5 browsable roles; confirmed this predates
+this change, not introduced by it, so left alone as out of scope). (2) The
+"Staff by Role" chart card gained two slicers — role then duty status —
+mirroring `SecurityDashboard.jsx`'s own `.ledger-slicers` pattern
+(`STAFF_DUTY_OPTIONS`, a local copy of that file's `DUTY_OPTIONS`, since
+the two slicers filter different things: the staff roster directly here,
+Ledger entries cross-referenced against staff there). (3) A new full
+roster list now renders below the search/Add-Staff row in the default
+view — independent of the tile-drill-down `results` list above it, so
+browsing it never disturbs that flow — fetched via `searchStaff('',
+roleFilter)` (the same call the tile-drill-down already uses) and
+filtered client-side by the two new slicers, scoped to
+`STAFF_BROWSE_ROLES` throughout (same 5-clinical-roles scoping already
+used everywhere else in this panel). A real bug surfaced and fixed before
+this shipped: the new state/effect block was first placed *before*
+`error`/`setError`'s own declaration in the component, so referencing
+`setError` inside the effect's `.catch()` hit a genuine temporal-dead-zone
+error (`oxlint` caught it: "Cannot access variable while it is being
+initialized") — fixed by moving the whole block after the existing state
+declarations, not by reordering `error` itself. `npm run lint`/`npm run
+build` clean. Verified live (Claude-in-Chrome, real admin account) via
+direct DOM inspection again (screenshots stayed unreliable this session):
+confirmed the slicers render, the donut shows a real "On call (0)"
+segment, the real doctor account appears in the new roster list with an
+"On duty" suffix, and changing the duty slicer to "Off duty" correctly
+filters the list to empty (the one real doctor is on duty) — no console
+errors.
+
+**Amended a sixth time (2026-09-19, both charts now driven by the
+slicers):** per the user, the two slicers added above were only wired to
+filter the new roster list — the "Staff by Role" bar and the "Duty
+Status" donut still always read the static, unfiltered `getStaffSummary()`
+counts, so changing a slicer visibly moved the list underneath but left
+both charts above it static. Both charts now derive their rows from
+`browseResults` (the same role/duty-filtered array the roster list already
+uses) instead of `roleCounts` — the bar counts each role's occurrences
+within `browseResults`, and the donut counts `on_duty`/`on_call` within
+`browseResults` the same way. A side effect, expected and not a bug: with
+the duty slicer set to a specific status, the donut correctly collapses
+toward that one segment (e.g. "Off duty" filters the whole card down to
+0/0/0 when the one real staff member is on duty) — that's the filter
+doing its job, not double-counting or losing data. `npm run lint`/`npm run
+build` clean. Verified live (Claude-in-Chrome, real admin account,
+DOM-inspection again): with no filters, the bar/donut/roster all agreed
+(Doctor: 1, On duty: 1); switching the duty slicer to "Off duty" correctly
+zeroed the bar and donut together with the roster ("No staff match the
+current filters"); switching back to "On duty" restored all three. No
+console errors.
+
+**Amended a seventh time (2026-09-19, same pattern applied to the Patients
+panel):** per the user, who pointed out the Staff-panel-only changes above
+left the Patients panel behind. `PatientPanel` gets the same treatment,
+scaled to one slicer instead of two since ward is the only browsable
+dimension there (no role/duty equivalent for patients): a ward `<select>`
+in the "Patients by Ward" chart card's header (`chartWardFilter`, options
+from `WARD_CHART_COLORS` — the same fixed ward-plus-unassigned list the
+tiles already use), a `browseResults` state fetched via
+`searchPatients('', chartWardFilter || undefined)` (client-side `!p.ward`
+filtering for the `'unassigned'` option, same as the existing
+`selectWardCategory`/`runSearch` special-casing elsewhere in this panel),
+and a full patient roster list rendered below the search/Add-Patient row.
+Both "Patients by Ward" (bar) and "Ward Distribution" (donut) now derive
+their rows from `browseResults` instead of the static `wardCounts`
+summary, so picking a ward in the slicer collapses both charts toward that
+ward together with the list — same expected-collapse behavior as the
+Staff panel's duty slicer, not a bug. `npm run lint`/`npm run build`
+clean (only the same pre-existing `set-state-in-effect` warning class
+already present elsewhere in this file). Verified live (Claude-in-Chrome,
+real admin account, DOM inspection): with no filter, the bar/donut/roster
+all agreed with the real data (Surgical Ward: 1, the one real patient);
+switching the slicer to "General Male Ward" correctly zeroed both charts
+and emptied the roster ("No patients match the current filter") while the
+ward tiles below (unaffected, static) still correctly showed Surgical
+Ward: 1; switching back to "All wards" restored all three. No console
+errors.
+
+**Amended an eighth time (2026-09-19, patient status field + chart swap):**
+per the user, who wanted the Patients panel's bar chart to show patient
+status (admitted/discharged/etc.) instead of ward, and the donut to become
+the ward chart with its own slicer. Confirmed via two `AskUserQuestion`
+rounds first, since "on appointment" in the user's own phrasing brushed
+directly against CLAUDE.md's explicit "do not build appointment booking or
+scheduling" exclusion: settled on a plain, manually-set current-state label
+— **Admitted / Discharged / Outpatient** — not a scheduling feature. New
+`patients.PatientStatus` (`TextChoices`, same shape as `staff.Ward`) and
+`Patient.status` (blank-by-default `CharField`, migration
+`patients/0004_patient_status.py`, applied to the real dev database) —
+manually set by an admin on the Patient panel's detail card, never
+computed, same convention as ward/on-duty/on-call. New
+`PATCH /api/patients/<id>/status/` (`PatientStatusUpdateView`, `IsAdmin`,
+mirrors `PatientWardUpdateView` exactly) and a `status` query param on the
+existing `GET /api/patients/` search endpoint (mirrors the existing `ward`
+param); `PatientSummaryView` gained `by_status` (mirrors `by_ward`,
+including an `unassigned` bucket for patients with no status set yet — the
+same necessary "not yet set" bucket ward already has, not a new status
+value). `PatientSummarySerializer` now includes `status`. 6 new backend
+tests (`patients.tests`: status update, invalid-status rejection,
+non-admin-forbidden, search-by-status filter, summary breakdown) — 37/37
+`patients` app tests passing.
+
+Frontend: `PatientPanel`'s left chart card is now **"Patient Status"**
+(`HorizontalBarChart`, new `PATIENT_STATUS_OPTIONS` color palette — green/
+lavender/amber/gray, distinct from both `WARD_CHART_COLORS` and the 5
+pinned Ledger severity hues) driven by `browseResults` grouped by
+`status`; the right card is now **"Patients by Ward"** (the donut,
+renamed from "Ward Distribution") and inherited the ward `<select>` slicer
+that used to sit on the bar card — so the one shared `chartWardFilter`
+still narrows the bar, the donut, and the roster list together, same
+collapse-toward-the-filter behavior as the seventh amendment established.
+The detail card gained a second "Status" dropdown + "Save status" button
+directly under the existing "Save ward" one (`updatePatientStatus`, new
+`frontend/src/api/patients.js` export), and the roster list's meta-line
+now appends the status label when one's set. `npm run lint`/`npm run
+build` clean (same pre-existing warning class as elsewhere). **Real bug
+found and fixed during live verification:** the backend dev server's
+autoreloader picked up the `views.py` changes but never re-registered the
+new `urls.py` route (`PATCH /api/patients/<id>/status/` 404'd against a
+live server whose process had been running since before this session's
+edits) — not a code bug, a stale-autoreload quirk; a full server restart
+picked up the route correctly on the very next request. Verified live
+(Claude-in-Chrome, real admin account, real patient `iuyjcghh`): set
+status to Admitted through the UI, confirmed the PATCH returned 200, the
+bar chart correctly moved from Unassigned:1 to Admitted:1 after a refetch,
+and the roster line picked up "· Admitted"; the ward slicer, now on the
+donut, still correctly collapsed both charts and the roster together when
+narrowed to a ward with no patients. The test status value was reverted
+back to blank afterward (not real data to leave behind) — the ward slicer
+was reset to "All wards" too. No console errors.
+
+**Amended a ninth time (2026-09-19, status slicer added):** per the user,
+the "Patient Status" bar chart gained its own status `<select>` slicer in
+its header (`chartStatusFilter`), mirroring the ward slicer already on the
+donut. The two slicers now combine: `browseResults`' fetch effect passes
+whichever filter is a concrete backend value as a `searchPatients()` query
+param and re-applies both dimensions client-side afterward (needed because
+`'unassigned'` isn't a real ward/status value server-side — blank is — so
+it's always filtered client-side regardless of which slicer set it,
+including when both are set at once). `npm run lint`/`npm run build`
+clean. Verified live (Claude-in-Chrome, real admin account): the status
+slicer renders with all 4 options; filtering to "Admitted" correctly
+zeroed both charts and the roster (the one real patient has no status
+set); filtering to "Unassigned" correctly matched that same real patient;
+reset back to "All statuses" afterward. No console errors.
+
 ## Offline Mode
 
 - Role/score decisioning and Emergency Override continue to work locally using the last-synced cache.
@@ -1333,6 +1689,99 @@ SMS arrives.
    still needs a second real clinical account or the user's own device:
    the colleague-approve/decline side of the assist flow, and the real
    biometric ceremony itself.
+
+   **Follow-up live verification (2026-09-17):** the colleague-approve/
+   decline side above is now confirmed too. A temporary second clinical
+   account (`STF-TEMP-VERIFY`, nurse) was created through the real
+   `POST /api/staff/create/` API specifically for this, and a genuine
+   `REDUCED_ACCESS` decision was produced for the real doctor account by
+   creating a fresh session with an unrecognized device/network plus
+   keystroke values tuned (via a dry-run of `scoring.engine._feature_similarity`
+   before writing anything) to land inside the 40-69% band without tripping
+   the hard behavioral gate — real factor inputs through the real scoring
+   pipeline, not a fabricated decision object. Clicking "Ask a colleague to
+   verify" in the doctor's browser tab created a real `StepUpAssistRequest`;
+   logging into a second tab as the temp nurse showed it in "Colleagues
+   asking for step-up verification"; Approve flipped the doctor's session to
+   full record access instantly. The temp nurse account, the verification
+   sessions/decisions, and the stale test `StepUpAssistRequest` rows were
+   all deleted afterward — the real `EMERGENCY_OVERRIDE`/etc. Ledger entries
+   this produced were left in place (append-only by design). **Still
+   outstanding:** the real biometric ceremony itself needs the user's own
+   physical device — structurally unreachable by browser automation, same
+   category of limitation as a native file-picker dialog.
+
+   **Amended the same day (2026-09-17, verification code added to the
+   assist flow):** per the user, approving a colleague's request is no
+   longer just a click — the requester's own "waiting for a colleague"
+   screen now displays a system-generated 6-digit code
+   (`scoring.views._generate_assist_code()`, `secrets.randbelow`, not
+   `random` — this gates a real access grant), and the colleague must read
+   it from the requester directly (in person or by phone) and type it into
+   the shared queue's new code field before Approve goes through. This
+   turns "vouching" into proof of actual contact between the two people,
+   not just a remote click on a notification. New
+   `StepUpAssistRequest.verification_code` (migration
+   `scoring/0007_stepupassistrequest_verification_code.py`), generated once
+   at request creation and never regenerated for the same pending row (a
+   duplicate `/assist/request/` call, already deduplicated via
+   `get_or_create`, returns the same code). **Deliberately asymmetric
+   serialization:** the existing `StepUpAssistRequestSerializer` (used by
+   the shared queue every *other* colleague sees, `StepUpAssistListView`)
+   still never exposes the code; a new `StepUpAssistRequestOwnSerializer`
+   (adds `verification_code`) is used only in `StepUpAssistRequestView`'s
+   own response to the requester who just created it — exposing the code on
+   the shared list would let anyone approve without ever actually
+   contacting the requester, defeating the point. Wrong-code attempts don't
+   get their own counter — `StepUpAssistApproveView` now checks and
+   increments the *decision's* existing `step_up_failed_attempts` (via
+   `hmac.compare_digest`, not `==`), the same counter/cap
+   (`STEP_UP_MAX_ATTEMPTS = 3`) a failed WebAuthn attempt already uses,
+   since both are just different methods through the same step-up gate; a
+   wrong code raises `STEP_UP_FAILED` same as a WebAuthn failure or an
+   explicit decline. Frontend: `ClinicalDashboard.jsx`'s "waiting for a
+   colleague" screen shows the large code (`.assist-code-display`);
+   `AssistRequestsBanner`'s shared queue gained a per-row 6-digit text input
+   (`.assist-code-input`, keyed by request id since several requests can be
+   pending at once) beside Approve, with its own inline error on a wrong
+   code. 8/8 `scoring.StepUpAssistTests` passing (2 new: wrong code
+   rejected and counts against the decision, three wrong codes locks out
+   further attempts even with the eventual correct one); full backend suite
+   green (282/282, see step 7's entry below for what else that run
+   covered). `npm run lint`/`npm run build` clean. **Live-verified**
+   end-to-end (Claude-in-Chrome, a diagnostic second clinical account
+   created and deleted afterward): a genuine 51% `REDUCED_ACCESS` decision
+   showed the code on the requester's screen; a wrong code on the
+   colleague's side correctly showed "Incorrect code." and left the request
+   pending; the real code then approved it, flipping the requester's
+   session to full access, confirmed both in the UI and directly against
+   the database (`step_up_verified=True`).
+
+   **Amended the next day (2026-09-18, narrowed to on-duty/on-call
+   colleagues in the requester's own ward):** per the user, confirmed via
+   two `AskUserQuestion` rounds. The assist pool used to be "any other
+   logged-in clinical colleague, hospital-wide" — now it's staff currently
+   on duty *or* on call (equivalent everywhere else in this app — the
+   Doctor rule, BTG's own gate) in the **same ward** as the requester.
+   Deliberately **no hospital-wide fallback** if nobody in-ward qualifies —
+   same reasoning the Nurse/Doctor rules already use for "nobody
+   legitimately connected": Break the Glass exists specifically to rescue
+   that case, so this doesn't need its own escape hatch. New
+   `scoring.views._is_eligible_assistant(colleague, requesting_staff)`
+   (`colleague.id != requesting_staff.id`, `colleague.on_duty or
+   colleague.on_call`, `colleague.ward == requesting_staff.ward`) — checked
+   in `StepUpAssistListView` (an ineligible caller, or one who isn't
+   themselves on duty/on call, sees an empty list) **and** enforced again in
+   `StepUpAssistApproveView`/`StepUpAssistDeclineView` (403, not just
+   hidden from the list) so a colleague who already knows a `request_id`
+   can't act on it via a direct API call either — same "not just the UI"
+   posture this app already applies to step-up gating elsewhere
+   (`PatientRecordView`). 11/11 `scoring.StepUpAssistTests` passing (3 new:
+   different-ward colleague sees nothing and is rejected server-side,
+   off-duty-and-not-on-call colleague likewise, on-call-but-not-on-duty
+   colleague in the same ward is correctly still eligible) — the 8
+   pre-existing tests needed no changes since their fixtures already used a
+   shared ward and `on_duty=True` for both parties.
 6. ✅ **Done (2026-09-12, closed out 2026-09-14).** Offline Mode. Planned via Plan Mode
    (`.claude/plans/greedy-humming-graham.md`) — full design decisions there,
    summarized here. Confirmed a hard constraint first: the real Ledger
@@ -1582,6 +2031,91 @@ SMS arrives.
    **Not yet live-verified against a real fingerprint** — CLAUDE.md's
    Enrollment data rule means that needs the user's own real finger, not
    synthetic test data; pending once supplied.
+
+   **Amended (2026-09-17, offline gap closed):** the "online only" gap
+   above is closed. Planned via Plan Mode (`.claude/plans/
+   greedy-humming-graham.md`); confirmed via `AskUserQuestion` that the
+   device caches the **full enrolled-patient roster** (every patient's
+   template + emergency summary), not just previously-viewed patients — a
+   partial cache would defeat identifying a patient this specific device
+   has never opened before, the exact "unconscious stranger" case this
+   feature exists for.
+
+   New `GET /api/identity/offline-bundle/` (`OfflineFingerprintBundleView`,
+   `IsClinicalStaff`) decrypts every `FingerprintTemplate` server-side and
+   returns the plaintext minutiae + the same minimal emergency summary
+   `identify()` already exposes, for the device to re-encrypt at rest
+   immediately on receipt — same protection level `refreshOfflineCache`
+   already gives full patient records. Frontend: `db.js` gained a
+   `fingerprints` IndexedDB store (bumped `DB_VERSION` to 2); new
+   `offline/fingerprintCache.js` caches the whole roster as one AES-GCM-
+   encrypted blob (matching always scans the whole roster anyway, mirroring
+   `IdentifyFingerprintView`'s own loop); refreshed best-effort on mount/
+   reconnect from `ClinicalDashboard.jsx`'s existing online/offline effect,
+   same silent-failure posture as `ensureSigningKeyRegistered()`.
+
+   The real new work: `offline/fingerprintExtraction.js`, a from-scratch
+   Canvas-2D-only port of `identity/extraction.py`'s pipeline (resize to
+   the same `CANONICAL_SIZE=400` → real tiled CLAHE with clip+redistribute+
+   bilinear blend, kept in scope rather than simplified away since it was
+   the actual fix for a real backend lighting bug already → Otsu threshold
+   → Zhang-Suen thinning → crossing-number minutiae detection), and
+   `offline/fingerprintMatching.js`, a direct port of `matching.py`'s
+   spatial-grid rigid-alignment `similarity_score` (own tolerance
+   constants, separate from the backend's). `FingerprintLookup`
+   (`ClinicalDashboard.jsx`) now takes an `online` prop: online behavior is
+   unchanged (server stays authoritative when reachable); offline, it runs
+   this pipeline against the cached roster instead.
+
+   **Known, stated-up-front risk:** enrollment stays online-only (Admin-
+   only, deliberate — nothing in CLAUDE.md's spec asks for offline
+   enrollment), so an offline probe (JS-extracted) is always matched
+   against a template extracted by the *Python* pipeline — cross-pipeline
+   matching, not the same-pipeline matching the online path has. The two
+   pipelines won't compute minutiae angle identically (Python's comes from
+   `fingerprint_feature_extractor`'s own orientation estimation, not
+   something a from-scratch client-side port can replicate exactly), so
+   offline match accuracy is honestly expected to be lower than online
+   until a live-tuning pass — mirroring what already happened to the
+   *online* path itself (a real performance bug, then a real accuracy bug,
+   both only found by testing against real photos). This is why the
+   tolerance constants live in their own file, separate from the backend's.
+
+   A new `emergencySummaryOnly` fallback was added to `openPatientOffline`
+   (`ClinicalDashboard.jsx`): previously, a cache-miss there always meant
+   "this patient hasn't been viewed offline yet, dead end" — but a
+   fingerprint match against the on-device roster can legitimately find a
+   patient this device has *never* opened before (the exact case this
+   whole feature exists for). When that happens, the roster's own bundled
+   emergency summary renders directly (blood type, allergies, meds,
+   diagnoses, next of kin) instead of the generic error — no decision is
+   computed and nothing is queued to the local ledger, since identification
+   isn't access-decisioning (matches the online `IdentifyFingerprintView`
+   itself, which never calls `record_event` either). If the device *does*
+   already have this patient's full record cached, behavior is unchanged.
+
+   3 new backend tests (`identity/tests.py`,
+   `OfflineFingerprintBundleViewTests`) — full suite green. No JS test
+   runner exists in this frontend (same limitation `scoringEngine.js`'s own
+   header comment already documents) — verified live instead
+   (Claude-in-Chrome): logged in as the real doctor account, confirmed the
+   roster downloads and caches encrypted in IndexedDB on a normal login;
+   simulated a real network outage (not just the `online`/`offline` DOM
+   events — `window.fetch` itself rejects any request to the backend, so a
+   latent bug couldn't silently fall through to the real server); fed a
+   synthetic (non-enrolled) test image through the offline "Search by
+   fingerprint" flow and confirmed it ran the full extraction+matching
+   pipeline against the cached roster with zero network calls and correctly
+   reported "No match found" — no crash, no console errors. **Not yet
+   verified with a real matching fingerprint photo** (same Enrollment data
+   constraint as the original online build — needs the user's own finger)
+   or the `emergencySummaryOnly` fallback specifically (the one real
+   enrolled patient was already cached on the test device from earlier in
+   the same session, so a genuine never-before-seen-patient match couldn't
+   be produced without fabricating data) — both pending live confirmation
+   from the user, and per the plan's own "Known risk" section, the first
+   of those may surface a real need to loosen `fingerprintMatching.js`'s
+   tolerances, a one-line follow-up if so.
 
 **Do not populate the database with any staff, patient, or fingerprint data until the user supplies it** — see Enrollment data below.
 

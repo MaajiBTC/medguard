@@ -17,6 +17,9 @@ import {
   verifyStepUpWebAuthn,
 } from '../api/scoring';
 import { useContextualCapture } from '../capture/contextual/useContextualCapture';
+import { extractMinutiae } from '../offline/fingerprintExtraction';
+import { getCachedFingerprintBundle, refreshFingerprintBundle } from '../offline/fingerprintCache';
+import { FINGERPRINT_MATCH_THRESHOLD, similarityScore } from '../offline/fingerprintMatching';
 import { ROLE_CEILINGS, computeOfflineDecision, computePatientAssignmentStatus } from '../offline/scoringEngine';
 import {
   cacheOwnProfile,
@@ -29,7 +32,7 @@ import {
   trySync,
 } from '../offline/syncManager';
 import { WARDS } from '../wards';
-import DashboardShell, { PatientsIcon, SearchIcon } from './DashboardShell';
+import DashboardShell, { AlertIcon, PatientsIcon, SearchIcon } from './DashboardShell';
 
 // Offline Mode (build step 6) -- how often the pending-sync badge refreshes
 // and a resync is attempted regardless of the browser's own online/offline
@@ -92,10 +95,7 @@ function timeAgo(isoString) {
  * identifies an *unknown* patient (unconscious, or otherwise unable to give
  * their hospital number) from a fingerprint photo. This is a scan-to-find
  * step, not gated behind an existing patient selection -- it doubles as
- * one, via `onView`. Deliberately doesn't try to work offline: real
- * minutiae extraction/matching needs image-processing that has no ready
- * client-side port (see the approved plan) -- this only ever calls the
- * server.
+ * one, via `onView`.
  *
  * Rendering is controlled by the parent (a button beside Search toggles
  * `open`, added 2026-09-14 per the user -- previously this owned its own
@@ -107,13 +107,47 @@ function timeAgo(isoString) {
  * settings.FINGERPRINT_MATCH_THRESHOLD -- not literally 100%, whatever the
  * closest real match is) opens the patient's record automatically and
  * closes this dropdown, same day, per the user -- no separate "View full
- * record" click needed. */
-function FingerprintLookup({ open, onView, onClose }) {
+ * record" click needed.
+ *
+ * Offline Mode's fingerprint gap (added 2026-09-17): while online, this
+ * still always calls the server (the more accurate Python pipeline stays
+ * authoritative whenever it's reachable). While offline, it runs a
+ * from-scratch client-side extraction+matching pipeline (../offline/
+ * fingerprintExtraction.js, ../offline/fingerprintMatching.js) against the
+ * whole enrolled roster cached on-device (../offline/fingerprintCache.js).
+ * A match found this way carries the roster's own bundled emergency
+ * summary, passed through onView's second argument -- see openPatient /
+ * openPatientOffline below for how that's used when this device has never
+ * cached this specific patient's full record. */
+function FingerprintLookup({ open, online, onView, onClose }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
 
   if (!open) return null;
+
+  const identifyOffline = async (file) => {
+    const probe = await extractMinutiae(file);
+    const bundle = await getCachedFingerprintBundle();
+    if (!bundle || !bundle.length) {
+      return { matched: false, score: 0, offlineNoBundle: true };
+    }
+
+    let best = null;
+    let bestScore = 0;
+    for (const entry of bundle) {
+      const score = similarityScore(probe, entry.minutiae);
+      if (score > bestScore) {
+        bestScore = score;
+        best = entry;
+      }
+    }
+
+    if (!best || bestScore < FINGERPRINT_MATCH_THRESHOLD) {
+      return { matched: false, score: Math.round(bestScore * 100) / 100 };
+    }
+    return { matched: true, score: bestScore, patient: best.patient, summary: best.summary };
+  };
 
   const handleFile = async (event) => {
     const file = event.target.files && event.target.files[0];
@@ -123,10 +157,10 @@ function FingerprintLookup({ open, onView, onClose }) {
     setError(null);
     setResult(null);
     try {
-      const data = await identifyFingerprint(file);
+      const data = online ? await identifyFingerprint(file) : await identifyOffline(file);
       setResult(data);
       if (data.matched) {
-        onView(data.patient);
+        onView(data.patient, { emergencySummary: data.summary });
         onClose();
       }
     } catch (err) {
@@ -143,6 +177,7 @@ function FingerprintLookup({ open, onView, onClose }) {
         network's down and they aren't already cached). Scans against every
         enrolled fingerprint and opens their record automatically on a
         match, using a minimal emergency summary until the full record loads.
+        {!online && ' Offline — using the on-device roster and a simplified matcher, so this may be less accurate than a normal connected scan.'}
       </p>
       <label className="btn-secondary file-label">
         {busy ? 'Identifying…' : 'Scan / upload fingerprint'}
@@ -150,12 +185,17 @@ function FingerprintLookup({ open, onView, onClose }) {
       </label>
 
       {error && <p role="alert" className="dev-error">{error}</p>}
+      {result && result.offlineNoBundle && (
+        <p className="meta-line">
+          No fingerprint roster cached on this device yet — connect once first.
+        </p>
+      )}
 
       {/* A match closes this dropdown and opens the record immediately
           (see handleFile above) -- so by the time a render could show a
           "matched" card here, this component has already unmounted. Only
           the no-match case is ever actually seen. */}
-      {result && !result.matched && (
+      {result && !result.matched && !result.offlineNoBundle && (
         <p className="meta-line">No match found (best score: {result.score}%).</p>
       )}
     </div>
@@ -163,47 +203,28 @@ function FingerprintLookup({ open, onView, onClose }) {
 }
 
 /** Any *other* clinical colleague's pending step-up assist requests (added
- * 2026-09-06) -- the fallback path for a device with no enrolled biometric.
- * Lives at the top of this dashboard, independent of whatever patient (if
- * any) the viewing clinician has open, since a colleague could need help at
- * any moment. */
-function AssistRequestsBanner() {
-  const [requests, setRequests] = useState([]);
-  const [error, setError] = useState(null);
-  const [actioningId, setActioningId] = useState(null);
-
-  const fetchRequests = useCallback(async () => {
-    try {
-      setRequests(await getStepUpAssistRequests());
-      setError(null);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchRequests();
-    const intervalId = setInterval(fetchRequests, ASSIST_BANNER_POLL_MS);
-    return () => clearInterval(intervalId);
-  }, [fetchRequests]);
-
-  const respond = async (id, action) => {
-    setActioningId(id);
-    try {
-      await action(id);
-      await fetchRequests();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setActioningId(null);
-    }
-  };
-
-  if (requests.length === 0 && !error) return null;
+ * 2026-09-06, moved to its own nav-addressable page 2026-09-18) -- the
+ * fallback path for a device with no enrolled biometric. State/polling
+ * lives in ClinicalDashboard itself (not here) so the pending count can
+ * drive the "Colleague Requests" nav badge regardless of which page is
+ * currently active -- this is purely presentational, mirroring how
+ * SecurityDashboard.jsx's AlertsPanel is fed by a count polled at that
+ * dashboard's own top level. Unlike the old inline banner, this doesn't
+ * self-hide when empty -- it's a real page now, so it shows an empty state
+ * instead of vanishing. */
+function ColleagueRequestsPanel({ requests, error, actioningId, codes, setCodes, rowErrors, onApprove, onDecline }) {
+  if (requests.length === 0 && !error) {
+    return (
+      <section className="panel-card assist-banner">
+        <h2>Colleagues asking for step-up verification</h2>
+        <p className="meta-line">No pending requests right now.</p>
+      </section>
+    );
+  }
 
   return (
     <section className="panel-card assist-banner">
-      <h3>Colleagues asking for step-up verification</h3>
+      <h2>Colleagues asking for step-up verification</h2>
       {error && <p role="alert" className="dev-error">{error}</p>}
       {requests.map((r) => (
         <div className="card-row" key={r.id}>
@@ -214,13 +235,26 @@ function AssistRequestsBanner() {
             <div className="meta-line">
               Patient {r.patient_hospital_number} · requested {timeAgo(r.requested_at)}
             </div>
+            <p className="meta-line">
+              Ask {r.requesting_staff_name.split(' ')[0]} for the code on their screen.
+            </p>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              className="assist-code-input"
+              placeholder="000000"
+              value={codes[r.id] || ''}
+              onChange={(e) => setCodes((prev) => ({ ...prev, [r.id]: e.target.value }))}
+            />
+            {rowErrors[r.id] && <p role="alert" className="dev-error">{rowErrors[r.id]}</p>}
           </div>
           <div className="card-row-actions">
             <button
               type="button"
               className="btn-primary"
               disabled={actioningId === r.id}
-              onClick={() => respond(r.id, approveStepUpAssist)}
+              onClick={() => onApprove(r.id)}
             >
               Approve
             </button>
@@ -228,7 +262,7 @@ function AssistRequestsBanner() {
               type="button"
               className="btn-secondary"
               disabled={actioningId === r.id}
-              onClick={() => respond(r.id, declineStepUpAssist)}
+              onClick={() => onDecline(r.id)}
             >
               Decline
             </button>
@@ -245,6 +279,67 @@ function AssistRequestsBanner() {
  * (scoring.decide), then render only the categories that decision actually granted.
  */
 function ClinicalDashboard({ staff, onLogout }) {
+  // Navigation restructure (2026-09-18): this dashboard previously passed
+  // DashboardShell a single static nav item with a no-op onNavChange,
+  // making the sidebar decorative. Now a real 2-page nav, mirroring the
+  // navItems/badgeCount pattern SecurityDashboard.jsx already established
+  // for its own Alerts page.
+  const [activePage, setActivePage] = useState('patients');
+
+  // Colleague step-up assist requests (added 2026-09-06, lifted up from the
+  // old always-rendered AssistRequestsBanner 2026-09-18 so the pending
+  // count can drive the "Colleague Requests" nav badge regardless of which
+  // page is active -- ColleagueRequestsPanel below is now purely
+  // presentational). Any *other* clinical colleague's pending requests,
+  // independent of whatever patient (if any) the viewing clinician has
+  // open, since a colleague could need help at any moment.
+  const [assistRequests, setAssistRequests] = useState([]);
+  const [assistError, setAssistError] = useState(null);
+  const [assistActioningId, setAssistActioningId] = useState(null);
+  const [assistCodes, setAssistCodes] = useState({});
+  const [assistRowErrors, setAssistRowErrors] = useState({});
+
+  const fetchAssistRequests = useCallback(async () => {
+    try {
+      setAssistRequests(await getStepUpAssistRequests());
+      setAssistError(null);
+    } catch (err) {
+      setAssistError(errorMessage(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAssistRequests();
+    const intervalId = setInterval(fetchAssistRequests, ASSIST_BANNER_POLL_MS);
+    return () => clearInterval(intervalId);
+  }, [fetchAssistRequests]);
+
+  const handleApproveAssist = async (id) => {
+    setAssistActioningId(id);
+    setAssistRowErrors((prev) => ({ ...prev, [id]: null }));
+    try {
+      await approveStepUpAssist(id, assistCodes[id] || '');
+      setAssistCodes((prev) => ({ ...prev, [id]: '' }));
+      await fetchAssistRequests();
+    } catch (err) {
+      setAssistRowErrors((prev) => ({ ...prev, [id]: errorMessage(err) }));
+    } finally {
+      setAssistActioningId(null);
+    }
+  };
+
+  const handleDeclineAssist = async (id) => {
+    setAssistActioningId(id);
+    try {
+      await declineStepUpAssist(id);
+      await fetchAssistRequests();
+    } catch (err) {
+      setAssistError(errorMessage(err));
+    } finally {
+      setAssistActioningId(null);
+    }
+  };
+
   const [session, setSession] = useState(null);
   const [assignedPatients, setAssignedPatients] = useState([]);
 
@@ -267,6 +362,11 @@ function ClinicalDashboard({ staff, onLogout }) {
   const [records, setRecords] = useState(null);
   const [viewError, setViewError] = useState(null);
   const [viewLoading, setViewLoading] = useState(false);
+  // Offline Mode's fingerprint gap -- a match found via the on-device
+  // roster for a patient this device has never viewed/cached before (no
+  // full record available offline). Rendered instead of the usual
+  // viewError "not available offline" message when this is set.
+  const [emergencySummaryOnly, setEmergencySummaryOnly] = useState(null);
 
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideCategory, setOverrideCategory] = useState('');
@@ -279,6 +379,10 @@ function ClinicalDashboard({ staff, onLogout }) {
   const [stepUpMode, setStepUpMode] = useState(null);
   const [stepUpSubmitting, setStepUpSubmitting] = useState(false);
   const [stepUpError, setStepUpError] = useState(null);
+  // The colleague-assist verification code (added 2026-09-17) -- shown only
+  // on this device's own "waiting for a colleague" screen; the colleague
+  // must be told it out of band (in person/by phone) and type it in.
+  const [assistCode, setAssistCode] = useState(null);
 
   // Offline Mode (build step 6) -- `online` mirrors navigator.onLine (link
   // layer only, see syncManager.js's isOnline() comment); the actual
@@ -345,9 +449,18 @@ function ClinicalDashboard({ staff, onLogout }) {
       refreshPending();
     };
 
+    // Offline Mode's fingerprint gap -- best-effort roster download, same
+    // silent-failure posture as ensureSigningKeyRegistered() in App.jsx.
+    // Only on mount (if already online) and on reconnect, not the plain
+    // sync-retry timer above -- a full roster re-download every
+    // OFFLINE_SYNC_POLL_MS would be far heavier than the small ledger sync
+    // that timer exists for.
+    if (isOnline()) refreshFingerprintBundle().catch(() => {});
+
     const handleOnline = () => {
       setOnline(true);
       attemptSync();
+      refreshFingerprintBundle().catch(() => {});
     };
     const handleOffline = () => setOnline(false);
 
@@ -387,12 +500,14 @@ function ClinicalDashboard({ staff, onLogout }) {
     setDecision(null);
     setRecords(null);
     setViewError(null);
+    setEmergencySummaryOnly(null);
     setOverrideOpen(false);
     setOverrideCategory('');
     setOverrideReason('');
     setOverrideError(null);
     setStepUpMode(null);
     setStepUpError(null);
+    setAssistCode(null);
   };
 
   const selectWardCategory = async (wardValue) => {
@@ -420,7 +535,7 @@ function ClinicalDashboard({ staff, onLogout }) {
   // See scoringEngine.js's top comment for the session-level-factor-reuse
   // simplification this depends on, and offline/syncManager.js for the
   // cache/queue mechanics.
-  const openPatientOffline = async (patient) => {
+  const openPatientOffline = async (patient, options = {}) => {
     const [cachedPatient, cachedSession] = await Promise.all([
       getCachedPatient(patient.id),
       getCachedSession(),
@@ -433,9 +548,19 @@ function ClinicalDashboard({ staff, onLogout }) {
       return;
     }
     if (!cachedPatient) {
-      setViewError({
-        detail: "This patient hasn't been made available offline yet — view them once while connected first.",
-      });
+      // A fingerprint match against the on-device roster can find a
+      // patient this device has never opened before (the exact
+      // unconscious/unidentified-stranger case this feature exists for) --
+      // there's no full cached record to fall back to, but the roster
+      // bundle already carries a minimal emergency summary, so show that
+      // instead of a dead-end error.
+      if (options.emergencySummary) {
+        setEmergencySummaryOnly(options.emergencySummary);
+      } else {
+        setViewError({
+          detail: "This patient hasn't been made available offline yet — view them once while connected first.",
+        });
+      }
       return;
     }
 
@@ -477,11 +602,12 @@ function ClinicalDashboard({ staff, onLogout }) {
     setOfflinePendingCount(await queueLength());
   };
 
-  const openPatient = async (patient) => {
+  const openPatient = async (patient, options = {}) => {
     setSelectedPatient(patient);
     setDecision(null);
     setRecords(null);
     setViewError(null);
+    setEmergencySummaryOnly(null);
     setViewLoading(true);
     setOverrideOpen(false);
     setOverrideCategory('');
@@ -489,9 +615,10 @@ function ClinicalDashboard({ staff, onLogout }) {
     setOverrideError(null);
     setStepUpMode(null);
     setStepUpError(null);
+    setAssistCode(null);
 
     if (!online) {
-      await openPatientOffline(patient);
+      await openPatientOffline(patient, options);
       setViewLoading(false);
       return;
     }
@@ -524,7 +651,7 @@ function ClinicalDashboard({ staff, onLogout }) {
       if (err.status === undefined) {
         // A real network failure (fetch never got a response), not a
         // server-side rejection -- fall back to the offline cache.
-        await openPatientOffline(patient);
+        await openPatientOffline(patient, options);
       } else {
         setViewError(err.data || { detail: err.message });
       }
@@ -545,6 +672,7 @@ function ClinicalDashboard({ staff, onLogout }) {
         setRecords(recordsData);
         setDecision((d) => (d ? { ...d, step_up_required: false, step_up_verified: true } : d));
         setStepUpMode(null);
+        setAssistCode(null);
       } catch {
         /* still waiting -- not an error worth surfacing on every poll tick */
       }
@@ -574,7 +702,8 @@ function ClinicalDashboard({ staff, onLogout }) {
     if (!decision) return;
     setStepUpError(null);
     try {
-      await requestStepUpAssist(decision.id);
+      const assistRequest = await requestStepUpAssist(decision.id);
+      setAssistCode(assistRequest.verification_code);
       setStepUpMode('assist-waiting');
     } catch (err) {
       setStepUpError(err.data || { detail: err.message });
@@ -696,24 +825,43 @@ function ClinicalDashboard({ staff, onLogout }) {
     offlineStatus = `${offlinePendingCount} pending sync`;
   }
 
+  const clinicalNavItems = [
+    { key: 'patients', label: 'Patients', icon: <PatientsIcon /> },
+    { key: 'requests', label: 'Colleague Requests', icon: <AlertIcon />, badgeCount: assistRequests.length },
+  ];
+  const pageTitle = activePage === 'requests' ? 'Colleague Requests' : 'Patients';
+
   return (
     <DashboardShell
-      navItems={[{ key: 'patients', label: 'Patients', icon: <PatientsIcon /> }]}
-      activeItem="patients"
-      onNavChange={() => {}}
+      navItems={clinicalNavItems}
+      activeItem={activePage}
+      onNavChange={setActivePage}
       staff={staff}
       onLogout={onLogout}
-      title="Patients"
+      title={pageTitle}
       offlineStatus={offlineStatus}
     >
+      {activePage === 'requests' && (
+        <ColleagueRequestsPanel
+          requests={assistRequests}
+          error={assistError}
+          actioningId={assistActioningId}
+          codes={assistCodes}
+          setCodes={setAssistCodes}
+          rowErrors={assistRowErrors}
+          onApprove={handleApproveAssist}
+          onDecline={handleDeclineAssist}
+        />
+      )}
+
+      {activePage === 'patients' && (
+      <>
       {session && (
         <p className="meta-line">
           {session.on_duty ? 'On duty' : 'Off duty'}
           {session.ward ? ` · ${session.ward}` : ''}
         </p>
       )}
-
-      <AssistRequestsBanner />
 
       <section>
         <h2>Find a patient</h2>
@@ -748,6 +896,7 @@ function ClinicalDashboard({ staff, onLogout }) {
 
         <FingerprintLookup
           open={fingerprintOpen}
+          online={online}
           onView={openPatient}
           onClose={() => setFingerprintOpen(false)}
         />
@@ -846,6 +995,24 @@ function ClinicalDashboard({ staff, onLogout }) {
             </p>
           )}
 
+          {emergencySummaryOnly && (
+            <div className="panel-card">
+              <p className="meta-line">
+                <strong>Emergency summary only</strong> — found via offline
+                fingerprint match; this device has no full cached record for
+                this patient, so nothing else can be shown until reconnected.
+              </p>
+              <ul className="summary-list">
+                <li><span className="detail-label">Blood type:</span> {emergencySummaryOnly.blood_type || '—'}</li>
+                <li><span className="detail-label">Drug allergies:</span> {emergencySummaryOnly.drug_allergies || '—'}</li>
+                <li><span className="detail-label">Other allergies:</span> {emergencySummaryOnly.other_allergies || '—'}</li>
+                <li><span className="detail-label">Current medications:</span> {emergencySummaryOnly.current_medications || '—'}</li>
+                <li><span className="detail-label">Current diagnoses:</span> {emergencySummaryOnly.current_diagnoses || '—'}</li>
+                <li><span className="detail-label">Next of kin:</span> {emergencySummaryOnly.next_of_kin || '—'}</li>
+              </ul>
+            </div>
+          )}
+
           {decision && decision.decision_type === 'ACCESS_DENIED' && (
             <p role="alert" className="access-denied">
               Access denied. Score: {decision.score.toFixed(0)}%.
@@ -901,13 +1068,27 @@ function ClinicalDashboard({ staff, onLogout }) {
                   )}
                 </>
               ) : (
-                <p className="meta-line">
-                  Waiting for a colleague to verify this session — this checks
-                  automatically.{' '}
-                  <button type="button" className="link-button" onClick={() => setStepUpMode(null)}>
-                    Cancel and try something else
-                  </button>
-                </p>
+                <div className="assist-waiting-code">
+                  <p className="meta-line">
+                    Give this code to your colleague — in person or by phone — and have
+                    them enter it when they approve:
+                  </p>
+                  <p className="assist-code-display">{assistCode}</p>
+                  <p className="meta-line">
+                    Waiting for them to verify this session — this checks
+                    automatically.{' '}
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => {
+                        setStepUpMode(null);
+                        setAssistCode(null);
+                      }}
+                    >
+                      Cancel and try something else
+                    </button>
+                  </p>
+                </div>
               )}
               {stepUpError && (
                 <p role="alert" className="dev-error">
@@ -1023,6 +1204,8 @@ function ClinicalDashboard({ staff, onLogout }) {
             </div>
           )}
         </section>
+      )}
+      </>
       )}
     </DashboardShell>
   );

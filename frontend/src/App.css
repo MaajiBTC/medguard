@@ -13,6 +13,99 @@
   --plum-deep: #2a0f5c;
   --lavender: #c4b5fd;
   --off-white: #faf7ff;
+
+  /* Semantic aliases on top of the 4 brand colors above -- added as part of
+     the 2026-09-18 redesign token pass. None of the 4 brand hex values
+     change; this just gives the rest of the stylesheet named roles to
+     reference instead of repeating literals (--color-border alone was
+     previously the same #ece5fa hex typed out in 5+ separate rules). */
+  --color-primary: var(--plum);
+  --color-on-primary: #fff;
+  --color-secondary: var(--lavender);
+  --color-background: var(--off-white);
+  --color-surface: #fff;
+  --color-text: #2b2440;
+  --color-text-muted: #7a6f96;
+  --color-border: #ece5fa;
+
+  /* Semantic status colors -- naming the 3 alert families that already
+     existed as scattered literals (danger/warning/notice), plus the
+     existing magenta family used specifically for Break the Glass/Disaster
+     Mode. Values are unchanged from what was already in use. */
+  --color-danger: #d1293d;
+  --color-danger-strong: #ff0000;
+  --color-warning: #b45309;
+  --color-warning-strong: #ff9300;
+  --color-notice: #16a34a;
+  --color-override: #e879f9;
+  --color-override-deep: #4a044e;
+
+  /* The Security Ledger's 5 event-type severity colors -- CLAUDE.md pins
+     these to an exact user-specified palette (see App.css's own
+     .severity-* rules below), so the VALUES never change here. This just
+     gives the CSS side one source instead of the hex being hand-typed in
+     each .severity-* rule. LedgerCharts3D.jsx's three.js color map can't
+     consume a CSS var (WebGL needs plain JS numbers) so it stays its own
+     literal constant -- the one place these five values must still be kept
+     in sync by hand if they were ever to change (they won't). */
+  --severity-standard: #00cc00;
+  --severity-audited: #ffff00;
+  --severity-reduced: #ff9300;
+  --severity-denied: #ff0000;
+  --severity-override: #0000ff;
+
+  /* Spacing scale (4/8-based) -- naming the values page literals already
+     clustered around, not introducing new sizes. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 64px;
+
+  /* Radius scale -- same idea: names what was already a handful of
+     recurring values (6/8/10/12px plus the pill shape). */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* Typography -- new for this pass (the app previously had no font-family
+     declaration anywhere, i.e. pure browser-default sans). Fira Sans for
+     UI text, Fira Code for anything literal/code-like (staff IDs, hospital
+     numbers, ledger hashes/sequence numbers, timestamps, the step-up
+     verification code) -- matches the ui-ux-pro-max skill's "Data-Dense
+     Dashboard" typography match for this kind of internal tool. */
+  --font-sans: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  /* Elevation + motion (added 2026-09-18, second redesign pass -- the
+     stylesheet had zero box-shadow declarations anywhere and only a
+     handful of transitions, all flat background-color swaps -- exactly
+     what reads as static/flat. Shadows are plum-tinted rather than pure
+     black, matching the brand instead of looking generic; --ease is the
+     one timing curve every hover/press transition below now shares. */
+  --shadow-sm: 0 1px 2px rgba(42, 15, 92, 0.06), 0 1px 3px rgba(42, 15, 92, 0.08);
+  --shadow-md: 0 2px 6px rgba(42, 15, 92, 0.08), 0 4px 12px rgba(42, 15, 92, 0.08);
+  --shadow-lg: 0 8px 20px rgba(42, 15, 92, 0.14), 0 2px 6px rgba(42, 15, 92, 0.08);
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-text);
+}
+
+/* Blanket safety net for every hover-lift/transition added in this pass --
+   collapses them to effectively instant rather than trying to gate each
+   one individually. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
 }
 
 .login-page {
@@ -48,7 +141,7 @@
 
 .login-brand-text h1 {
   margin: 8px 0 6px;
-  font-size: 40px;
+  font-size: 2.5rem;
   letter-spacing: -0.5px;
   color: #fff;
 }
@@ -56,7 +149,7 @@
 .login-tagline {
   margin: 0;
   color: rgba(250, 247, 255, 0.7);
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 
 .login-form-panel {
@@ -79,7 +172,7 @@
 
 .login-form h2 {
   margin: 0;
-  font-size: 32px;
+  font-size: 2rem;
   color: var(--plum-deep, #2a0f5c);
 }
 
@@ -104,6 +197,7 @@
   border-radius: 12px;
   background: #ede4fc;
   color: var(--plum-deep, #2a0f5c);
+  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
   margin-bottom: 4px;
 }
 
@@ -123,11 +217,14 @@
   background: var(--plum, #6528d9);
   color: #fff;
   cursor: pointer;
-  transition: background 0.15s ease;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.1s var(--ease);
 }
 
 .login-form button:hover:not(:disabled) {
   background: #5420b8;
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .login-form button:disabled {
@@ -137,8 +234,8 @@
 
 .login-error,
 .dev-error {
-  color: #d1293d;
-  font-size: 14px;
+  color: var(--color-danger);
+  font-size: 0.875rem;
 }
 
 .login-pending-spinner {
@@ -205,12 +302,32 @@ button {
   gap: 8px;
 }
 
+/* Decision-outcome status banners, unified 2026-09-18: these 4 were plain
+   colored text with no box at all; now share one banner treatment (tint
+   background + left accent bar) via `currentColor`, so each keeps its own
+   distinct tone color (set per class below) without 4 separate box-model
+   declarations drifting independently. Deliberately NOT applied to
+   .dev-error/.notice -- those are also used for small inline field-level
+   errors (e.g. "Incorrect code." under a code input) where a full banner
+   box would be too heavy; only these page-level decision banners get it. */
+.access-denied,
+.access-reduced,
+.access-audited,
+.access-override {
+  display: block;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border-left: 4px solid currentColor;
+  background: color-mix(in srgb, currentColor 8%, var(--color-surface));
+  font-weight: 600;
+}
+
 .access-denied {
-  color: #d1293d;
+  color: var(--color-danger);
 }
 
 .access-reduced {
-  color: #b45309;
+  color: var(--color-warning);
 }
 
 .access-audited {
@@ -218,7 +335,7 @@ button {
 }
 
 .access-override {
-  color: #e879f9;
+  color: var(--color-override);
 }
 
 .override-control {
@@ -226,8 +343,8 @@ button {
 }
 
 .override-button {
-  border: 1px solid #e879f9;
-  color: #e879f9;
+  border: 1px solid var(--color-override);
+  color: var(--color-override);
   background: transparent;
   border-radius: 6px;
   padding: 8px 12px;
@@ -239,7 +356,7 @@ button {
   flex-direction: column;
   gap: 8px;
   max-width: 480px;
-  border: 1px solid #e879f9;
+  border: 1px solid var(--color-override);
   border-radius: 8px;
   padding: 12px;
 }
@@ -249,8 +366,8 @@ button {
 }
 
 .notice {
-  color: #16a34a;
-  font-size: 14px;
+  color: var(--color-notice);
+  font-size: 0.875rem;
 }
 
 .category-editor {
@@ -276,10 +393,11 @@ button {
 }
 
 .ledger-chart-card {
-  background: #fff;
+  background: var(--color-surface);
   border: 1px solid var(--plum);
-  border-radius: 12px;
-  padding: 16px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
 }
 
 /* A small background chip behind just the title text (corrected 2026-08-31 --
@@ -312,7 +430,7 @@ button {
 
 .slicer-input {
   font: inherit;
-  font-size: 12px;
+  font-size: 0.75rem;
   padding: 5px 8px;
   border-radius: 6px;
   border: 1px solid var(--plum);
@@ -323,6 +441,26 @@ button {
 .ledger-chart-mount {
   width: 100%;
   height: 220px;
+}
+
+/* Admin dashboard's Staff/Patients summary charts (added 2026-09-18) --
+   scoped shorter than the default .ledger-chart-mount height above:
+   these have only 2-5 simple segments/bars (not Security's richer
+   role/event breakdowns), and the user asked for less vertical space so
+   the tiles and search bar below don't feel crowded against them. Scoped
+   to this one wrapper class rather than changing .ledger-chart-mount
+   itself, which would also shrink Security dashboard's own charts. */
+.admin-summary-charts {
+  margin-bottom: var(--space-4);
+}
+
+.admin-summary-charts .ledger-chart-mount {
+  height: 130px;
+}
+
+.admin-summary-charts .role-bar-chart {
+  min-height: 130px;
+  gap: 8px;
 }
 
 /* Donut card only (2026-08-31, per the user): legend and donut sit side by
@@ -363,7 +501,7 @@ button {
 }
 
 .role-bar-label {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--plum-deep);
   white-space: nowrap;
   overflow: hidden;
@@ -384,7 +522,7 @@ button {
 }
 
 .role-bar-count {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--plum-deep);
   text-align: right;
@@ -404,7 +542,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--plum-deep);
 }
 
@@ -434,8 +572,8 @@ button {
   flex-direction: column;
   gap: 2px;
   padding: 8px 0;
-  border-bottom: 1px solid #ece5fa;
-  font-size: 13px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.8125rem;
 }
 
 .admin-action-row:last-child {
@@ -452,7 +590,7 @@ button {
 }
 
 .admin-action-time {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: rgba(42, 15, 92, 0.6);
 }
 
@@ -477,6 +615,24 @@ button {
 .entity-detail-info {
   flex: 1;
   min-width: 0;
+}
+
+/* Responsive pass (2026-09-18) -- this row sits inside a .ledger-chart-card,
+   itself one of two side-by-side columns in .ledger-chart-row (which already
+   stacks under 700px), so .entity-detail-row's own fixed 46% avatar column
+   can get cramped well before that outer stack kicks in. Reuses the same
+   720px breakpoint already established for .ledger-drilldown-split/
+   .shell-header below, rather than introducing another one-off value. */
+@media (max-width: 720px) {
+  .entity-detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .entity-detail-avatar {
+    flex: 0 0 auto;
+    align-self: center;
+  }
 }
 
 .role-avatar {
@@ -514,6 +670,16 @@ button {
   align-items: flex-start;
   gap: 24px;
   margin-top: 12px;
+}
+
+/* Responsive pass (2026-09-18) -- was a fixed 2-column grid with no
+   breakpoint at all; stacks to one column so the photo and labeled fields
+   don't get squeezed into unreadably narrow halves. Same 720px breakpoint
+   as .entity-detail-row above. */
+@media (max-width: 720px) {
+  .profile-detail-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .profile-detail-photo {
@@ -603,13 +769,13 @@ button {
 .ledger-verify-ok {
   color: #0a7a2f;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .ledger-verify-bad {
-  color: #ff0000;
+  color: var(--color-danger-strong);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 /* Security alerts (added 2026-09-06) -- one card per alert, red-striped while
@@ -623,8 +789,8 @@ button {
 }
 
 .alert-card {
-  border: 1px solid #ece5fa;
-  border-left: 4px solid #ff0000;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-danger-strong);
   border-radius: 12px;
   padding: 14px 16px;
   background: #fff;
@@ -676,7 +842,7 @@ button {
   border-radius: 10px;
   background: #e11d48;
   color: #fff;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 700;
   text-align: center;
 }
@@ -685,7 +851,7 @@ button {
    2026-09-06, mechanism replaced device biometrics/colleague-assist the
    same day -- see CLAUDE.md). */
 .step-up-control {
-  border: 1px solid #ece5fa;
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 14px 16px;
   margin-top: 12px;
@@ -696,7 +862,33 @@ button {
    2026-09-06) -- a plain panel-card, just with the same red accent the
    alerts/lockout surfaces already use so it reads as "needs attention". */
 .assist-banner {
-  border-left: 4px solid #ff9300;
+  border-left: 4px solid var(--color-warning-strong);
+}
+
+/* The requester's own colleague-assist verification code (added
+   2026-09-17) -- large and letter-spaced so it's easy to read aloud or
+   over the phone. */
+.assist-code-display {
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  color: var(--plum-deep);
+  text-align: center;
+  margin: 8px 0;
+}
+
+/* The colleague's code-entry field beside Approve on the assist banner
+   (added 2026-09-17). */
+.assist-code-input {
+  width: 7em;
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  letter-spacing: 0.2em;
+  text-align: center;
+  padding: 6px 8px;
+  border: 1px solid #d8cdf0;
+  border-radius: 8px;
 }
 
 /* Live feed: a tinted "tray" holding one white row-card per entry (added
@@ -718,13 +910,13 @@ button {
   grid-template-columns: 50px 190px 160px 1fr 140px;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
+  font-size: 0.875rem;
   min-width: 640px;
 }
 
 .ledger-row-card-header {
   padding: 4px 14px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--plum-deep);
 }
@@ -748,23 +940,23 @@ button {
    stripe + keeping body text its normal color keeps every row legible while
    still using the exact requested hues. */
 .ledger-row-card-entry.severity-STANDARD_ACCESS {
-  border-left-color: #00cc00;
+  border-left-color: var(--severity-standard);
 }
 
 .ledger-row-card-entry.severity-AUDITED_DEVIATION {
-  border-left-color: #ffff00;
+  border-left-color: var(--severity-audited);
 }
 
 .ledger-row-card-entry.severity-REDUCED_ACCESS {
-  border-left-color: #ff9300;
+  border-left-color: var(--severity-reduced);
 }
 
 .ledger-row-card-entry.severity-ACCESS_DENIED {
-  border-left-color: #ff0000;
+  border-left-color: var(--severity-denied);
 }
 
 .ledger-row-card-entry.severity-EMERGENCY_OVERRIDE {
-  border-left-color: #0000ff;
+  border-left-color: var(--severity-override);
 }
 
 .ledger-drilldown {
@@ -777,7 +969,8 @@ button {
 .ledger-drilldown pre {
   margin: 0;
   overflow-x: auto;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
   max-height: 320px;
 }
 
@@ -808,7 +1001,7 @@ button {
 .ledger-ai-panel h4 {
   margin: 0 0 8px;
   color: var(--plum-deep);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 /* Dashboard shell (new): fixed light plum/lavender/off-white brand palette, same
@@ -854,7 +1047,7 @@ button {
 }
 
 .sidebar-brand {
-  font-size: 22px;
+  font-size: 1.375rem;
   font-weight: 700;
   letter-spacing: -0.3px;
   color: #fff;
@@ -880,6 +1073,7 @@ button {
   color: rgba(250, 247, 255, 0.75);
   font: inherit;
   cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
 }
 
 .sidebar-nav-item:hover {
@@ -946,7 +1140,7 @@ button {
 
 .shell-header-page-label {
   margin: 0;
-  font-size: 17px;
+  font-size: 1.0625rem;
   font-weight: 600;
   color: var(--lavender);
   overflow: hidden;
@@ -977,7 +1171,7 @@ button {
   align-items: center;
   gap: 10px;
   justify-self: center;
-  font-size: 24px;
+  font-size: 1.5rem;
   font-weight: 800;
   color: #fff;
   white-space: nowrap;
@@ -1042,8 +1236,20 @@ button {
   max-width: 420px;
   padding: 10px 14px;
   border-radius: 10px;
+  border: 1px solid transparent;
   background: #f1ecfb;
   color: #7a6f96;
+  transition: border-color 0.15s var(--ease);
+}
+
+/* Accessibility pass (2026-09-18): .search-bar input below removes the
+   default focus outline with nothing replacing it -- a real gap (Priority 1
+   in the ui-ux-pro-max skill's checklist: "Removing focus rings" is
+   flagged as a top anti-pattern). Gives the whole pill a visible border on
+   focus instead, same visual language .login-form input:focus already
+   uses elsewhere. */
+.search-bar:focus-within {
+  border-color: var(--plum);
 }
 
 .search-bar svg {
@@ -1082,6 +1288,18 @@ button {
   color: var(--plum-deep);
 }
 
+/* Offline fingerprint match's emergency-summary-only fallback (added
+   2026-09-17) -- a patient this device has never cached a full record for,
+   found only via the on-device fingerprint roster while offline. */
+.summary-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* Role/section tabs */
 
 .role-tabs {
@@ -1097,7 +1315,7 @@ button {
   background: #f1ecfb;
   color: var(--plum-deep);
   font: inherit;
-  font-size: 13px;
+  font-size: 0.8125rem;
   cursor: pointer;
 }
 
@@ -1112,13 +1330,20 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-4);
   flex-wrap: wrap;
-  padding: 16px 20px;
-  margin-bottom: 12px;
-  border: 1px solid #ece5fa;
-  border-radius: 12px;
-  background: #fff;
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
+}
+
+.card-row:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .card-row-main {
@@ -1136,7 +1361,7 @@ button {
 }
 
 .card-row-main .meta-line {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: #7a6f96;
 }
 
@@ -1153,7 +1378,7 @@ button {
   align-items: center;
   padding: 2px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -1178,22 +1403,32 @@ button {
 /* Buttons */
 
 .btn-primary,
-.btn-secondary {
+.btn-secondary,
+.btn-danger {
   padding: 9px 16px;
   border-radius: 8px;
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.1s var(--ease);
 }
 
 .btn-primary {
   border: none;
   background: var(--plum);
   color: #fff;
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: #5420b8;
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .btn-secondary {
@@ -1204,27 +1439,27 @@ button {
 
 .btn-secondary:hover:not(:disabled) {
   background: #f6f1fd;
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .btn-primary:disabled,
-.btn-secondary:disabled {
+.btn-secondary:disabled,
+.btn-danger:disabled {
   opacity: 0.6;
   cursor: default;
 }
 
 .btn-danger {
-  padding: 9px 16px;
-  border-radius: 8px;
   border: 1px solid #f3d9dc;
-  background: #fff;
+  background: var(--color-surface);
   color: #9d2f3d;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
 }
 
 .btn-danger:hover:not(:disabled) {
   background: #fbe9eb;
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 /* Reveal-before-acting confirmation block (delete account, etc.) -- same
@@ -1241,7 +1476,7 @@ button {
 .danger-confirm p {
   margin: 0 0 12px;
   color: #9d2f3d;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 /* Modal */
@@ -1266,6 +1501,7 @@ button {
   border-radius: 14px;
   background: #fff;
   overflow: hidden;
+  box-shadow: var(--shadow-lg);
 }
 
 .modal-header {
@@ -1279,14 +1515,14 @@ button {
 
 .modal-header h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 1.125rem;
 }
 
 .modal-close {
   border: none;
   background: transparent;
   color: #fff;
-  font-size: 22px;
+  font-size: 1.375rem;
   line-height: 1;
   cursor: pointer;
 }
@@ -1307,7 +1543,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--plum-deep);
   margin-bottom: 14px;
@@ -1327,20 +1563,28 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--plum-deep);
   margin-bottom: 14px;
 }
 
-/* Inline detail/edit panel (fixed light palette, not dark-mode reactive) */
+/* Inline detail/edit panel (fixed light palette, not dark-mode reactive).
+   Card language, unified 2026-09-18: every plain "content card" in the app
+   (.panel-card, .card-row, .detail-block) now shares the same radius/
+   padding scale via the tokens above -- previously each had picked its own
+   nearby-but-different pixel values by hand. .ledger-chart-card keeps its
+   own bolder plum border deliberately (see its own rule below) as an
+   intentional second tier for data-visualization cards specifically, not
+   an inconsistency to flatten away. */
 
 .panel-card {
-  border: 1px solid #ece5fa;
-  border-radius: 12px;
-  padding: 20px;
-  margin-top: 16px;
-  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  margin-top: var(--space-4);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .panel-card h3,
@@ -1350,12 +1594,13 @@ button {
 }
 
 .detail-block {
-  border: 1px solid #ece5fa;
-  border-radius: 8px;
-  padding: 10px 14px;
-  margin-bottom: 8px;
-  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-2);
+  background: var(--color-surface);
   color: var(--plum-deep);
+  box-shadow: var(--shadow-sm);
 }
 
 .detail-block summary {
@@ -1366,7 +1611,7 @@ button {
 .detail-block h4 {
   margin: 12px 0 8px;
   color: var(--plum-deep);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 /* Back link (category detail -> categories) */
@@ -1398,6 +1643,7 @@ button {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px;
+  margin-bottom: var(--space-6);
 }
 
 /* Clinical dashboard's "Assigned to you" list, moved below the ward tiles
@@ -1413,7 +1659,14 @@ button {
 }
 
 /* No sub-breakdown here (just a label + count), so it stays a single solid
-   card -- plum, same as the two-card stat groups' top/headline card. */
+   card -- plum, same as the two-card stat groups' top/headline card.
+   Redesign pass (2026-09-18): was a flat single-color fill with a
+   barely-perceptible brightness(0.97) hover and no shadow/motion at all --
+   the single biggest contributor to the whole app reading as static/flat,
+   since this is the first thing on every list-heavy page. Gradient reuses
+   the same plum-to-plum-deep language .login-brand-panel already
+   establishes elsewhere, given real elevation at rest, and lifts further
+   with a bigger shadow on hover instead of just darkening a shade. */
 .category-tile {
   display: flex;
   flex-direction: column;
@@ -1422,14 +1675,22 @@ button {
   padding: 20px;
   border: none;
   border-radius: 12px;
-  background: var(--plum);
+  background: linear-gradient(160deg, var(--plum) 0%, var(--plum-deep) 130%);
   color: var(--off-white);
   cursor: pointer;
   text-align: left;
+  box-shadow: var(--shadow-md);
+  transition: box-shadow 0.2s var(--ease), transform 0.2s var(--ease);
 }
 
 .category-tile:hover {
-  filter: brightness(0.97);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-3px);
+}
+
+.category-tile:active {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 .category-tile-label {
@@ -1438,7 +1699,7 @@ button {
 }
 
 .category-tile-count {
-  font-size: 28px;
+  font-size: 1.75rem;
   font-weight: 700;
   color: var(--off-white);
 }
@@ -1470,24 +1731,25 @@ button {
   gap: 4px;
   padding: 20px 22px;
   border-radius: 12px;
-  background: var(--plum);
+  background: linear-gradient(160deg, var(--plum) 0%, var(--plum-deep) 130%);
   color: var(--off-white);
+  box-shadow: var(--shadow-md);
 }
 
 .stat-label {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: rgba(250, 247, 255, 0.75);
 }
 
 .stat-value {
-  font-size: 32px;
+  font-size: 2rem;
   font-weight: 700;
   color: var(--off-white);
 }
 
 .stat-card-top-alert {
-  background: #e879f9;
-  color: #4a044e;
+  background: var(--color-override);
+  color: var(--color-override-deep);
 }
 
 .stat-card-top-alert .stat-label {
@@ -1495,7 +1757,7 @@ button {
 }
 
 .stat-card-top-alert .stat-value {
-  color: #4a044e;
+  color: var(--color-override-deep);
 }
 
 .stat-card-bottom {
@@ -1505,10 +1767,11 @@ button {
   background: linear-gradient(160deg, var(--lavender) 0%, var(--off-white) 100%);
   border: 1px solid var(--plum);
   color: var(--plum-deep);
+  box-shadow: var(--shadow-sm);
 }
 
 .stat-card-bottom-alert {
-  background: linear-gradient(160deg, #a21caf 0%, #4a044e 100%);
+  background: linear-gradient(160deg, #a21caf 0%, var(--color-override-deep) 100%);
   border-color: transparent;
 }
 
@@ -1523,7 +1786,7 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: rgba(42, 15, 92, 0.7);
 }
 

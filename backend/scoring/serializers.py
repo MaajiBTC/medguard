@@ -71,6 +71,18 @@ class StepUpAssistRequestSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class StepUpAssistRequestOwnSerializer(StepUpAssistRequestSerializer):
+    """The same request, as seen by the REQUESTER who created it (added
+    2026-09-17) -- adds verification_code, which the shared-queue serializer
+    above deliberately never exposes. Used only by
+    StepUpAssistRequestView.post()'s own response; never returned to the
+    colleague who'll be asked to type this code in."""
+
+    class Meta(StepUpAssistRequestSerializer.Meta):
+        fields = StepUpAssistRequestSerializer.Meta.fields + ["verification_code"]
+        read_only_fields = fields
+
+
 class AccessDecisionSerializer(serializers.ModelSerializer):
     class Meta:
         model = AccessDecision

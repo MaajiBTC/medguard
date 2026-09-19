@@ -10,6 +10,7 @@ urlpatterns = [
     path("assigned-to-me/", views.MyAssignedPatientsView.as_view(), name="assigned-to-me"),
     path("create/", views.PatientCreateView.as_view(), name="create"),
     path("<int:patient_id>/ward/", views.PatientWardUpdateView.as_view(), name="ward-update"),
+    path("<int:patient_id>/status/", views.PatientStatusUpdateView.as_view(), name="status-update"),
     path("<int:patient_id>/records/all/", views.PatientCategoryRecordsView.as_view(), name="records-all"),
     path(
         "<int:patient_id>/records/<int:category>/",

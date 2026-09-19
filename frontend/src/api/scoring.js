@@ -86,10 +86,17 @@ function getStepUpAssistRequests() {
   return request('/scoring/step-up/assist-requests/');
 }
 
-/** POST /api/scoring/step-up/assist-requests/<id>/approve/ — vouches for a
- * colleague's reduced-access session, flipping its step_up_verified. */
-function approveStepUpAssist(requestId) {
-  return request(`/scoring/step-up/assist-requests/${requestId}/approve/`, { method: 'POST' });
+/** POST /api/scoring/step-up/assist-requests/<id>/approve/ — {code}
+ * (added 2026-09-17). Vouches for a colleague's reduced-access session,
+ * flipping its step_up_verified — but only once the requester's own
+ * verification code (read off their "waiting for a colleague" screen) is
+ * entered correctly; the shared queue this button lives on never carries
+ * the code itself. */
+function approveStepUpAssist(requestId, code) {
+  return request(`/scoring/step-up/assist-requests/${requestId}/approve/`, {
+    method: 'POST',
+    body: { code },
+  });
 }
 
 /** POST /api/scoring/step-up/assist-requests/<id>/decline/ */

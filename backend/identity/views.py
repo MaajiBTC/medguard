@@ -127,3 +127,42 @@ class IdentifyFingerprintView(APIView):
                 "summary": _emergency_summary(best_patient),
             }
         )
+
+
+class OfflineFingerprintBundleView(APIView):
+    """GET /api/identity/offline-bundle/ -- Offline Mode's fingerprint gap
+    (MedGuard Identity, added 2026-09-17). Identification mode can't know
+    which patient it's looking for in advance, so unlike the rest of
+    Offline Mode's per-patient cache (built organically as a clinician
+    views patients online), fingerprint lookup needs the *whole* enrolled
+    roster available on-device before the network ever goes down --
+    confirmed with the user via AskUserQuestion rather than assumed.
+
+    Decrypts every FingerprintTemplate server-side (same
+    identity.crypto.decrypt_minutiae call IdentifyFingerprintView already
+    makes in its matching loop) and returns the plaintext minutiae plus the
+    same minimal emergency summary identify already exposes -- the device
+    re-encrypts this at rest immediately on receipt (frontend/src/offline/
+    fingerprintCache.js), the same protection level refreshOfflineCache
+    already gives full patient records today. Open to any clinical staff
+    member, matching IdentifyFingerprintView's own permission model."""
+
+    permission_classes = [IsClinicalStaff]
+
+    def get(self, request):
+        templates = []
+        for template in FingerprintTemplate.objects.select_related("patient"):
+            patient = template.patient
+            templates.append(
+                {
+                    "patient": {
+                        "id": patient.id,
+                        "hospital_number": patient.hospital_number,
+                        "full_name": patient.full_name,
+                        "ward": patient.ward,
+                    },
+                    "minutiae": decrypt_minutiae(template.encrypted_template),
+                    "summary": _emergency_summary(patient),
+                }
+            )
+        return Response({"templates": templates})

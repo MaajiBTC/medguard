@@ -9,7 +9,7 @@ from rest_framework.test import APITestCase
 
 from staff.models import Staff, Ward
 
-from .models import Patient, PatientAssignment, PatientCategoryRecord
+from .models import Patient, PatientAssignment, PatientCategoryRecord, PatientStatus
 
 
 class PatientModelTests(TestCase):
@@ -341,3 +341,59 @@ class PatientApiTests(APITestCase):
     def test_unauthenticated_cannot_read_patient_summary(self):
         resp = self.client.get("/api/patients/summary/")
         self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_admin_can_update_patient_status(self):
+        """Added 2026-09-19, per the user -- same shape as ward update above."""
+        admin, token = self._login("adminPatientStatusApi", "pw-patient-api-18", "STF-P917", Staff.Role.ADMIN)
+        patient = Patient.objects.create(hospital_number="HN-P918", full_name="P", ward=Ward.EMERGENCY)
+        resp = self.client.patch(
+            f"/api/patients/{patient.id}/status/",
+            {"status": PatientStatus.ADMITTED},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        patient.refresh_from_db()
+        self.assertEqual(patient.status, PatientStatus.ADMITTED)
+
+    def test_invalid_status_rejected_on_status_update(self):
+        _admin, token = self._login("adminPatientStatusApi2", "pw-patient-api-19", "STF-P918", Staff.Role.ADMIN)
+        patient = Patient.objects.create(hospital_number="HN-P919", full_name="P", ward=Ward.EMERGENCY)
+        resp = self.client.patch(
+            f"/api/patients/{patient.id}/status/", {"status": "on_appointment"}, format="json", **self._auth(token)
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_non_admin_cannot_update_patient_status(self):
+        _staff, token = self._login("clerkPatientStatusApi", "pw-patient-api-20", "STF-P919", Staff.Role.CLERK)
+        patient = Patient.objects.create(hospital_number="HN-P920", full_name="P", ward=Ward.EMERGENCY)
+        resp = self.client.patch(
+            f"/api/patients/{patient.id}/status/",
+            {"status": PatientStatus.ADMITTED},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_search_filters_by_status(self):
+        Patient.objects.create(hospital_number="HN-P921", full_name="Admitted Patient", status=PatientStatus.ADMITTED)
+        Patient.objects.create(hospital_number="HN-P922", full_name="Outpatient Patient", status=PatientStatus.OUTPATIENT)
+        _staff, token = self._login("clerkStatusFilterApi", "pw-patient-api-21", "STF-P920", Staff.Role.CLERK)
+
+        resp = self.client.get(f"/api/patients/?status={PatientStatus.ADMITTED}", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        hospital_numbers = {row["hospital_number"] for row in resp.data}
+        self.assertIn("HN-P921", hospital_numbers)
+        self.assertNotIn("HN-P922", hospital_numbers)
+
+    def test_summary_counts_by_status_including_unassigned(self):
+        Patient.objects.create(hospital_number="HN-P923", full_name="A", status=PatientStatus.ADMITTED)
+        Patient.objects.create(hospital_number="HN-P924", full_name="B", status=PatientStatus.ADMITTED)
+        Patient.objects.create(hospital_number="HN-P925", full_name="C", status="")
+        _admin, token = self._login("adminPatientStatusApi3", "pw-patient-api-22", "STF-P921", Staff.Role.ADMIN)
+
+        resp = self.client.get("/api/patients/summary/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["by_status"]["admitted"], 2)
+        self.assertEqual(resp.data["by_status"]["discharged"], 0)
+        self.assertEqual(resp.data["by_status"]["unassigned"], 1)

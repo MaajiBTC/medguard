@@ -790,7 +790,9 @@ function AdminsPanel() {
           )}
         </div>
         <div className="ledger-chart-card">
-          <h3>{selected ? 'Activity' : 'Event breakdown'}</h3>
+          <div className="ledger-chart-card-header">
+            <h3>{selected ? 'Activity' : 'Event breakdown'}</h3>
+          </div>
           {selected ? <AdminActivityCard actions={actions} /> : <LedgerDonutChart3D entries={entries} />}
         </div>
       </div>

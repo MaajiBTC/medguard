@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from staff.models import Staff, Ward
 from staff.permissions import IsAdmin
 
-from .models import Patient, PatientAssignment, PatientCategoryRecord
+from .models import Patient, PatientAssignment, PatientCategoryRecord, PatientStatus
 from .serializers import (
     AssignedPatientSerializer,
     PatientAssignmentCreateSerializer,
@@ -16,26 +16,31 @@ from .serializers import (
     PatientCategoryContentUpdateSerializer,
     PatientCategoryRecordSerializer,
     PatientCreateSerializer,
+    PatientStatusUpdateSerializer,
     PatientSummarySerializer,
     PatientWardUpdateSerializer,
 )
 
 
 class PatientSearchView(APIView):
-    """GET /api/patients/?q=...&ward=... -- any authenticated staff (the search step
-    has to happen before the system knows what the caller is allowed to see; the
-    actual category content is gated separately, in scoring.views.PatientRecordView).
-    ward is an exact match against Ward, used by the Admin dashboard's ward-category
-    drill-down so results aren't limited by the 50-row search cap below."""
+    """GET /api/patients/?q=...&ward=...&status=... -- any authenticated staff (the
+    search step has to happen before the system knows what the caller is allowed to
+    see; the actual category content is gated separately, in
+    scoring.views.PatientRecordView). ward/status are exact matches, used by the
+    Admin/Security dashboards' category-tile and chart-slicer drill-downs so results
+    aren't limited by the 50-row search cap below."""
 
     def get(self, request):
         q = request.query_params.get("q", "").strip()
         ward = request.query_params.get("ward", "").strip()
+        status_filter = request.query_params.get("status", "").strip()
         patients = Patient.objects.all()
         if q:
             patients = patients.filter(Q(hospital_number__icontains=q) | Q(full_name__icontains=q))
         if ward:
             patients = patients.filter(ward=ward)
+        if status_filter:
+            patients = patients.filter(status=status_filter)
         return Response(PatientSummarySerializer(patients[:50], many=True).data)
 
 
@@ -55,9 +60,14 @@ class PatientSummaryView(APIView):
         by_ward["unassigned"] = 0
         for row in Patient.objects.values("ward").annotate(count=Count("id")):
             by_ward[row["ward"] or "unassigned"] = row["count"]
+        by_status = {status_value: 0 for status_value, _ in PatientStatus.choices}
+        by_status["unassigned"] = 0
+        for row in Patient.objects.values("status").annotate(count=Count("id")):
+            by_status[row["status"] or "unassigned"] = row["count"]
         return Response({
             "total": Patient.objects.count(),
             "by_ward": by_ward,
+            "by_status": by_status,
         })
 
 
@@ -92,6 +102,21 @@ class PatientWardUpdateView(APIView):
         serializer.is_valid(raise_exception=True)
         patient.ward = serializer.validated_data["ward"]
         patient.save(update_fields=["ward", "updated_at"])
+        return Response(PatientSummarySerializer(patient).data)
+
+
+class PatientStatusUpdateView(APIView):
+    """PATCH /api/patients/<id>/status/ -- admin-only, same shape as
+    PatientWardUpdateView above."""
+
+    permission_classes = [IsAdmin]
+
+    def patch(self, request, patient_id):
+        patient = get_object_or_404(Patient, pk=patient_id)
+        serializer = PatientStatusUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        patient.status = serializer.validated_data["status"]
+        patient.save(update_fields=["status", "updated_at"])
         return Response(PatientSummarySerializer(patient).data)
 
 

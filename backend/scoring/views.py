@@ -1,3 +1,6 @@
+import hmac
+import secrets
+
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -31,6 +34,7 @@ from .serializers import (
     DecideRequestSerializer,
     DisasterModeActionSerializer,
     EmergencyOverrideRequestSerializer,
+    StepUpAssistRequestOwnSerializer,
     StepUpAssistRequestSerializer,
 )
 
@@ -38,6 +42,14 @@ from .serializers import (
 # attempts, or the decision otherwise going stale, spends it: the clinician
 # has to re-run /decide/ rather than retry indefinitely against one decision.
 STEP_UP_MAX_ATTEMPTS = 3
+
+
+def _generate_assist_code():
+    """A 6-digit numeric code (000000-999999) -- easy to read aloud/type,
+    and 1,000,000 possibilities is enough that STEP_UP_MAX_ATTEMPTS guessing
+    attempts is not a meaningful brute-force risk. secrets, not random --
+    this gates a real access grant."""
+    return f"{secrets.randbelow(1_000_000):06d}"
 
 
 class DecideView(APIView):
@@ -347,6 +359,25 @@ class DisasterModeDeactivateView(APIView):
         )
 
 
+def _is_eligible_assistant(colleague, requesting_staff):
+    """Amended 2026-09-18, per the user: the colleague-assist pool is no
+    longer "any logged-in clinical colleague, hospital-wide" -- it's
+    narrowed to staff on duty (or on call, equivalent everywhere else in
+    this app -- the Doctor rule, BTG's own availability gate) in the SAME
+    ward as the requester. Deliberately no hospital-wide fallback if nobody
+    qualifies -- consistent with how the Nurse/Doctor rules already treat
+    "nobody legitimately connected" as a hard boundary rather than
+    softening it; Break the Glass already exists specifically to rescue
+    that case. Enforced here, not just filtered out of the list view, so a
+    colleague who doesn't qualify can't approve/decline via a direct API
+    call to a request_id they already know."""
+    if colleague.id == requesting_staff.id:
+        return False
+    if not (colleague.on_duty or colleague.on_call):
+        return False
+    return colleague.ward == requesting_staff.ward
+
+
 def _get_own_reduced_decision(request, decision_id):
     """Shared lookup + guards for every step-up endpoint below. Scoped to the
     caller's own session -- a decision belonging to anyone else's session is
@@ -506,7 +537,13 @@ class StepUpAssistRequestView(APIView):
     clinical colleague can vouch instead. Mirrors
     access.PendingDeviceRequest's create -> shared-list -> approve/decline
     shape. `get_or_create` avoids piling up duplicate pending rows if the
-    clinician clicks more than once.
+    clinician clicks more than once -- and, since the verification code
+    (added 2026-09-17) is only ever generated once per request, a retry hits
+    the same pending row and gets back the same code rather than a fresh one.
+
+    Uses StepUpAssistRequestOwnSerializer -- unlike the shared queue
+    (StepUpAssistListView), the requester who just created this is exactly
+    who's supposed to see the code.
     """
 
     permission_classes = [IsClinicalStaff]
@@ -519,33 +556,55 @@ class StepUpAssistRequestView(APIView):
         assist_request, _created = StepUpAssistRequest.objects.get_or_create(
             decision=decision,
             status=StepUpAssistRequest.Status.PENDING,
-            defaults={"requesting_staff": request.auth.staff},
+            defaults={"requesting_staff": request.auth.staff, "verification_code": _generate_assist_code()},
         )
-        return Response(StepUpAssistRequestSerializer(assist_request).data)
+        return Response(StepUpAssistRequestOwnSerializer(assist_request).data)
 
 
 class StepUpAssistListView(APIView):
-    """GET /api/scoring/step-up/assist-requests/ -- the shared queue any
-    clinical colleague can act on (added 2026-09-06). Unlike
-    access.DeviceListView (scoped to your own account), this deliberately
-    shows everyone *else's* pending requests -- excludes the caller's own so
-    nobody can approve their own request just by finding it in this list."""
+    """GET /api/scoring/step-up/assist-requests/ -- the queue a colleague can
+    act on (added 2026-09-06). Unlike access.DeviceListView (scoped to your
+    own account), this deliberately shows someone *else's* pending
+    requests -- excludes the caller's own so nobody can approve their own
+    request just by finding it in this list.
+
+    Amended 2026-09-18: narrowed from "everyone, hospital-wide" to "staff on
+    duty/on call in the requester's own ward" (see _is_eligible_assistant).
+    A caller who isn't themselves on duty/on call sees an empty list --
+    they're not an eligible assistant for anyone right now, same reasoning
+    the helper applies per-request."""
 
     permission_classes = [IsClinicalStaff]
 
     def get(self, request):
-        requests = (
-            StepUpAssistRequest.objects.filter(status=StepUpAssistRequest.Status.PENDING)
-            .exclude(requesting_staff=request.auth.staff)
-            .select_related("requesting_staff", "decision", "decision__patient")
-        )
+        staff = request.auth.staff
+        if not (staff.on_duty or staff.on_call):
+            requests = StepUpAssistRequest.objects.none()
+        else:
+            requests = (
+                StepUpAssistRequest.objects.filter(
+                    status=StepUpAssistRequest.Status.PENDING, requesting_staff__ward=staff.ward
+                )
+                .exclude(requesting_staff=staff)
+                .select_related("requesting_staff", "decision", "decision__patient")
+            )
         return Response(StepUpAssistRequestSerializer(requests, many=True).data)
 
 
 class StepUpAssistApproveView(APIView):
-    """POST /api/scoring/step-up/assist-requests/<id>/approve/ -- the actual
-    point of this endpoint: flips step_up_verified on the linked decision,
-    same as a successful biometric check would."""
+    """POST /api/scoring/step-up/assist-requests/<id>/approve/ -- {code}
+
+    Added 2026-09-17, per the user: approving now requires the requester's
+    verification code, not just a click -- proves the colleague actually
+    made contact with the requester (read the code off their screen) rather
+    than approving a notification from anywhere. Wrong-code attempts are
+    counted against the underlying decision's existing
+    step_up_failed_attempts (the same counter/cap a failed WebAuthn attempt
+    already uses -- STEP_UP_MAX_ATTEMPTS), not a separate counter, since
+    both are just different methods of the same step-up gate. On the
+    correct code: flips step_up_verified on the linked decision, same as a
+    successful biometric check would.
+    """
 
     permission_classes = [IsClinicalStaff]
 
@@ -558,13 +617,46 @@ class StepUpAssistApproveView(APIView):
                 {"detail": "You can't approve your own request."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if not _is_eligible_assistant(request.auth.staff, assist_request.requesting_staff):
+            return Response(
+                {"detail": "You're not eligible to assist this request -- only staff on duty or on call in the requester's own ward can."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        decision = assist_request.decision
+        if decision.step_up_failed_attempts >= STEP_UP_MAX_ATTEMPTS:
+            return Response(
+                {"detail": "Too many failed attempts. The requester must ask again to retry."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        submitted_code = str(request.data.get("code", ""))
+        if not hmac.compare_digest(submitted_code, assist_request.verification_code):
+            decision.step_up_failed_attempts += 1
+            decision.save(update_fields=["step_up_failed_attempts"])
+            attempts_remaining = max(0, STEP_UP_MAX_ATTEMPTS - decision.step_up_failed_attempts)
+            raise_alert(
+                alert_type=SecurityAlert.AlertType.STEP_UP_FAILED,
+                staff=assist_request.requesting_staff,
+                patient=decision.patient,
+                details={
+                    "method": "assist",
+                    "reason": "wrong verification code",
+                    "attempted_by": request.auth.staff.staff_id,
+                    "decision_id": decision.id,
+                    "attempts_remaining": attempts_remaining,
+                },
+            )
+            return Response(
+                {"detail": "Incorrect code.", "attempts_remaining": attempts_remaining},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         assist_request.status = StepUpAssistRequest.Status.APPROVED
         assist_request.resolved_by = request.auth.staff
         assist_request.resolved_at = timezone.now()
         assist_request.save(update_fields=["status", "resolved_by", "resolved_at"])
 
-        decision = assist_request.decision
         decision.step_up_verified = True
         decision.step_up_verified_at = timezone.now()
         decision.save(update_fields=["step_up_verified", "step_up_verified_at"])
@@ -587,6 +679,11 @@ class StepUpAssistDeclineView(APIView):
             return Response(
                 {"detail": "You can't decline your own request."},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not _is_eligible_assistant(request.auth.staff, assist_request.requesting_staff):
+            return Response(
+                {"detail": "You're not eligible to assist this request -- only staff on duty or on call in the requester's own ward can."},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         assist_request.status = StepUpAssistRequest.Status.DECLINED

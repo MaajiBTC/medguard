@@ -15,11 +15,20 @@
 //                exported as raw bytes except the *public* signing key,
 //                which WebAuthn-style key pairs always allow exporting
 //                regardless of the `extractable` flag).
+// - `fingerprints` -- the whole enrolled-patient fingerprint roster
+//                (template minutiae + emergency summary per patient),
+//                encrypted, one row under a single key -- see
+//                fingerprintCache.js. Unlike `cache`, this isn't built
+//                organically per-patient-viewed: identification mode can't
+//                know which patient it's looking for in advance, so the
+//                whole roster is downloaded ahead of time instead.
 
 import { openDB } from 'idb';
 
 const DB_NAME = 'medguard-offline';
-const DB_VERSION = 1;
+// Bumped 2026-09-17 (fingerprints store added) -- idb only runs upgrade()
+// again on an existing device when this increases.
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -31,6 +40,7 @@ function getDb() {
         if (!db.objectStoreNames.contains('session')) db.createObjectStore('session');
         if (!db.objectStoreNames.contains('queue')) db.createObjectStore('queue', { keyPath: 'client_seq' });
         if (!db.objectStoreNames.contains('keys')) db.createObjectStore('keys');
+        if (!db.objectStoreNames.contains('fingerprints')) db.createObjectStore('fingerprints');
       },
     });
   }

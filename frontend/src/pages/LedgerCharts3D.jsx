@@ -13,6 +13,14 @@ import { CLINICAL_ROLES } from '../roles';
 // the live-feed table's row stripes (App.css's .ledger-row.severity-* rules).
 // STANDARD_ACCESS is included here (and so in EVENT_TYPES/the donut below)
 // since it's no longer hidden from the feed by default.
+//
+// Redesign token pass (2026-09-18): App.css now names these same 5 values
+// as --severity-standard/--severity-audited/--severity-reduced/
+// --severity-denied/--severity-override CSS custom properties, so its own
+// .severity-* rules read from one place instead of a hand-typed hex. This
+// JS map can't consume a CSS var (three.js materials need plain numbers,
+// not computed style strings) -- it stays the one place these 5 values
+// must still be kept in sync by hand if they were ever to change.
 const SEVERITY_COLOR = {
   STANDARD_ACCESS: 0x00cc00,
   AUDITED_DEVIATION: 0xffff00,
@@ -351,4 +359,4 @@ function LedgerDonutChart3D({ entries }) {
   );
 }
 
-export { LedgerRoleBarChart, EventTypeBarChart, LedgerDonutChart3D, ROLES };
+export { LedgerRoleBarChart, EventTypeBarChart, LedgerDonutChart3D, HorizontalBarChart, heatColor, ROLES };

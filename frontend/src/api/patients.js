@@ -1,12 +1,13 @@
 import { request } from './client';
 
-/** GET /api/patients/?q=...&ward=... — any authenticated staff, matches
- * hospital_number or full_name, optionally filtered to an exact ward (Admin
- * dashboard's ward-category drill-down). */
-function searchPatients(q, ward) {
+/** GET /api/patients/?q=...&ward=...&status=... — any authenticated staff,
+ * matches hospital_number or full_name, optionally filtered to an exact
+ * ward and/or status (Admin dashboard's ward/status chart slicers). */
+function searchPatients(q, ward, patientStatus) {
   const params = new URLSearchParams();
   if (q) params.set('q', q);
   if (ward) params.set('ward', ward);
+  if (patientStatus) params.set('status', patientStatus);
   const qs = params.toString();
   return request(`/patients/${qs ? `?${qs}` : ''}`);
 }
@@ -30,6 +31,11 @@ function createPatient(data) {
 /** PATCH /api/patients/<id>/ward/ — admin-only. */
 function updatePatientWard(patientId, ward) {
   return request(`/patients/${patientId}/ward/`, { method: 'PATCH', body: { ward } });
+}
+
+/** PATCH /api/patients/<id>/status/ — admin-only. */
+function updatePatientStatus(patientId, patientStatus) {
+  return request(`/patients/${patientId}/status/`, { method: 'PATCH', body: { status: patientStatus } });
 }
 
 /** GET /api/patients/<id>/records/all/ — admin-only, unfiltered by any access decision. */
@@ -74,6 +80,7 @@ export {
   getMyAssignedPatients,
   createPatient,
   updatePatientWard,
+  updatePatientStatus,
   getAllPatientCategoryRecords,
   updatePatientCategory,
   getPatientAssignments,

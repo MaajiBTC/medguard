@@ -912,10 +912,11 @@ class StepUpAssistTests(APITestCase):
 
     databases = {"default", "ledger"}
 
-    def _login(self, username, password, staff_id, role):
+    def _login(self, username, password, staff_id, role, ward="Ward A", on_duty=True, on_call=False):
         user = User.objects.create_user(username=username, password=password)
         staff = Staff.objects.create(
-            user=user, staff_id=staff_id, full_name=username, role=role, ward="Ward A", on_duty=True,
+            user=user, staff_id=staff_id, full_name=username, role=role,
+            ward=ward, on_duty=on_duty, on_call=on_call,
         )
         resp = self.client.post(
             "/api/access/login/",
@@ -951,13 +952,21 @@ class StepUpAssistTests(APITestCase):
         self.assertEqual(resp.data["patient_hospital_number"], "HN-AS1")
         self.assertEqual(resp.data["status"], "pending")
 
+        # The requester's own create-response carries the verification code...
+        self.assertIn("verification_code", resp.data)
+        self.assertEqual(len(resp.data["verification_code"]), 6)
+
         # Visible to the colleague...
         colleague_view = self.client.get(
             "/api/scoring/step-up/assist-requests/", **self._auth(colleague_token)
         )
         self.assertEqual(len(colleague_view.data), 1)
+        # ...but the shared queue never leaks the code -- the colleague must
+        # obtain it from the requester directly, or the whole point of
+        # proving contact is defeated.
+        self.assertNotIn("verification_code", colleague_view.data[0])
 
-        # ...but not to the requester themselves.
+        # ...but the request itself is not visible to the requester.
         own_view = self.client.get("/api/scoring/step-up/assist-requests/", **self._auth(req_token))
         self.assertEqual(len(own_view.data), 0)
 
@@ -986,11 +995,16 @@ class StepUpAssistTests(APITestCase):
             f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token)
         )
         assist_id = req_resp.data["id"]
+        code = req_resp.data["verification_code"]
+        self.assertEqual(len(code), 6)
 
         approve_resp = self.client.post(
-            f"/api/scoring/step-up/assist-requests/{assist_id}/approve/", **self._auth(colleague_token)
+            f"/api/scoring/step-up/assist-requests/{assist_id}/approve/",
+            {"code": code},
+            format="json",
+            **self._auth(colleague_token),
         )
-        self.assertEqual(approve_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(approve_resp.status_code, status.HTTP_200_OK, approve_resp.data)
         self.assertEqual(approve_resp.data["status"], "approved")
         self.assertEqual(approve_resp.data["resolved_by_staff_id"], colleague.staff_id)
 
@@ -1043,6 +1057,175 @@ class StepUpAssistTests(APITestCase):
             self.client.get(f"/api/scoring/patients/{patient.id}/records/", **self._auth(req_token)).status_code,
             status.HTTP_403_FORBIDDEN,
         )
+
+    def test_wrong_code_rejected_and_counts_against_the_decision(self):
+        """Added 2026-09-17: approving now requires the requester's own
+        verification code, not just a click."""
+        _requester, req_token = self._login("docAssist6", "pw-assist-10", "STF-AS10", Staff.Role.DOCTOR)
+        colleague, colleague_token = self._login("nurseAssist6", "pw-assist-11", "STF-AS11", Staff.Role.NURSE)
+        patient = Patient.objects.create(hospital_number="HN-AS6", full_name="P", ward="Ward A")
+        decision = self._reduced_decision(req_token, patient)
+
+        req_resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token)
+        )
+        real_code = req_resp.data["verification_code"]
+        wrong_code = "000000" if real_code != "000000" else "111111"
+
+        resp = self.client.post(
+            f"/api/scoring/step-up/assist-requests/{req_resp.data['id']}/approve/",
+            {"code": wrong_code},
+            format="json",
+            **self._auth(colleague_token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data["attempts_remaining"], 2)
+
+        decision.refresh_from_db()
+        self.assertFalse(decision.step_up_verified)
+        self.assertEqual(decision.step_up_failed_attempts, 1)
+
+        alert = SecurityAlert.objects.filter(alert_type=SecurityAlert.AlertType.STEP_UP_FAILED).first()
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.details["method"], "assist")
+        self.assertEqual(alert.details["attempted_by"], colleague.staff_id)
+
+        # Still pending -- the colleague can retry with the correct code.
+        retry = self.client.post(
+            f"/api/scoring/step-up/assist-requests/{req_resp.data['id']}/approve/",
+            {"code": real_code},
+            format="json",
+            **self._auth(colleague_token),
+        )
+        self.assertEqual(retry.status_code, status.HTTP_200_OK, retry.data)
+        decision.refresh_from_db()
+        self.assertTrue(decision.step_up_verified)
+
+    def test_three_wrong_codes_locks_out_further_attempts(self):
+        _requester, req_token = self._login("docAssist7", "pw-assist-12", "STF-AS12", Staff.Role.DOCTOR)
+        colleague, colleague_token = self._login("nurseAssist7", "pw-assist-13", "STF-AS13", Staff.Role.NURSE)
+        patient = Patient.objects.create(hospital_number="HN-AS7", full_name="P", ward="Ward A")
+        decision = self._reduced_decision(req_token, patient)
+
+        req_resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token)
+        )
+        real_code = req_resp.data["verification_code"]
+        wrong_code = "000000" if real_code != "000000" else "111111"
+        assist_id = req_resp.data["id"]
+
+        for _ in range(3):
+            self.client.post(
+                f"/api/scoring/step-up/assist-requests/{assist_id}/approve/",
+                {"code": wrong_code},
+                format="json",
+                **self._auth(colleague_token),
+            )
+
+        # A fourth attempt, even with the CORRECT code, is now locked out.
+        resp = self.client.post(
+            f"/api/scoring/step-up/assist-requests/{assist_id}/approve/",
+            {"code": real_code},
+            format="json",
+            **self._auth(colleague_token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        decision.refresh_from_db()
+        self.assertFalse(decision.step_up_verified)
+
+    def test_different_ward_colleague_does_not_see_or_act_on_the_request(self):
+        """Amended 2026-09-18, per the user: the assist pool is narrowed
+        from "everyone, hospital-wide" to "on duty/on call, same ward as
+        the requester"."""
+        _requester, req_token = self._login(
+            "docAssist8", "pw-assist-14", "STF-AS14", Staff.Role.DOCTOR, ward="Ward A"
+        )
+        _other_ward, other_token = self._login(
+            "nurseAssist8", "pw-assist-15", "STF-AS15", Staff.Role.NURSE, ward="Ward B"
+        )
+        patient = Patient.objects.create(hospital_number="HN-AS8", full_name="P", ward="Ward A")
+        decision = self._reduced_decision(req_token, patient)
+
+        req_resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token)
+        )
+
+        # Not visible to a colleague in a different ward...
+        other_ward_view = self.client.get(
+            "/api/scoring/step-up/assist-requests/", **self._auth(other_token)
+        )
+        self.assertEqual(len(other_ward_view.data), 0)
+
+        # ...and rejected server-side even with a direct call and the right code.
+        resp = self.client.post(
+            f"/api/scoring/step-up/assist-requests/{req_resp.data['id']}/approve/",
+            {"code": req_resp.data["verification_code"]},
+            format="json",
+            **self._auth(other_token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        decision.refresh_from_db()
+        self.assertFalse(decision.step_up_verified)
+
+    def test_off_duty_not_on_call_colleague_does_not_see_or_act_on_the_request(self):
+        _requester, req_token = self._login(
+            "docAssist9", "pw-assist-16", "STF-AS16", Staff.Role.DOCTOR, ward="Ward A"
+        )
+        _off_duty, off_duty_token = self._login(
+            "nurseAssist9", "pw-assist-17", "STF-AS17", Staff.Role.NURSE,
+            ward="Ward A", on_duty=False, on_call=False,
+        )
+        patient = Patient.objects.create(hospital_number="HN-AS9", full_name="P", ward="Ward A")
+        decision = self._reduced_decision(req_token, patient)
+
+        req_resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token)
+        )
+
+        off_duty_view = self.client.get(
+            "/api/scoring/step-up/assist-requests/", **self._auth(off_duty_token)
+        )
+        self.assertEqual(len(off_duty_view.data), 0)
+
+        resp = self.client.post(
+            f"/api/scoring/step-up/assist-requests/{req_resp.data['id']}/approve/",
+            {"code": req_resp.data["verification_code"]},
+            format="json",
+            **self._auth(off_duty_token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_on_call_but_not_on_duty_colleague_in_same_ward_is_eligible(self):
+        """on_call counts the same as on_duty -- matches how the rest of
+        this app already treats it (the Doctor rule, BTG's gate)."""
+        _requester, req_token = self._login(
+            "docAssist10", "pw-assist-18", "STF-AS18", Staff.Role.DOCTOR, ward="Ward A"
+        )
+        _on_call, on_call_token = self._login(
+            "nurseAssist10", "pw-assist-19", "STF-AS19", Staff.Role.NURSE,
+            ward="Ward A", on_duty=False, on_call=True,
+        )
+        patient = Patient.objects.create(hospital_number="HN-AS10", full_name="P", ward="Ward A")
+        decision = self._reduced_decision(req_token, patient)
+
+        req_resp = self.client.post(
+            f"/api/scoring/decisions/{decision.id}/step-up/assist/request/", **self._auth(req_token)
+        )
+
+        on_call_view = self.client.get(
+            "/api/scoring/step-up/assist-requests/", **self._auth(on_call_token)
+        )
+        self.assertEqual(len(on_call_view.data), 1)
+
+        resp = self.client.post(
+            f"/api/scoring/step-up/assist-requests/{req_resp.data['id']}/approve/",
+            {"code": req_resp.data["verification_code"]},
+            format="json",
+            **self._auth(on_call_token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        decision.refresh_from_db()
+        self.assertTrue(decision.step_up_verified)
 
     def test_non_clinical_role_cannot_use_assist_endpoints(self):
         user = User.objects.create_user(username="assistAdmin", password="pw-assist-9")

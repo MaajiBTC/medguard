@@ -23,4 +23,13 @@ function identifyFingerprint(file) {
   return request('/identity/identify/', { method: 'POST', body: formData });
 }
 
-export { enrollFingerprint, identifyFingerprint };
+/** GET /api/identity/offline-bundle/ — Offline Mode's fingerprint gap
+ * (added 2026-09-17). Every enrolled patient's decrypted minutiae + the
+ * same minimal emergency summary identify() returns, for a clinical device
+ * to cache locally (encrypted at rest — see ../offline/fingerprintCache.js)
+ * so identify-mode lookup keeps working with no network. */
+function getOfflineFingerprintBundle() {
+  return request('/identity/offline-bundle/');
+}
+
+export { enrollFingerprint, identifyFingerprint, getOfflineFingerprintBundle };

@@ -3,6 +3,19 @@ from django.db import models
 from staff.models import Ward
 
 
+class PatientStatus(models.TextChoices):
+    """Manually-set current-state label (added 2026-09-19, per the user) --
+    same "never computed, admin sets it directly" convention as Staff.on_duty/
+    on_call/ward (see CLAUDE.md's explicit-exclusions section). Deliberately
+    NOT an appointment-scheduling feature -- CLAUDE.md excludes booking/
+    scheduling outright -- this is a plain current-state field an admin
+    edits on the Patient panel's detail card, same interaction as ward."""
+
+    ADMITTED = "admitted", "Admitted"
+    DISCHARGED = "discharged", "Discharged"
+    OUTPATIENT = "outpatient", "Outpatient"
+
+
 class Patient(models.Model):
     """Deliberately minimal patient record for step 1.
 
@@ -19,6 +32,12 @@ class Patient(models.Model):
         choices=Ward.choices,
         blank=True,
         help_text="Ward the patient currently occupies.",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=PatientStatus.choices,
+        blank=True,
+        help_text="Current-state label (Admitted/Discharged/Outpatient). Blank means not yet set.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

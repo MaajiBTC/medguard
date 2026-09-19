@@ -10,6 +10,7 @@ import {
   getStaffAssignments,
   searchPatients,
   updatePatientCategory,
+  updatePatientStatus,
   updatePatientWard,
 } from '../api/patients';
 import { enrollFingerprint } from '../api/identity';
@@ -31,6 +32,8 @@ import {
 import Modal from '../components/Modal';
 import { WARDS } from '../wards';
 import DashboardShell, { DisasterIcon, OverviewIcon, PatientsIcon, SearchIcon, StaffIcon } from './DashboardShell';
+import DonutChart2D from './DonutChart2D';
+import { HorizontalBarChart, heatColor } from './LedgerCharts3D';
 
 const STAFF_ROLES = ['doctor', 'nurse', 'pharmacist', 'lab_technician', 'clerk', 'admin', 'security_officer'];
 // The Staff page's category browsing/search is scoped to clinical roles only --
@@ -46,6 +49,39 @@ const STAFF_BROWSE_ROLES = ['doctor', 'nurse', 'pharmacist', 'lab_technician', '
 const ADMIN_CREATABLE_ROLES = STAFF_ROLES.filter((r) => r !== 'admin');
 // Shared accounts (admin/security officer) have no ward/on-duty/on-call concept.
 const NO_WARD_DUTY_ROLES = new Set(['admin', 'security_officer']);
+
+// Fixed distinct colors for the Patients-by-ward bar/donut (added
+// 2026-09-18) -- a purple/plum family shade per ward plus a neutral gray
+// for unassigned, deliberately not reusing the 5 exact severity hues
+// (those are pinned to Ledger event types elsewhere and mean something
+// different here).
+const WARD_CHART_COLORS = [
+  ...WARDS.map((w, i) => ({ ...w, color: ['#6528d9', '#c4b5fd', '#9b7fd4', '#2a0f5c'][i] })),
+  { value: 'unassigned', label: 'Unassigned', color: '#c9c3d8' },
+];
+
+// Patient status options for the Patient panel's status chart/slicer (added
+// 2026-09-19, per the user) -- a plain manually-set current-state label
+// (see patients/models.py's PatientStatus), deliberately NOT an appointment/
+// scheduling feature, which CLAUDE.md explicitly excludes. Own color family,
+// distinct from both WARD_CHART_COLORS and the 5 pinned Ledger severity hues.
+const PATIENT_STATUS_OPTIONS = [
+  { value: 'admitted', label: 'Admitted', color: '#2a9d5c' },
+  { value: 'discharged', label: 'Discharged', color: '#9b7fd4' },
+  { value: 'outpatient', label: 'Outpatient', color: '#e0a83e' },
+  { value: 'unassigned', label: 'Unassigned', color: '#c9c3d8' },
+];
+
+// Same 4 options SecurityDashboard.jsx's own duty-status slicer uses (added
+// 2026-09-19, per the user) -- kept as its own local copy since that
+// file's DUTY_OPTIONS isn't exported and the two slicers filter different
+// things (Ledger entries there, the staff roster itself here).
+const STAFF_DUTY_OPTIONS = [
+  { value: '', label: 'All' },
+  { value: 'on_duty', label: 'On duty' },
+  { value: 'off_duty', label: 'Off duty' },
+  { value: 'on_call', label: 'On call' },
+];
 const ASSIGNMENT_ROLES = ['doctor', 'nurse'];
 
 function errorMessage(err) {
@@ -58,6 +94,10 @@ function formatRole(role) {
 
 function wardLabel(value) {
   return WARDS.find((w) => w.value === value)?.label || value;
+}
+
+function statusLabel(value) {
+  return PATIENT_STATUS_OPTIONS.find((s) => s.value === value)?.label || value;
 }
 
 function OverviewPanel() {
@@ -182,6 +222,40 @@ function StaffPanel() {
   const [notice, setNotice] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
+
+  // "Staff by Role" chart slicers + the full roster list they filter,
+  // shown below the search bar (added 2026-09-19, per the user) --
+  // independent of the tile-drill-down `results` above so browsing here
+  // never disturbs that flow. Mirrors SecurityDashboard.jsx's own role +
+  // duty-status slicer pattern, but simpler: searchStaff() already returns
+  // each row's own on_duty/on_call directly, no cross-referencing needed
+  // the way filtering Ledger entries by duty does there.
+  const [chartRoleFilter, setChartRoleFilter] = useState('');
+  const [chartDutyFilter, setChartDutyFilter] = useState('');
+  const [browseResults, setBrowseResults] = useState([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBrowseLoading(true);
+    searchStaff('', chartRoleFilter || undefined)
+      .then((data) => {
+        if (cancelled) return;
+        const filtered = data.filter((s) => {
+          if (!STAFF_BROWSE_ROLES.includes(s.role)) return false;
+          if (chartDutyFilter === 'on_duty') return s.on_duty;
+          if (chartDutyFilter === 'off_duty') return !s.on_duty;
+          if (chartDutyFilter === 'on_call') return s.on_call;
+          return true;
+        });
+        setBrowseResults(filtered);
+      })
+      .catch((err) => setError(errorMessage(err)))
+      .finally(() => !cancelled && setBrowseLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [chartRoleFilter, chartDutyFilter]);
 
   // Patient-assignment section (added 2026-09-03, per the user) -- only
   // applies to doctor/nurse (CLAUDE.md's Contextual module: patient
@@ -355,6 +429,34 @@ function StaffPanel() {
 
   const showingCategories = selectedRole === null && !query.trim();
 
+  // Layout order (2026-09-18, per the user): in the default
+  // (nothing-selected) view, chart -> role tiles -> search bar. Once a role
+  // is picked or a search is active there's no chart to show first, so the
+  // search bar moves back above the results list -- same searchRow/
+  // feedback elements either way, just placed in a different position per
+  // state rather than duplicated markup.
+  const searchRow = (
+    <div className="search-row">
+      <form className="search-bar" onSubmit={runSearch} role="search">
+        <SearchIcon />
+        <input
+          placeholder={selectedRole ? `Search within ${formatRole(selectedRole)}` : 'Staff ID or name'}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </form>
+      <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>
+        + Add Staff
+      </button>
+    </div>
+  );
+  const feedback = (
+    <>
+      {error && <p role="alert" className="dev-error">{error}</p>}
+      {notice && <p className="notice">{notice}</p>}
+    </>
+  );
+
   return (
     <div>
       {selectedRole !== null && (
@@ -363,32 +465,130 @@ function StaffPanel() {
         </button>
       )}
 
-      <div className="search-row">
-        <form className="search-bar" onSubmit={runSearch} role="search">
-          <SearchIcon />
-          <input
-            placeholder={selectedRole ? `Search within ${formatRole(selectedRole)}` : 'Staff ID or name'}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </form>
-        <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>
-          + Add Staff
-        </button>
-      </div>
-
-      {error && <p role="alert" className="dev-error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
+      {!showingCategories && searchRow}
+      {feedback}
 
       {showingCategories ? (
-        <div className="category-grid">
-          {STAFF_BROWSE_ROLES.map((r) => (
-            <button key={r} type="button" className="category-tile" onClick={() => selectRole(r)}>
-              <span className="category-tile-label">{formatRole(r)}</span>
-              <span className="category-tile-count">{roleCounts ? roleCounts.by_role[r] ?? 0 : '—'}</span>
-            </button>
+        <>
+          {roleCounts && (
+            <div className="ledger-chart-row admin-summary-charts">
+              <div className="ledger-chart-card">
+                <div className="ledger-chart-card-header">
+                  <h3>Staff by Role</h3>
+                  <div className="ledger-slicers">
+                    <select
+                      className="slicer-input"
+                      value={chartRoleFilter}
+                      onChange={(e) => setChartRoleFilter(e.target.value)}
+                      aria-label="Filter by role"
+                    >
+                      <option value="">All roles</option>
+                      {STAFF_BROWSE_ROLES.map((r) => (
+                        <option key={r} value={r}>{formatRole(r)}</option>
+                      ))}
+                    </select>
+                    <select
+                      className="slicer-input"
+                      value={chartDutyFilter}
+                      onChange={(e) => setChartDutyFilter(e.target.value)}
+                      aria-label="Filter by duty status"
+                    >
+                      {STAFF_DUTY_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <HorizontalBarChart
+                  rows={(() => {
+                    // Driven by browseResults (already role/duty-filtered
+                    // by the two slicers above), not the static summary --
+                    // added 2026-09-19, per the user, so both charts in
+                    // this card row move together with the slicers instead
+                    // of only the roster list below reacting to them.
+                    const counts = STAFF_BROWSE_ROLES.map(
+                      (r) => browseResults.filter((s) => s.role === r).length
+                    );
+                    const max = Math.max(...counts, 1);
+                    return STAFF_BROWSE_ROLES.map((r, i) => ({
+                      key: r,
+                      label: formatRole(r),
+                      count: counts[i],
+                      color: heatColor(counts[i] / max),
+                    }));
+                  })()}
+                />
+              </div>
+              <div className="ledger-chart-card">
+                <div className="ledger-chart-card-header">
+                  <h3>Duty Status</h3>
+                </div>
+                <DonutChart2D
+                  rows={(() => {
+                    // Same browseResults source as the bar chart above --
+                    // filtering to a specific duty status here will
+                    // correctly collapse this donut toward that one
+                    // segment, which is the expected effect of the slicer
+                    // rather than a bug.
+                    const onDuty = browseResults.filter((s) => s.on_duty).length;
+                    const onCall = browseResults.filter((s) => s.on_call).length;
+                    return [
+                      { key: 'on_duty', label: 'On duty', count: onDuty, color: 'var(--color-notice)' },
+                      { key: 'on_call', label: 'On call', count: onCall, color: 'var(--plum)' },
+                      {
+                        key: 'off_duty',
+                        label: 'Off duty',
+                        count: Math.max(0, browseResults.length - onDuty - onCall),
+                        color: 'var(--lavender)',
+                      },
+                    ];
+                  })()}
+                />
+              </div>
+            </div>
+          )}
+          <div className="category-grid">
+            {STAFF_BROWSE_ROLES.map((r) => (
+              <button key={r} type="button" className="category-tile" onClick={() => selectRole(r)}>
+                <span className="category-tile-label">{formatRole(r)}</span>
+                <span className="category-tile-count">{roleCounts ? roleCounts.by_role[r] ?? 0 : '—'}</span>
+              </button>
+            ))}
+          </div>
+          {searchRow}
+
+          {/* Full roster, filtered by the "Staff by Role" chart's own
+              slicers above (added 2026-09-19, per the user) -- separate
+              from the tile-drill-down `results` list, so it's always
+              visible here regardless of whether a role tile is selected. */}
+          {browseLoading && <p className="meta-line">Loading staff…</p>}
+          {!browseLoading && browseResults.length === 0 && (
+            <p className="meta-line">No staff match the current filters.</p>
+          )}
+          {browseResults.map((s) => (
+            <div className="card-row" key={s.id}>
+              <div className="card-row-main">
+                <div className="name-line">
+                  {s.full_name}
+                  <span className={`badge ${s.account_active ? 'badge-active' : 'badge-inactive'}`}>
+                    {s.account_active ? 'Active' : 'Deactivated'}
+                  </span>
+                </div>
+                <div className="meta-line">
+                  {formatRole(s.role)} · {s.staff_id}
+                  {s.ward ? ` · ${wardLabel(s.ward)}` : ''}
+                  {s.on_duty ? ' · On duty' : ''}
+                  {s.on_call ? ' · On call' : ''}
+                </div>
+              </div>
+              <div className="card-row-actions">
+                <button type="button" className="btn-secondary" onClick={() => select(s)}>
+                  Manage
+                </button>
+              </div>
+            </div>
           ))}
-        </div>
+        </>
       ) : (
         results.map((s) => (
           <div className="card-row" key={s.id}>
@@ -593,6 +793,7 @@ function PatientPanel() {
   const [wardCounts, setWardCounts] = useState(null);
   const [selected, setSelected] = useState(null);
   const [ward, setWard] = useState('');
+  const [patientStatus, setPatientStatus] = useState('');
   const [categoryRecords, setCategoryRecords] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [assignStaffId, setAssignStaffId] = useState('');
@@ -603,6 +804,38 @@ function PatientPanel() {
   const [fingerprintBusy, setFingerprintBusy] = useState(false);
 
   const [newPatient, setNewPatient] = useState({ hospital_number: '', full_name: '', ward: WARDS[0].value });
+
+  // "Patients by Ward" + "Patient Status" chart slicers + the full patient
+  // list they filter, shown below the search bar -- mirrors StaffPanel's
+  // own role/duty slicers + roster list (added 2026-09-19, per the user).
+  // 'unassigned' isn't a real backend ward/status value (blank is), so it's
+  // filtered client-side after fetching whatever server-side filter is a
+  // concrete value; both dimensions are re-applied client-side regardless,
+  // which keeps the two filters correct together in any combination.
+  const [chartWardFilter, setChartWardFilter] = useState('');
+  const [chartStatusFilter, setChartStatusFilter] = useState('');
+  const [browseResults, setBrowseResults] = useState([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBrowseLoading(true);
+    const wardParam = chartWardFilter && chartWardFilter !== 'unassigned' ? chartWardFilter : undefined;
+    const statusParam = chartStatusFilter && chartStatusFilter !== 'unassigned' ? chartStatusFilter : undefined;
+    searchPatients('', wardParam, statusParam)
+      .then((data) => {
+        if (cancelled) return;
+        let filtered = data;
+        if (chartWardFilter === 'unassigned') filtered = filtered.filter((p) => !p.ward);
+        if (chartStatusFilter === 'unassigned') filtered = filtered.filter((p) => !p.status);
+        setBrowseResults(filtered);
+      })
+      .catch((err) => setError(errorMessage(err)))
+      .finally(() => !cancelled && setBrowseLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [chartWardFilter, chartStatusFilter]);
 
   const refreshCounts = () => {
     getPatientSummary().then(setWardCounts).catch((err) => setError(errorMessage(err)));
@@ -655,6 +888,7 @@ function PatientPanel() {
   const select = async (p) => {
     setSelected(p);
     setWard(p.ward || '');
+    setPatientStatus(p.status || '');
     setNotice(null);
     setError(null);
     try {
@@ -676,6 +910,17 @@ function PatientPanel() {
       setSelected(updated);
       setNotice('Ward saved.');
       refreshCounts();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const saveStatus = async () => {
+    setError(null);
+    try {
+      const updated = await updatePatientStatus(selected.id, patientStatus);
+      setSelected(updated);
+      setNotice('Status saved.');
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -752,6 +997,31 @@ function PatientPanel() {
 
   const showingCategories = selectedWard === null && !query.trim();
 
+  // Layout order (2026-09-18, per the user) -- same reasoning as
+  // StaffPanel above: chart -> ward tiles -> search bar by default, search
+  // bar moves back to the top once a ward's picked or a search is active.
+  const searchRow = (
+    <div className="search-row">
+      <form className="search-bar" onSubmit={runSearch} role="search">
+        <SearchIcon />
+        <input
+          placeholder={selectedWard ? 'Search within this ward' : 'Hospital number or name'}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </form>
+      <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>
+        + Add Patient
+      </button>
+    </div>
+  );
+  const feedback = (
+    <>
+      {error && <p role="alert" className="dev-error">{error}</p>}
+      {notice && <p className="notice">{notice}</p>}
+    </>
+  );
+
   return (
     <div>
       {selectedWard !== null && (
@@ -760,36 +1030,108 @@ function PatientPanel() {
         </button>
       )}
 
-      <div className="search-row">
-        <form className="search-bar" onSubmit={runSearch} role="search">
-          <SearchIcon />
-          <input
-            placeholder={selectedWard ? 'Search within this ward' : 'Hospital number or name'}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </form>
-        <button type="button" className="btn-primary" onClick={() => setCreateOpen(true)}>
-          + Add Patient
-        </button>
-      </div>
-
-      {error && <p role="alert" className="dev-error">{error}</p>}
-      {notice && <p className="notice">{notice}</p>}
+      {!showingCategories && searchRow}
+      {feedback}
 
       {showingCategories ? (
-        <div className="category-grid">
-          {WARDS.map((w) => (
-            <button key={w.value} type="button" className="category-tile" onClick={() => selectWardCategory(w.value)}>
-              <span className="category-tile-label">{w.label}</span>
-              <span className="category-tile-count">{wardCounts ? wardCounts.by_ward[w.value] ?? 0 : '—'}</span>
+        <>
+          {wardCounts && (
+            <div className="ledger-chart-row admin-summary-charts">
+              <div className="ledger-chart-card">
+                <div className="ledger-chart-card-header">
+                  <h3>Patient Status</h3>
+                  <div className="ledger-slicers">
+                    <select
+                      className="slicer-input"
+                      value={chartStatusFilter}
+                      onChange={(e) => setChartStatusFilter(e.target.value)}
+                      aria-label="Filter by status"
+                    >
+                      <option value="">All statuses</option>
+                      {PATIENT_STATUS_OPTIONS.map((s) => (
+                        <option key={s.value} value={s.value}>{s.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <HorizontalBarChart
+                  rows={PATIENT_STATUS_OPTIONS.map((s) => ({
+                    key: s.value,
+                    label: s.label,
+                    count:
+                      s.value === 'unassigned'
+                        ? browseResults.filter((p) => !p.status).length
+                        : browseResults.filter((p) => p.status === s.value).length,
+                    color: s.color,
+                  }))}
+                />
+              </div>
+              <div className="ledger-chart-card">
+                <div className="ledger-chart-card-header">
+                  <h3>Patients by Ward</h3>
+                  <div className="ledger-slicers">
+                    <select
+                      className="slicer-input"
+                      value={chartWardFilter}
+                      onChange={(e) => setChartWardFilter(e.target.value)}
+                      aria-label="Filter by ward"
+                    >
+                      <option value="">All wards</option>
+                      {WARD_CHART_COLORS.map((w) => (
+                        <option key={w.value} value={w.value}>{w.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <DonutChart2D
+                  rows={WARD_CHART_COLORS.map((w) => ({
+                    key: w.value,
+                    label: w.label,
+                    count:
+                      w.value === 'unassigned'
+                        ? browseResults.filter((p) => !p.ward).length
+                        : browseResults.filter((p) => p.ward === w.value).length,
+                    color: w.color,
+                  }))}
+                />
+              </div>
+            </div>
+          )}
+          <div className="category-grid">
+            {WARDS.map((w) => (
+              <button key={w.value} type="button" className="category-tile" onClick={() => selectWardCategory(w.value)}>
+                <span className="category-tile-label">{w.label}</span>
+                <span className="category-tile-count">{wardCounts ? wardCounts.by_ward[w.value] ?? 0 : '—'}</span>
+              </button>
+            ))}
+            <button type="button" className="category-tile" onClick={() => selectWardCategory('unassigned')}>
+              <span className="category-tile-label">Unassigned</span>
+              <span className="category-tile-count">{wardCounts ? wardCounts.by_ward.unassigned ?? 0 : '—'}</span>
             </button>
+          </div>
+          {searchRow}
+          {browseLoading && <p className="meta-line">Loading patients…</p>}
+          {!browseLoading && browseResults.length === 0 && (
+            <p className="meta-line">No patients match the current filter.</p>
+          )}
+          {browseResults.map((p) => (
+            <div className="card-row" key={p.id}>
+              <div className="card-row-main">
+                <div className="name-line">{p.full_name}</div>
+                <div className="meta-line">
+                  {p.hospital_number}
+                  {p.ward ? ` · ${wardLabel(p.ward)}` : ' · Unassigned'}
+                  {p.status ? ` · ${statusLabel(p.status)}` : ''}
+                </div>
+              </div>
+              <div className="card-row-actions">
+                <button type="button" className="btn-secondary" onClick={() => select(p)}>
+                  Manage
+                </button>
+              </div>
+            </div>
           ))}
-          <button type="button" className="category-tile" onClick={() => selectWardCategory('unassigned')}>
-            <span className="category-tile-label">Unassigned</span>
-            <span className="category-tile-count">{wardCounts ? wardCounts.by_ward.unassigned ?? 0 : '—'}</span>
-          </button>
-        </div>
+        </>
       ) : (
         results.map((p) => (
           <div className="card-row" key={p.id}>
@@ -821,6 +1163,19 @@ function PatientPanel() {
           </label>
           <div className="button-row">
             <button type="button" className="btn-primary" onClick={saveWard}>Save ward</button>
+          </div>
+
+          <label className="form-label">
+            Status
+            <select className="form-input" value={patientStatus} onChange={(e) => setPatientStatus(e.target.value)}>
+              <option value="">— Not set —</option>
+              {PATIENT_STATUS_OPTIONS.filter((s) => s.value !== 'unassigned').map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="button-row">
+            <button type="button" className="btn-primary" onClick={saveStatus}>Save status</button>
           </div>
 
           <h4>Assignments</h4>

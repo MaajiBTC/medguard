@@ -114,12 +114,17 @@ function ClerkIcon() {
 }
 
 function AdminIcon() {
+  // The only mascot using brand colors for its outfit (a shield-pin/tie
+  // detail on a dark suit) -- routed through the CSS custom properties
+  // (added in the 2026-09-18 redesign token pass) instead of repeating the
+  // hex literally, so it's one source with App.css even though the exact
+  // rendered color is unchanged.
   return (
     <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
-      <path d={BODY_PATH} fill="#2a0f5c" stroke={OUTLINE} strokeWidth="1.6" />
+      <path d={BODY_PATH} fill="var(--plum-deep)" stroke={OUTLINE} strokeWidth="1.6" />
       <Head skin="#e3a877" hair="#241a12" hairPath={SIDE_PART_HAIR} />
-      <path d="M50 73 L59 77 L59 86 Q50 92 41 86 L41 77 Z" fill="#c4b5fd" stroke={OUTLINE} strokeWidth="1.3" />
-      <path d="M50 75 L56 78 L56 84 Q50 89 44 84 L44 78 Z" fill="#6528d9" />
+      <path d="M50 73 L59 77 L59 86 Q50 92 41 86 L41 77 Z" fill="var(--lavender)" stroke={OUTLINE} strokeWidth="1.3" />
+      <path d="M50 75 L56 78 L56 84 Q50 89 44 84 L44 78 Z" fill="var(--plum)" />
     </svg>
   );
 }

@@ -131,6 +131,18 @@ class StepUpAssistRequest(models.Model):
     requested_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
 
+    # Added 2026-09-17, per the user: approving a request now requires
+    # entering a short code, not just clicking Approve -- proves the
+    # colleague is actually in contact with the requester (read the code
+    # off their screen, in person or by phone), not just clicking a
+    # notification from anywhere. Generated once, at creation
+    # (scoring.views.StepUpAssistRequestView), never regenerated for the
+    # same request. Only ever serialized back to the REQUESTER (whose own
+    # screen displays it) -- StepUpAssistRequestSerializer (the shared
+    # queue every other colleague sees) deliberately omits this field, or
+    # the whole point of proving contact would be defeated.
+    verification_code = models.CharField(max_length=6, blank=True, default="")
+
     class Meta:
         ordering = ["-requested_at"]
 

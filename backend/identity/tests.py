@@ -327,3 +327,75 @@ class IdentityViewTests(APITestCase):
         second = FingerprintTemplate.objects.get(patient=self.patient)
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(FingerprintTemplate.objects.filter(patient=self.patient).count(), 1)
+
+
+@override_settings(FINGERPRINT_TEMPLATE_KEY=TEST_FERNET_KEY)
+class OfflineFingerprintBundleViewTests(APITestCase):
+    """Offline Mode's fingerprint gap (added 2026-09-17) -- the bundle
+    endpoint a clinical device downloads and caches locally so identify-mode
+    lookup keeps working with no network. See frontend/src/offline/
+    fingerprintCache.js for the on-device side."""
+
+    def setUp(self):
+        admin_user = User.objects.create_user(username="bundleAdmin", password="pw-bundle-1")
+        self.admin = Staff.objects.create(
+            user=admin_user, staff_id="STF-BND1", full_name="Admin", role=Staff.Role.ADMIN
+        )
+        self.admin_token = self._login("bundleAdmin", "pw-bundle-1", "bundle-admin-dev")
+
+        doc_user = User.objects.create_user(username="bundleDoc", password="pw-bundle-2")
+        self.doctor = Staff.objects.create(
+            user=doc_user, staff_id="STF-BND2", full_name="Doc", role=Staff.Role.DOCTOR
+        )
+        self.doctor_token = self._login("bundleDoc", "pw-bundle-2", "bundle-doc-dev")
+
+        self.patient = Patient.objects.create(hospital_number="HN-BND-1", full_name="Bundle Patient")
+        for category, _ in PatientCategoryRecord.Category.choices:
+            PatientCategoryRecord.objects.create(patient=self.patient, category=category)
+        PatientCategoryRecord.objects.filter(patient=self.patient, category=3).update(
+            content={"blood_type": "AB-"}
+        )
+
+        self.print_bytes = _ridge_like_image(seed=11)
+
+    def _login(self, username, password, device_id):
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": device_id, "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def _enroll(self):
+        return self.client.post(
+            "/api/identity/enroll/",
+            {"patient_id": self.patient.id, "image": _upload(self.print_bytes)},
+            format="multipart",
+            **self._auth(self.admin_token),
+        )
+
+    def test_bundle_returns_decrypted_minutiae_and_summary(self):
+        self._enroll()
+        expected_minutiae = extract_minutiae(self.print_bytes)
+
+        resp = self.client.get("/api/identity/offline-bundle/", **self._auth(self.doctor_token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        self.assertEqual(len(resp.data["templates"]), 1)
+
+        entry = resp.data["templates"][0]
+        self.assertEqual(entry["patient"]["hospital_number"], "HN-BND-1")
+        self.assertEqual(entry["summary"]["blood_type"], "AB-")
+        self.assertEqual(entry["minutiae"], expected_minutiae)
+
+    def test_empty_roster_returns_empty_list(self):
+        resp = self.client.get("/api/identity/offline-bundle/", **self._auth(self.doctor_token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["templates"], [])
+
+    def test_unauthenticated_rejected(self):
+        resp = self.client.get("/api/identity/offline-bundle/")
+        self.assertEqual(resp.status_code, status.HTTP_401_UNAUTHORIZED)
