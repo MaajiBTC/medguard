@@ -36,3 +36,15 @@ enrollment_data/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Hackathon submission bundle — the demo video alone is ~574 MB, far past
+# GitHub's 100 MB per-file limit, and none of this belongs in the source tree.
+Submission/
+*.mp4
+*.mov
+*.mkv
+*.webm
+
+# Submission documents — kept local, not part of the source tree.
+MedGuard-Technical-Writeup.docx
+MedGuard-Technical-Writeup.pdf

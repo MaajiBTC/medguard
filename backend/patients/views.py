@@ -6,8 +6,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from staff.models import Staff, Ward
-from staff.permissions import IsAdmin
+from staff.permissions import IsAdmin, IsClinicalStaff
 
+from .emergency_summary import emergency_summaries_for
 from .models import Patient, PatientAssignment, PatientCategoryRecord, PatientStatus
 from .serializers import (
     AssignedPatientSerializer,
@@ -64,10 +65,23 @@ class PatientSummaryView(APIView):
         by_status["unassigned"] = 0
         for row in Patient.objects.values("status").annotate(count=Count("id")):
             by_status[row["status"] or "unassigned"] = row["count"]
+
+        # Ward x status cross-tab, for the Clinical dashboard's per-ward
+        # status bar chart. Aggregated here rather than counted client-side
+        # from a patient search, which is capped at 50 rows (see
+        # PatientSearchView) and would silently undercount a busy ward.
+        status_keys = [s for s, _ in PatientStatus.choices] + ["unassigned"]
+        by_ward_status = {
+            ward_key: {status_key: 0 for status_key in status_keys} for ward_key in by_ward
+        }
+        for row in Patient.objects.values("ward", "status").annotate(count=Count("id")):
+            by_ward_status[row["ward"] or "unassigned"][row["status"] or "unassigned"] = row["count"]
+
         return Response({
             "total": Patient.objects.count(),
             "by_ward": by_ward,
             "by_status": by_status,
+            "by_ward_status": by_ward_status,
         })
 
 
@@ -217,3 +231,79 @@ class StaffAssignmentsView(APIView):
         staff = get_object_or_404(Staff, pk=staff_pk)
         assignments = PatientAssignment.objects.filter(staff=staff, active=True).select_related("patient")
         return Response(AssignedPatientSerializer(assignments, many=True).data)
+
+
+class WardEmergencySummaryView(APIView):
+    """GET /api/patients/ward-emergency-summaries/ -- Offline Mode's ward
+    roster (added 2026-09-21, per the user).
+
+    Offline Mode caches a patient's FULL record only once that clinician has
+    opened them online (offline/syncManager.js's refreshOfflineCache). That
+    leaves a real gap the feature exists to cover: network down, and the
+    clinician turns to a patient on their own ward they simply hadn't opened
+    yet -- previously a dead end, not even a blood type. This endpoint is
+    what the device caches ahead of time so that case degrades to a MINIMAL
+    summary instead of nothing.
+
+    Scoped two ways, both deliberate:
+
+    * The ward comes from request.auth.staff.ward -- NOT a query parameter,
+      so one clinician can never pull another ward's roster by asking for it.
+    * Doctors and nurses only (403 otherwise, confirmed with the user). The
+      summary spans record categories 1/3/4/5/6, but a clerk's ceiling is
+      1-2 and a lab technician's is category 1 -- handing them this would
+      break CLAUDE.md's own role table. Same "this role never participates
+      here" posture scoring.views.DecideView already takes for admin/
+      security officer.
+
+    Patients actively assigned to the caller are included even when they sit
+    on another ward: assignment grants access by the rules regardless of
+    ward, so excluding them would be an odd gap in the same cache.
+
+    Returns the summary only -- never the full 13-category record -- and the
+    device re-encrypts it at rest on receipt (offline/wardSummaryCache.js),
+    the same protection refreshOfflineCache already gives full records.
+    Response shape mirrors identity's OfflineFingerprintBundleView so the two
+    client caches stay the same shape.
+    """
+
+    permission_classes = [IsClinicalStaff]
+
+    ROSTER_ROLES = {Staff.Role.DOCTOR, Staff.Role.NURSE}
+
+    def get(self, request):
+        staff = request.auth.staff
+        if staff.role not in self.ROSTER_ROLES:
+            return Response(
+                {"detail": "Only doctors and nurses hold an offline ward roster."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        assigned_ids = PatientAssignment.objects.filter(staff=staff, active=True).values_list(
+            "patient_id", flat=True
+        )
+        scope = Q(pk__in=list(assigned_ids))
+        if staff.ward:
+            # A staff member with no ward set still gets their assigned
+            # patients -- they just have no ward-mates to add.
+            scope |= Q(ward=staff.ward)
+
+        patients = list(Patient.objects.filter(scope).order_by("full_name"))
+        summaries = emergency_summaries_for(patients)
+
+        return Response(
+            {
+                "patients": [
+                    {
+                        "patient": {
+                            "id": p.id,
+                            "hospital_number": p.hospital_number,
+                            "full_name": p.full_name,
+                            "ward": p.ward,
+                        },
+                        "summary": summaries[p.id],
+                    }
+                    for p in patients
+                ]
+            }
+        )

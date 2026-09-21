@@ -1,5 +1,9 @@
 from rest_framework import serializers
 
+from captures.models import ContextualCapture
+from captures.services import compute_patient_assignment_status
+
+from .disaster_mode import is_disaster_mode_active
 from .models import AccessDecision, StepUpAssistRequest
 
 
@@ -15,15 +19,20 @@ class EmergencyOverrideRequestSerializer(serializers.Serializer):
     would make the resulting Ledger/Security Dashboard entries useless for audit.
 
     `reason_category` (added 2026-08-29) is a required, structured companion to the
-    free-text reason -- selecting "cross_coverage" is itself what lets BTG through
-    the off-duty+unconnected block (self-attested, permanently logged; see
-    scoring.views.EmergencyOverrideView), not a system-verified check.
+    free-text reason: what kind of situation this is, permanently logged alongside
+    the detail text so the Ledger entry can be read without parsing prose.
+
+    "cross_coverage" used to be more than a label -- selecting it let BTG through the
+    off-duty+unconnected block. That was removed 2026-09-20, per the user: someone
+    covering a shift is on duty or on call, so a self-attested checkbox shouldn't
+    substitute for either. All three categories are now purely descriptive; see
+    scoring.views.EmergencyOverrideView for what actually gates BTG.
     """
 
     CROSS_COVERAGE = "cross_coverage"
     REASON_CATEGORY_CHOICES = [
         ("clinical_emergency", "Clinical emergency / direct patient care"),
-        (CROSS_COVERAGE, "Cross-coverage (covering an unrostered shift)"),
+        (CROSS_COVERAGE, "Cross-coverage (covering for a colleague)"),
         ("other", "Other"),
     ]
 
@@ -100,6 +109,7 @@ class AccessDecisionSerializer(serializers.ModelSerializer):
             "factor_breakdown",
             "step_up_verified",
             "step_up_required",
+            "break_glass_blocked",
         ]
         read_only_fields = fields
 
@@ -112,4 +122,22 @@ class AccessDecisionSerializer(serializers.ModelSerializer):
         return (
             obj.decision_type == AccessDecision.DecisionType.REDUCED_ACCESS
             and not obj.step_up_verified
+        )
+
+    # Added 2026-09-20, per the user -- lets the dashboard hide the Break the
+    # Glass button outright in the one state EmergencyOverrideView would
+    # refuse anyway (off duty, not on call, no assignment and not the
+    # patient's ward). Computed with the same live fields that view uses, so
+    # the two can't drift; that view still enforces it regardless of what the
+    # UI shows.
+    break_glass_blocked = serializers.SerializerMethodField()
+
+    def get_break_glass_blocked(self, obj):
+        staff = obj.session.staff
+        if staff.on_duty or staff.on_call or is_disaster_mode_active():
+            return False
+        assignment_status = compute_patient_assignment_status(staff, obj.patient)
+        return (
+            assignment_status
+            == ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
         )

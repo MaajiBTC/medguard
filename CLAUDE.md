@@ -66,12 +66,20 @@ rejects any attempt to set them for an existing admin/security-officer row (400)
 
 **Nurse rule (specific override — implement exactly this logic, it does not follow the generic role-ceiling pattern above):**
 1. Nurse is specifically assigned to this patient → full access (1–13) granted normally, processed through the standard score-band system like any other access.
-2. Nurse is **not** specifically assigned to this patient, but is on the **same ward** as the patient → full access (1–13) is still granted, but this access is **always** logged as `AUDITED_DEVIATION`, regardless of what the aggregate score would otherwise indicate.
+2. Nurse is **not** specifically assigned to this patient, but is on the **same ward** as the patient **and is on duty or on call** → full access (1–13) is still granted, but this access is **always** logged as `AUDITED_DEVIATION`, regardless of what the aggregate score would otherwise indicate. The reasoning: a nurse working her own ward cares for every patient on it, not only the ones formally assigned to her.
+   - **Duty condition added 2026-09-20**, confirmed via `AskUserQuestion` after the equivalent Doctor rule change the same day (the user chose "only when she's off duty" over leaving nurses alone or a broader match): if she is **off duty and not on call**, that justification is gone and this case becomes `ACCESS_DENIED` (`role_rule_path = "off_duty_same_ward_denied"`, the same value the Doctor rule uses for the identical situation) with **Break the Glass still available**. Suspended hospital-wide during Disaster/Mass Casualty Mode, like the Doctor rule's own duty-based paths. Nothing else in the Nurse rule changed — case 1 and case 3 are untouched, and an **on-duty or on-call** nurse behaves exactly as this rule has always specified.
 3. Nurse is neither assigned to the patient nor on the same ward → **hard-denied** (`ACCESS_DENIED`, no categories granted), regardless of score — standard scoring does not apply to this case (revised 2026-08-25: the original wording let this case fall through to standard scoring, which could still land in `AUDITED_DEVIATION` territory if other factors scored well despite the ward mismatch; the user wants zero ambiguity here). The intended path to access in this case is Emergency Override ("Break the Glass") — **but see the 2026-08-29 note below: BTG itself now has its own duty-status gate**, so this rescue path is only open while the nurse is on duty *or* on call.
 
 **This does not bypass the hard behavioral-mismatch gate** (see Scoring Engine) — a proven behavioral mismatch still overrides and denies access even in cases 1 and 2 above. The gate always takes precedence over any role-specific ceiling rule.
 
-**Doctor rule (added 2026-08-29, one carve-out — not a full path structure like the Nurse rule above):** a doctor who is **off duty and not on call** *and* has no connection to the patient at all (not specifically assigned, and not even on the patient's ward) → hard-denied (`ACCESS_DENIED`, no categories granted), regardless of score — same standard the Nurse rule's worst case already applies. Every other doctor combination (on duty/on call regardless of assignment; off duty but same ward; off duty but assigned) is untouched and still goes through standard weighted scoring exactly as before — this was confirmed live: an off-duty doctor with no ward/assignment connection previously only dropped to `REDUCED_ACCESS` (65%, sensitive categories hidden), never a hard deny. The hard behavioral gate still takes precedence over this rule, same as it does over the Nurse rule. **Suspended hospital-wide while Disaster/Mass Casualty Mode is active** (see its own section below).
+**Doctor rule (added 2026-08-29, extended 2026-09-20 — now two denial paths, closer in shape to the Nurse rule above):** a doctor who is **off duty and not on call** *and* is **not specifically assigned to this patient** is hard-denied (`ACCESS_DENIED`, no categories granted) regardless of score, in both of these cases — the difference is what's left afterwards:
+
+1. **Off duty, not on call, not assigned, but on the patient's own ward** → `ACCESS_DENIED` (`role_rule_path = "off_duty_same_ward_denied"`), **but Break the Glass stays available.** Added 2026-09-20, per the user: *"he can only access his data through Break the Glass."* The doctor isn't working and this isn't their patient, so routine access isn't justified — but they are on the right ward, so a deliberate, justified, permanently-logged override is the right shape for it rather than silent access. (Before this, this combination went through standard weighted scoring and typically landed in `AUDITED_DEVIATION`/`REDUCED_ACCESS`.)
+2. **Off duty, not on call, not assigned, and not even on the patient's ward** → `ACCESS_DENIED` (`role_rule_path = "off_duty_denied"`, added 2026-08-29) **and Break the Glass is blocked and hidden too** (see Emergency Override below) — no path at all short of Disaster Mode.
+
+Every other doctor combination is untouched and still goes through standard weighted scoring exactly as before: any **on duty or on call** doctor regardless of assignment, and an **off-duty doctor who *is* assigned** to this patient. The hard behavioral gate still takes precedence over this rule, same as it does over the Nurse rule. **Both paths are suspended hospital-wide while Disaster/Mass Casualty Mode is active** (see its own section below).
+
+**The Nurse rule was brought into line the same day** (2026-09-20, confirmed via `AskUserQuestion` — see Nurse rule case 2 above): an off-duty, not-on-call, unassigned nurse on the patient's own ward is now denied too, under the same `role_rule_path` value, with Break the Glass likewise still available. The two roles' duty-based paths are therefore identical; only the **on-duty** same-ward case still differs (nurse → full access logged as `AUDITED_DEVIATION` by her own rule; doctor → plain weighted scoring).
 
 ## Two-dimensional access model
 
@@ -153,9 +161,11 @@ Always available regardless of score or role match. One action grants immediate 
 
 **`on_call` (added 2026-08-29):** a manual, admin-set `Staff` field (never computed — same as `on_duty`/`ward`). Per the user, on-call is *"just like on duty status but virtually"* — treated as fully equivalent to `on_duty` everywhere the Doctor rule and the BTG gate above check duty status.
 
-**BTG cross-coverage (added 2026-08-29):** no automated "hospital workstation + clinical hours" detection was built — the user explicitly rejected that in favor of a simpler, human-attested approach. Instead, BTG's `reason` becomes two required fields: a `reason_category` (`clinical_emergency` / `cross_coverage` / `other`) plus the existing free-text `reason` detail. Selecting **`cross_coverage`** is itself what lets BTG through the off-duty(+not on call)+unconnected block above (e.g. a doctor covering a colleague's unrostered shift, roster not yet updated) — self-attested and permanently logged with the category, same trust model the free-text reason always used, not a system-verified check. The other two categories do not affect the block.
+**BTG cross-coverage (added 2026-08-29):** no automated "hospital workstation + clinical hours" detection was built — the user explicitly rejected that in favor of a simpler, human-attested approach. Instead, BTG's `reason` becomes two required fields: a `reason_category` (`clinical_emergency` / `cross_coverage` / `other`) plus the existing free-text `reason` detail. Originally, selecting **`cross_coverage`** was itself what let BTG through the off-duty(+not on call)+unconnected block above — self-attested, not a system-verified check.
 
-**Disaster/Mass Casualty Mode (added 2026-08-29):** a hospital-wide switch, `POST /api/scoring/disaster-mode/activate/` and `.../deactivate/` (`{reason}`, min 10 characters, `staff.permissions.IsAdmin`-gated — UI lives on the Admin dashboard only). While active, it suspends **both** the Doctor off-duty+unconnected hard-deny rule **and** BTG's availability gate hospital-wide (does not touch the hard behavioral gate, role ceilings, or the Nurse rule's own original assignment/ward logic — only the two 2026-08-29 additions). Manual on/off only, no auto-expiry; activating while already active (or deactivating while already inactive) is rejected. Audited in its own `scoring.DisasterModeEvent` history table (`scoring.disaster_mode.is_disaster_mode_active()` derives current status from the latest event) — **deliberately not routed through the Security Ledger**, since CLAUDE.md pins the Ledger to exactly five event types above and "the mode itself changed" doesn't fit any of them; stretching that spec was explicitly rejected in favor of a separate, purpose-built audit trail.
+**Revised 2026-09-20 — no category is a bypass any more.** Per the user: *"a staff cannot cross cover when he's not on duty or not on call."* Someone genuinely covering a shift is on duty or on call; if the roster hasn't caught up, an admin setting either flag is the honest fix, not a checkbox the requester ticks about themselves. All three `reason_category` values are now purely descriptive labels stored in the Ledger entry — the off-duty+unconnected block is absolute, and **only Disaster/Mass Casualty Mode lifts it** (see below). The category stays in the form (`cross_coverage`'s label is now "covering for a colleague", not "covering an unrostered shift", since an unrostered shift is exactly the case that's blocked): an on-duty clinician covering a colleague's patients still has a real reason worth recording, it just no longer opens a door. `EmergencyOverrideView`'s 403 message no longer suggests selecting it.
+
+**Disaster/Mass Casualty Mode (added 2026-08-29):** a hospital-wide switch, `POST /api/scoring/disaster-mode/activate/` and `.../deactivate/` (`{reason}`, min 10 characters, `staff.permissions.IsAdmin`-gated — UI lives on the Admin dashboard only). While active, it suspends every **duty-based** hard-deny hospital-wide — the Doctor rule's two paths, the Nurse rule's 2026-09-20 off-duty same-ward path, and BTG's own availability gate (updated 2026-09-20; it was the Doctor rule plus the BTG gate when this was written on 2026-08-29). It still **does not** touch the hard behavioral gate, the role ceilings, or the Nurse rule's own original assignment/ward logic — an unassigned, different-ward nurse is still denied by Nurse rule case 3 even in a mass-casualty event, and reaches the record through Break the Glass, which Disaster Mode does unblock. Manual on/off only, no auto-expiry; activating while already active (or deactivating while already inactive) is rejected. Audited in its own `scoring.DisasterModeEvent` history table (`scoring.disaster_mode.is_disaster_mode_active()` derives current status from the latest event) — **deliberately not routed through the Security Ledger**, since CLAUDE.md pins the Ledger to exactly five event types above and "the mode itself changed" doesn't fit any of them; stretching that spec was explicitly rejected in favor of a separate, purpose-built audit trail.
 
 ## Security Dashboard
 
@@ -984,6 +994,65 @@ reset back to "All statuses" afterward. No console errors.
 - Devices still require local staff login — offline never means unrestricted.
 - For vendor-hosted/cloud clinics without their own server room: the offline layer runs as a lightweight local agent per workstation (SQLite or encrypted browser storage), not a dedicated server — the device is a temporary bridge, syncing back to the vendor's existing cloud system once online.
 
+**Ward emergency summaries (added 2026-09-21, per the user).** Until now the
+offline cache held a patient's full record **only** once that clinician had
+opened them online (`refreshOfflineCache`), so an offline clinician opening a
+patient on their own ward they simply hadn't got to yet hit a dead end —
+"view them once while connected first" — not even a blood type. The device now
+also caches, ahead of time, the **minimal emergency summary** (the same six
+fields `identify()` returns: blood type, drug/other allergies, current
+medication, current diagnoses, next of kin) for **every patient on that
+clinician's own ward, plus anyone actively assigned to them** — assignment
+grants access regardless of ward, so excluding cross-ward assigned patients
+would be an odd gap in the same cache.
+
+Three decisions confirmed via `AskUserQuestion`:
+- **Doctors and nurses only.** The summary spans record categories 1/3/4/5/6,
+  but a clerk's ceiling is 1–2 and a lab technician's is category 1 — handing
+  them this would break the role table above. `WardEmergencySummaryView` 403s
+  every other role (same posture `DecideView` takes for admin/security
+  officer), and the frontend re-checks before reading its own cache.
+- **The duty rules still apply offline.** An off-duty, not-on-call clinician
+  who isn't assigned is denied here too, so the 2026-09-20 Doctor/Nurse
+  same-ward denial doesn't gain a hole exactly when the network is down.
+  Assignment status comes from `offline/scoringEngine.js`'s existing
+  `computePatientAssignmentStatus()` rather than a second copy of that logic.
+- **It is recorded.** Queued to the local hash chain like any other offline
+  access and synced to the Security Ledger on reconnect —
+  **`REDUCED_ACCESS`** when shown (the honest label of the five pinned event
+  types: genuinely less than the role ceiling was released), `ACCESS_DENIED`
+  when refused, which already raises a `SecurityAlert` at sync. `score` is
+  null in both: this is a rule outcome, not a scored band.
+
+New `GET /api/patients/ward-emergency-summaries/` (`patients.views.
+WardEmergencySummaryView`, `IsClinicalStaff` + the doctor/nurse check). **The
+ward is derived from `request.auth.staff.ward`, never a query parameter**, so
+one clinician cannot request another ward's roster. `SUMMARY_FIELDS`/
+`_emergency_summary()` moved out of `identity/views.py` into a shared
+`patients/emergency_summary.py` (nothing about them was fingerprint-specific;
+`patients` sits before `identity` in the app dependency order), gaining an
+`emergency_summaries_for()` bulk variant so the roster is one query rather
+than one per patient. Frontend: new `offline/wardSummaryCache.js` (a near-copy
+of `fingerprintCache.js` — one AES-GCM-encrypted blob, `wardSummaries` store,
+`DB_VERSION` bumped 2→3), refreshed best-effort beside the existing
+fingerprint-roster refresh on mount/reconnect. `openPatientOffline`'s guard
+order was restructured so the `sessionFactors` check now applies only to the
+full-decision path — those factors exist to compute a weighted score, which a
+minimal summary doesn't need, and requiring them would have blocked a device
+holding a roster but no completed online decision yet.
+
+**Privacy tradeoff, stated rather than buried:** this puts a minimal summary
+for a whole ward on the device, including patients that clinician never
+opened. It's bounded (one ward, six fields, no notes or history), encrypted at
+rest with the same non-extractable per-device key as everything else offline,
+and scoped to exactly the patients the ward rules already grant that clinician
+access to. 7 new backend tests (`patients.WardEmergencySummaryViewTests`:
+own-ward only, cross-ward assigned included, inactive assignment excluded,
+real category content, the three forbidden roles, unauthenticated, blank-ward
+staff). Verified against the real dev database read-only before shipping —
+doctor `282828` (Emergency) and nurse `STF-2026-N01` (Surgical) each resolve
+to exactly their own three demo patients with all six fields populated.
+
 ## Bonus layer: MedGuard Identity (fingerprint patient identification)
 
 **Build this last — nothing else in the system depends on it. See "Timeline & scope commitment" above: the user has committed to attempting this, not just building it opportunistically.**
@@ -1376,6 +1445,284 @@ reset back to "All statuses" afterward. No console errors.
    browser against the real doctor account, including a full page refresh:
    "Assigned to you" now permanently shows this patient, no console errors.
 
+   **Amended (2026-09-19, KPI stat cards above the ward tiles):** per the
+   user, who shared a hospital-dashboard reference image and asked for a
+   card row above the existing ward tiles / "Assigned to you" / "Find a
+   patient" flow, all of which stay exactly as they were underneath. Only
+   the reference's *layout pattern* carried over -- its own cards (revenue
+   generated, beds available, scheduled operations, today's appointments,
+   a calendar) are all billing/scheduling/hospital-management features
+   CLAUDE.md excludes outright, so this was raised with the user rather
+   than silently built, and the cards show access-control facts instead.
+   Confirmed via `AskUserQuestion`: four cards -- **My Patients** (count
+   assigned to you + how many are in your ward; doctor/nurse only, matching
+   `ASSIGNMENT_ROLES`), **Total Patients** (hospital total + how many in
+   your ward), **Duty Status** (on duty/off duty, ward label, on-call --
+   the one filled card), and a stacked pair in the last slot. That pair
+   mirrors the reference's own "Beds available" + "Scheduled Operations"
+   column -- a compact filled card above a compact white one, the same
+   "two separate cards with a gap, not one tall card" idea
+   `.stat-card-group` already uses on the Admin dashboard: **Colleague
+   Requests** on top, **Flagged Events** (this month) below. The
+   reference's lower card is scheduled operations, excluded by CLAUDE.md
+   and unbacked by any data here, so the replacement was settled via
+   `AskUserQuestion`. Every
+   value is derived from data this page already fetched (`getCurrentSession`,
+   `getMyAssignedPatients`, `getPatientSummary`, the existing assist-request
+   poll) -- no new endpoints, no backend change at all.
+
+   Style was a second `AskUserQuestion`: the user chose the reference's own
+   look over reusing the Admin Overview's all-plum `.stat-card-group`, so
+   new `.clinical-stat-*` classes in `App.css` render mostly-white cards
+   (surface + border + `--shadow-md` + the hover lift the elevation pass
+   established) with a single filled "highlight" card -- **Duty Status**,
+   the live fact that most directly drives what this user can see -- using
+   the same plum gradient `.category-tile`/`.stat-card-top` already use,
+   not the reference's blue. A `.clinical-stat-value.is-text` modifier
+   drops the font size for word values ("On duty"), which would otherwise
+   overflow the narrowest column the grid allows.
+
+   Two structural consequences, both deliberate: the bare on-duty/ward
+   `<p className="meta-line">` that had sat at the top of this page since
+   2026-08-30 (when it moved out of the header) is **removed** -- the Duty
+   Status card supersedes it and shows strictly more (on-call state, and a
+   proper `wardLabel()` rather than the raw choice key it had been printing).
+   And the search row + `FingerprintLookup` were extracted into a
+   `searchBlock` variable and **moved below the ward tiles** -- the user's
+   actual intent ("all the cards representing wards should be above the
+   search bar"), which an earlier in-session layout-preview question got
+   wrong by reading "cards" as the new stat cards only. Placement is now
+   conditional, exactly mirroring what `AdminDashboard.jsx`'s StaffPanel/
+   PatientPanel already do with their own `searchRow`: below the tiles in
+   the default view, back above the list once a ward is picked or a search
+   is running (no tiles to lead with in that state). The `<h2>Find a
+   patient</h2>` was then dropped entirely (per the user) so the ward cards
+   follow the stat cards directly -- the `<section>` keeps an
+   `aria-label="Find a patient"` so screen readers still have a name for
+   that block.
+
+   Finally, per the user, the **four fixed ward tiles were replaced by one
+   slicer-driven ward card** (`.ward-chart-card`, titled **"Patient
+   Ward"**) that is itself a **bar chart**: a ward `<select>` (including an
+   **"All wards"** option) and a `HorizontalBarChart`
+   (reused from `LedgerCharts3D.jsx`, already exported) breaking that ward's
+   patients down by status -- Admitted / Discharged / Outpatient -- and a
+   "View patients" `.btn-secondary` calling the existing
+   `selectWardCategory()`, so the drill-down and "← Back to wards"
+   behaviour is unchanged. **`unassigned` is filtered out of this chart**
+   (per the user) but stays in the shared `PATIENT_STATUS_OPTIONS`, which
+   the Admin dashboard still needs for its own status chart and slicer.
+   Because of that filtering, a ward's bars will *not* sum to its patient
+   count whenever some of them have no status set yet -- expected, not a
+   bug. (A "N total" indicator in the header was built and then removed the
+   same day, per the user.)
+
+   The "All wards" option uses the sentinel `ALL_WARDS = 'all'`, chosen
+   deliberately over `''`: an empty string is falsy and would fall straight
+   through `activeWardCard`'s own `cardWard || session.ward || WARDS[0]`
+   default back to the user's own ward, silently ignoring the choice. It
+   reads hospital-wide counts from the summary's existing `by_status`
+   rather than `by_ward_status`, and maps to `''` only when handing off to
+   `selectWardCategory()`, where a blank ward correctly means "don't filter
+   by ward" (`searchPatients` omits the param).
+
+   Beside it sits a second, equal-width card (`.patient-list-card`, the two
+   share a `.ward-cards-row` flex container that wraps to one column when
+   there isn't room), modelled on the **"Well Experienced Doctors /
+   Specializations"** card from the same reference image: an
+   accent-bordered card with bold paired column headings (**"My Patients"**
+   / **"Ward"**), a circular avatar beside each name, hairline-divided
+   rows, and the right-hand value in an accent color. The reference's
+   accent is blue; plum is the equivalent here, and the "white card, 1px
+   plum border" treatment is the one `.ledger-chart-card` already
+   established in this app. The avatars reuse `RoleAvatar role="patient"`
+   (its one generic patient mascot) constrained to a 40px thumbnail --
+   `.role-avatar` sizes to its container, which is 190px on the detail
+   pages. A first pass shipped without the avatars or the accent border and
+   was corrected, per the user. Rows come from the already-fetched
+   `assignedPatients` -- patient name left, ward right. Doctor/nurse only
+   (`ASSIGNMENT_ROLES`), since assignment isn't a concept for the other
+   three clinical roles and the card would always be empty for them. Those
+   three roles therefore see one fewer card in *both* rows, so neither row
+   caps its card width -- `.ward-cards-row`'s cards are `flex: 1 1 320px`
+   with no `max-width`, and the stat row is an `auto-fit` grid, so both
+   fill the width whether they hold two cards or three. Verified in both
+   states.
+
+   **Admin dashboard Overview rebuilt in the same language (2026-09-19),**
+   the user having handed the design over ("based on my taste and
+   preference" from this session). `OverviewPanel`'s older
+   `.stat-card-group` pattern -- a solid-plum headline card stacked above a
+   lavender-gradient breakdown card -- is replaced by the `.clinical-stat-*`
+   row plus two `.patient-list-card` breakdown lists: Total Patients, Total
+   Staff, **Staff On Duty** (the filled highlight, mirroring Duty Status
+   holding that role on the Clinical dashboard), and a stacked pair of
+   Disaster Mode + Last Change. **No number the old version showed was
+   dropped** -- the per-ward and per-role breakdowns moved into the two
+   list cards so the top row can stay compact. Disaster Mode active keeps
+   its old override palette via a new `.clinical-stat-card.is-alert`.
+   The `.clinical-stat-*`/`.patient-list-*` classes are now shared by both
+   dashboards rather than duplicated (the prefixes just record where they
+   were introduced); the old `.overview-grid`/`.stat-card-*`/`.stat-sublist`/
+   `.stat-subrow` rules were used *only* by this panel, so they were
+   deleted rather than left as dead CSS, and the three comments elsewhere
+   that referenced them were updated. Verified by previewing the new markup
+   with this database's real numbers -- **not yet seen on the real Admin
+   page**, which needs an admin login.
+
+   **Global search on the Overview (2026-09-19, per the user):**
+   `AdminGlobalSearch` runs `searchStaff(q)` and `searchPatients(q)` in
+   parallel from one box and lists both result groups, each row opening
+   that record in its own panel already selected. Staff results are
+   filtered to `STAFF_BROWSE_ROLES` -- an admin or security-officer row
+   would otherwise hand the Staff panel something it deliberately can't
+   manage. Wiring: `AdminDashboard` holds an `openRecord` state set by
+   `goToRecord()`, passed to `StaffPanel`/`PatientPanel` as
+   `initialSelection` and applied in a mount effect; an ordinary nav change
+   goes through `changePage()`, which clears it so a stale record can't be
+   re-selected later. The effect also drills into that record's own
+   role/ward, not just selecting it, so the page looks as it would had you
+   navigated by hand instead of leaving the category tiles above the detail
+   panel. Sits below the cards, matching the cards-then-search order the
+   user chose for the Clinical dashboard.
+
+   **Admin detail panels tidied (2026-09-19, per the user -- "the window UI
+   is not good... resize it to standard"):** both the staff and patient
+   detail panels stacked every control full-width, so a one-word value like
+   "Surgical Ward" got a ~1150px select, and the patient panel had a
+   separate Save button per field. Fixed with a new `.detail-form-grid`
+   (`repeat(auto-fit, minmax(200px, 260px))`) that caps field width and
+   puts Ward and Status side by side, a `.form-checkbox-row` so On duty/On
+   call sit inline, and a `.detail-panel h4` rule giving each section a
+   divider (scoped, so h4s on other pages are untouched). The patient
+   panel's `saveWard`/`saveStatus` merged into one `saveDetails()` that
+   PATCHes only the fields that actually changed. Verified live on the real
+   Admin account: global search found the real doctor by name, its Manage
+   button landed on the Staff page with that record selected, the select
+   now renders 260px inside a 1201px card, and the patient panel shows a
+   single "Save changes". No console errors.
+
+   **Detail panels now open inline (2026-09-19, per the user):** clicking
+   Manage used to render the detail panel at the *foot of the page*, below
+   the whole list, so on a long list the record you opened was nowhere near
+   the row you clicked. Both panels' `{selected && (...)}` blocks were
+   lifted out of their returns into a `detailPanel` const and are now
+   rendered inside each list's `.map()`, after the row where
+   `selected?.id === row.id`. Rows are wrapped in a keyed `<Fragment>` so
+   the row and its panel stay one list item. Applies to both lists in each
+   panel (the default browse roster and the drill-down/search results).
+   Verified live: opening the middle patient of a ward put the panel
+   between that row and the next, and the Staff panel behaves the same.
+
+   **The same treatment for the Clinical dashboard (2026-09-20, per the
+   user):** the clinician-facing patient record had the identical problem
+   the Admin panels had — clicking **View** rendered the whole
+   decision/records/BTG panel *after* both patient lists, so on a ward with
+   several patients you scrolled past everyone to reach the record you'd
+   just asked for. Same fix, same shape: the `{selectedPatient && (...)}`
+   block became a `patientDetailPanel` const rendered inside each list's
+   `.map()` under its own row, rows wrapped in keyed `<Fragment>`s. Two
+   things this dashboard needed that the Admin one didn't:
+   - **Click-again-to-close**, per the user. New `togglePatient()` — the
+     same button closes the panel when it's already open on that patient
+     (via the existing `closePatientDetail()`), and its label flips
+     `View` ⇄ `Close`.
+   - **A `detailSource` state (`'browse' | 'assigned' | null`)**, because
+     unlike the Admin panels this page renders *two* lists that legitimately
+     overlap: an assigned patient appears both in the main list and under
+     "Assigned to you", so keying the panel on id alone rendered the record
+     **twice on the page**. The source records which list was clicked so it
+     opens under that row only. `null` (an emergency fingerprint match, which
+     can resolve to a patient in neither list — the whole point of that
+     lookup) falls back to rendering at the foot of the section, where the
+     panel used to live; `detailHasInlineHome` mirrors the two inline
+     conditions exactly so the record can never render nowhere.
+   `npm run lint`/`npm run build` clean. **Not click-verified in-browser** —
+   the Chrome extension wasn't connected during this change.
+
+   A third card in the same row, `ActivityCalendarCard`, is laid out like
+   the reference's own calendar -- title, month/year, Sun-Sat headings, a
+   7-column grid with greyed leading/trailing blanks, today ringed, prev/
+   next month arrows, and a legend. **The reference's dots mean
+   appointment-slot availability, which CLAUDE.md excludes outright and
+   MedGuard has no data for**, so this was raised rather than silently
+   built; confirmed via `AskUserQuestion` that the dots should mark the
+   clinician's **own record-access activity** instead -- plum for a clean
+   day, amber where anything that day was flagged (any event type other
+   than `STANDARD_ACCESS`).
+
+   That needed the one genuinely new backend piece of this whole redesign:
+   `GET /api/ledger/my-activity/?year=&month=`
+   (`ledger.views.MyActivityCalendarView`, `IsClinicalStaff`). Every other
+   Ledger read in this app is Security-Officer-only, so this is
+   **deliberately narrow**: filtered server-side to
+   `request.auth.staff.staff_id`, and returning only dates, per-day counts
+   and a `flagged` boolean -- never patient identities, never another staff
+   member's activity, never the entries themselves. A clinician learning
+   which days they themselves touched records discloses nothing they didn't
+   already do, which is what makes it safe to open up -- the same reasoning
+   as the other self-service endpoints (`MyBaselineView`, `DeviceListView`).
+   Days are grouped in the configured local timezone so a calendar day
+   matches the day the clinician actually experienced (`occurred_at` itself
+   is stored UTC -- see `services.record_event`). A fetch failure clears
+   the dots rather than breaking the dashboard, since this is decoration.
+   The response also carries `flagged_count` per day plus top-level
+   `total`/`flagged_total`, which is what the **Flagged Events** stat card
+   reads -- the parent fetches the current month specifically, separately
+   from the calendar's own fetch, so that card stays pinned to "this
+   month" while the calendar is free to browse other months.
+   6 new tests (`ledger.tests.MyActivityCalendarViewTests`): own counts +
+   flagging, clean days unflagged, another staff member's activity never
+   included, other months excluded, bad month rejected, non-clinical roles
+   403. Verified live against the real doctor account -- September showed
+   4 real flagged days from this account's genuine history, August showed
+   none, and the month arrows refetched correctly. Deliberately a `<div>` with an explicit action
+   rather than the old clickable `<button>` tile -- interactive content
+   can't nest inside a `<button>`, so a `<select>` inside one would have
+   been invalid. Defaults to the clinician's **own** ward, resolved at
+   render (`cardWard || session.ward || WARDS[0]`) rather than in an effect,
+   which would otherwise clobber a manual choice if the session resolved
+   late. The card scopes away the base `.role-bar-chart`'s `min-height:
+   220px` (sized for the Security dashboard's taller chart), same
+   scoped-override approach `.admin-summary-charts` already uses.
+
+   Backend: `PatientSummaryView` gained **`by_ward_status`**, a ward x
+   status cross-tab -- aggregated server-side rather than counted
+   client-side from a patient search, which is capped at 50 rows
+   (`PatientSearchView`) and would silently undercount a busy ward. New test
+   `test_summary_cross_tabs_ward_by_status`. `PATIENT_STATUS_OPTIONS` moved
+   out of `AdminDashboard.jsx` into a shared `frontend/src/patientStatus.js`
+   (same convention as the existing `wards.js`) so both dashboards read one
+   definition instead of the Clinical page importing from the Admin page.
+
+   Final default order: stat cards -> ward status chart -> search ->
+   "Assigned to you". `npm run lint`/`npm run build` clean.
+   **Verified live** (Claude-in-Chrome, real doctor account `282828`): all
+   four cards render with real values -- My Patients 1 / "0 in your ward",
+   Duty Status "On duty" + "Emergency Ward" on the filled card (correctly
+   no "On call" tag, that flag being false), Total Patients 1 / "0 in your
+   ward" (the one real patient is in Surgical Ward while this doctor is
+   Emergency Ward, so both zeros are right), Colleague Requests 0 / "None
+   pending" -- with the search row full-width directly beneath them and
+   "Find a patient" / ward tiles / "Assigned to you" following, all
+   unchanged. No console errors.
+
+   **Two browser-side gotchas worth recording, since both cost real time
+   here and neither is an app bug.** (1) The session token lives in
+   **`sessionStorage`**, deliberately (`api/client.js`, to limit XSS
+   persistence) -- so it is **per-tab**, not shared across tabs. A login in
+   one tab is invisible to every other tab, which makes "I'm logged in" and
+   "the page shows the login screen" both true at once, and makes browser
+   automation in a *different* tab than the user's unable to see their
+   session at all. Verifying an authenticated screen requires logging in on
+   the exact tab being driven. (2) A Chrome tab running this app can get
+   into a genuinely frozen-renderer state (CDP `Runtime.evaluate` times out;
+   reproduced repeatedly this session, and once earlier against the
+   `medguard-offline` IndexedDB database). A frozen tab keeps displaying a
+   stale render, so code changes appear not to have applied. Opening a fresh
+   tab is the fix; the old one is not recoverable. When a UI change "hasn't
+   worked", rule these two out before touching the code.
+
    **Amended a fifth time the same day (2026-09-12, real bug: clinical
    record view never displayed the structured fields):** while checking
    why category 1 (Identity)'s phone number wasn't showing to clinical
@@ -1432,6 +1779,92 @@ reset back to "All statuses" afterward. No console errors.
    (same reasoning as step 5's original entry above — the Ledger is
    append-only by design and this was a genuine audited event, not
    fabricated test data).
+
+   **Amended a fourth time (2026-09-20, hide the button where the override
+   would be refused anyway):** per the user, after testing with a doctor who
+   was off duty, not on call, not assigned to the patient and not on the
+   patient's ward — the exact combination BTG's own availability gate blocks
+   (see the Emergency Override section above) — the button still appeared,
+   and clicking it could only ever fail. Per the user: *"I don't want it to
+   completely appear even if it will not work."* New read-only
+   `break_glass_blocked` field on `AccessDecisionSerializer`
+   (`scoring/serializers.py`), computed with the **same** inputs
+   `EmergencyOverrideView` uses for its own gate — live `staff.on_duty`/
+   `on_call` (not the login snapshot), a fresh
+   `compute_patient_assignment_status()` lookup, and the Disaster Mode
+   exemption — so the UI can't drift from what the endpoint would actually
+   do. `ClinicalDashboard.jsx`'s existing `hideBreakGlass` now also hides on
+   that flag; `offline/scoringEngine.js` returns the same flag so the button
+   behaves identically while disconnected. Roles with no assignment concept
+   (pharmacist/lab tech/clerk) are never blocked, same as the endpoint.
+   Backend security is unchanged — `EmergencyOverrideView` still enforces
+   the real gate and would still refuse a direct API call, exactly as before.
+   **Followed immediately by removing the `cross_coverage` bypass
+   server-side** (same day, same user instruction — see the Emergency
+   Override section above): hiding the button had left the UI and the API
+   disagreeing, since `cross_coverage` was still a way *through* the block
+   at the endpoint. It isn't any more — `EmergencyOverrideView`'s gate now
+   checks only duty status, connection, and Disaster Mode, so the hidden
+   button and the endpoint say the same thing. 6 new tests
+   (`scoring.BreakGlassBlockedFlagTests`) plus 1 rewritten and 1 added in
+   `EmergencyOverrideTests` — 83/83 `scoring` tests passing (was 76; no
+   other app's tests touch this endpoint, checked rather than assumed);
+   `npm run lint`/`npm run build` clean. Verified against the
+   user's own real test case in the dev database (doctor `STF-2366`, off
+   duty, ward `general_male`): their surgical-ward decisions serialize
+   `break_glass_blocked=True` (button hidden) while their same-ward ones
+   serialize `False` — not live-clicked in-browser, since the Chrome
+   extension wasn't connected at the time.
+
+   **Amended a fifth time (2026-09-20, same day — the Doctor rule's second
+   denial path):** the user pointed out the half of their instruction that
+   hadn't been built. The two BTG changes above only covered the doctor
+   with *no* connection at all; the user also wanted an off-duty,
+   not-on-call, **unassigned but same-ward** doctor denied — *"he can only
+   access his data through Break the Glass"* — with the button still
+   there for that case. `scoring/engine.py`'s doctor block now branches on
+   both unassigned statuses instead of just one (new `role_rule_path`
+   value `off_duty_same_ward_denied`, distinct from `off_duty_denied` so
+   the Ledger drilldown can tell the two apart — no migration needed,
+   `role_rule_path` is a plain unconstrained `CharField`). No change was
+   needed to BTG itself: `EmergencyOverrideView`'s gate and the
+   `break_glass_blocked` flag already keyed on `NOT_ASSIGNED_NOT_SAME_WARD`
+   alone, so same-ward already kept the button — `BreakGlassBlockedFlagTests.
+   test_not_blocked_when_same_ward` now covers exactly this case and still
+   passes unchanged. `offline/scoringEngine.js` mirrors the new branch.
+   Nothing in the frontend reads `role_rule_path` by value (checked), so
+   no UI copy needed updating. Tests: the old
+   `test_off_duty_but_same_ward_uses_standard_scoring` (which asserted the
+   opposite) rewritten as
+   `test_off_duty_and_same_ward_but_unassigned_is_also_denied`, plus 2 new
+   (Disaster Mode suspends this path too; on-call keeps a same-ward doctor
+   out of it, since on-call is equivalent to on-duty everywhere else).
+   Verified against real records before anything shipped: the real off-duty
+   doctor `STF-2366` was run through the real engine against two real demo
+   patients inside a rolled-back transaction (nothing written) — same-ward
+   `MGH-2026-0101` → `ACCESS_DENIED` at 80% with BTG shown, different-ward
+   `MGH-2026-0107` → `ACCESS_DENIED` at 65% with BTG hidden. The 80% is the
+   point: that case previously granted all 13 categories as an
+   `AUDITED_DEVIATION`, which is the gap the user had spotted.
+
+   **Amended a sixth time (2026-09-20, same day — the Nurse rule's case 2
+   gained the same duty condition):** confirmed via `AskUserQuestion` after
+   flagging the asymmetry the doctor change had just created. The user chose
+   to deny "only when she's off duty", so Nurse rule case 2 (same ward, not
+   assigned) now branches on `effectively_on_duty` exactly as the doctor
+   path does: on duty or on call → unchanged full access logged as
+   `AUDITED_DEVIATION`; off duty and not on call → `ACCESS_DENIED` under the
+   **same** `role_rule_path` value as the doctor case
+   (`off_duty_same_ward_denied` — one value, one meaning, and the role is
+   already recorded separately on both the decision and the Ledger entry),
+   with Break the Glass still available. `effectively_on_duty`/
+   `disaster_mode` were hoisted above the role branching in `engine.py` since
+   both rules now need them; `offline/scoringEngine.js` mirrors it. All 4
+   pre-existing `NurseRuleTests` needed no changes — every one of them
+   already used `on_duty=True`, which is itself the proof that the on-duty
+   behaviour is untouched. 4 new nurse tests (off-duty denied; on-call keeps
+   full access; Disaster Mode suspends it; an off-duty *assigned* nurse is
+   still plain weighted scoring).
 5b. ✅ **Done (2026-09-06).** Five hackathon-hardening features, chosen by the
    user from a full-system review that surfaced six gaps (they picked all but
    the sixth — demo enrollment data, which is theirs to supply per the
@@ -2141,9 +2574,73 @@ reset back to "All statuses" afterward. No console errors.
 
 The user will supply their own staff, patient, and fingerprint enrollment data directly. **Do not create synthetic, placeholder, or example datasets for any of these** — no example staff rows, no generated patient records, no public fingerprint datasets (e.g. do not use SOCOFing, Synthea, or similar substitutes). Build the schemas and the code paths that will consume this data, but leave the actual data population until the user provides it. If a schema decision is needed before the user's data arrives, ask rather than inventing example rows to fill the gap.
 
+### Demo patients — the one authorised exception (2026-09-19)
+
+The user explicitly asked for demo patient data for the hackathon
+presentation, overriding the rule above; confirmed via `AskUserQuestion`
+before anything was written. **12 synthetic patients, 3 per ward**, every
+one of the 13 categories fully populated, Nigerian names and addresses to
+match the project's scope. Hospital numbers run **`MGH-2026-0101` through
+`MGH-2026-0112`** — the user chose realistic numbers with no `DEMO-`
+prefix, so **that number range is the only thing marking them as
+synthetic. Recorded here deliberately**: without it a later session would
+have no way to tell these from real enrollment data, and would rightly
+refuse to touch them.
+
+| Ward | Patients |
+|---|---|
+| General Male | Chukwuemeka Okafor, Ibrahim Danladi, Oluwaseun Adebayo |
+| General Female | Ngozi Chukwuma, Aisha Bello, Folasade Ogunleye |
+| Surgical | Emeka Nwachukwu, Halima Yusuf, Tunde Adeyemi |
+| Emergency | Chidinma Eze, Musa Abubakar, Bisi Afolabi |
+
+**Phone numbers are deliberately non-assignable**, per the user: the first
+pass used realistic Nigerian mobile numbers (`+23480…`/`+23470…`) which
+could genuinely belong to a real person -- and since patient phone numbers
+are exactly what the Twilio SMS feature texts, a demo could have messaged a
+stranger. Replaced with `+234 800 000 01NN`, matching each hospital number:
+`0800` is Nigeria's toll-free range, not a mobile range, so it cannot be
+anyone's personal line. **Any future demo data must follow the same rule.**
+
+**The previously-real patient `iuyjcghh` ("iukjghchv") was deleted on the
+user's explicit instruction (2026-09-19)**, confirmed via `AskUserQuestion`
+after the consequences were spelled out. It took 205 rows with it: 13
+category records, 4 patient assignments, 14 `PatientNotification` rows, 1
+`StepUpAssistRequest`, **171 `AccessDecision` rows**, and — the costly one —
+**the only real `FingerprintTemplate`, enrolled from an actual finger**, so
+the outstanding "verify fingerprint matching against a real photo" task now
+needs a fresh enrolment. Ledger entries survived untouched, since that app
+denormalises the hospital number as plain text rather than holding a
+foreign key. Done by direct ORM delete: **there is still no patient-delete
+endpoint or UI** (only `StaffDeleteView` exists for staff), so any future
+patient deletion needs one built or another direct delete.
+
+The 12 demo patients are therefore now the *entire* patient table. Seeded by a one-off script that validated every field against
+`CATEGORY_FIELDS` first -- same check `PatientCategoryContentUpdateSerializer`
+applies -- so nothing was stored that the real API would have rejected, and
+keyed on `hospital_number` via `get_or_create` so a re-run updates rather
+than duplicates. The rule above still stands for everything else:
+**do not generate further staff, patient or fingerprint data without the
+user asking for it explicitly.**
+
+**Real bug this surfaced (fixed the same day):** with more than one patient
+in the database for the first time, switching between them in the Admin
+patient panel left the *previous* patient's values in every category form.
+`CategoryFieldsEditor` seeds its state in a `useState` initialiser, which
+only runs on mount, and two things conspired to stop it remounting: the
+`<details>` key was `r.category`, identical 1-13 for every patient, and
+`select()` set `selected` immediately while leaving `categoryRecords`
+holding the old patient's data until the fetch returned -- so the editors
+mounted against mismatched records and never re-initialised. Fixed by
+keying on `${selected.id}-${r.category}` *and* clearing `categoryRecords`/
+`assignments` before the fetch. **This was a data-integrity bug, not just a
+display one**: saving a category while the stale values showed would have
+written the previous patient's details onto the open patient's record.
+Verified by stepping through three patients in a row.
+
 ## Pending — not yet provided by the user
 
-- Staff, patient, and fingerprint enrollment data (see above — will be supplied directly by the user)
+- Staff and fingerprint enrollment data (see above — will be supplied directly by the user)
 
 ## Working style for this project
 

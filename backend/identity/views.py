@@ -4,7 +4,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from patients.models import Patient, PatientCategoryRecord
+from patients.emergency_summary import emergency_summary
+from patients.models import Patient
 from staff.permissions import IsAdmin, IsClinicalStaff
 
 from .crypto import decrypt_minutiae, encrypt_minutiae
@@ -12,33 +13,6 @@ from .extraction import UnreadableImage, extract_minutiae
 from .matching import similarity_score
 from .models import FingerprintTemplate
 from .serializers import EnrollFingerprintSerializer, IdentifyFingerprintSerializer
-
-# Emergency-summary field lookup: (category, field name) pairs pulled from
-# each matched patient's own structured category content -- deliberately a
-# MINIMAL summary (CLAUDE.md's own wording), not the full 13-category
-# record. See patients/category_fields.py for what each category actually
-# stores.
-SUMMARY_FIELDS = {
-    "blood_type": (3, "blood_type"),
-    "drug_allergies": (6, "drug_allergies"),
-    "other_allergies": (6, "other_allergies"),
-    "current_medications": (5, "current_medications"),
-    "current_diagnoses": (4, "current_diagnoses"),
-    "next_of_kin": (1, "next_of_kin"),
-}
-
-
-def _emergency_summary(patient):
-    records_by_category = {
-        r.category: r.content
-        for r in PatientCategoryRecord.objects.filter(
-            patient=patient, category__in={cat for cat, _ in SUMMARY_FIELDS.values()}
-        )
-    }
-    summary = {}
-    for key, (category, field) in SUMMARY_FIELDS.items():
-        summary[key] = records_by_category.get(category, {}).get(field, "")
-    return summary
 
 
 class EnrollFingerprintView(APIView):
@@ -124,7 +98,7 @@ class IdentifyFingerprintView(APIView):
                     "full_name": best_patient.full_name,
                     "ward": best_patient.ward,
                 },
-                "summary": _emergency_summary(best_patient),
+                "summary": emergency_summary(best_patient),
             }
         )
 
@@ -162,7 +136,7 @@ class OfflineFingerprintBundleView(APIView):
                         "ward": patient.ward,
                     },
                     "minutiae": decrypt_minutiae(template.encrypted_template),
-                    "summary": _emergency_summary(patient),
+                    "summary": emergency_summary(patient),
                 }
             )
         return Response({"templates": templates})

@@ -74,6 +74,16 @@ function getStaffAssignments(staffPk) {
   return request(`/patients/staff/${staffPk}/assignments/`);
 }
 
+/** GET /api/patients/ward-emergency-summaries/ — Offline Mode's ward roster:
+ * the minimal emergency summary for every patient on the caller's OWN ward
+ * (plus anyone assigned to them). Doctors and nurses only; every other role
+ * gets a 403, which the caller treats as "no roster", not an error. The ward
+ * is derived server-side from the session — there is deliberately no ward
+ * argument to pass. */
+function getWardEmergencySummaries() {
+  return request('/patients/ward-emergency-summaries/');
+}
+
 export {
   searchPatients,
   getPatientSummary,
@@ -87,4 +97,5 @@ export {
   createPatientAssignment,
   deactivatePatientAssignment,
   getStaffAssignments,
+  getWardEmergencySummaries,
 };

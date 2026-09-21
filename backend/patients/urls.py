@@ -28,6 +28,11 @@ urlpatterns = [
         name="assignment-deactivate",
     ),
     path(
+        "ward-emergency-summaries/",
+        views.WardEmergencySummaryView.as_view(),
+        name="ward-emergency-summaries",
+    ),
+    path(
         "staff/<int:staff_pk>/assignments/",
         views.StaffAssignmentsView.as_view(),
         name="staff-assignments",

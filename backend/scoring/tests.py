@@ -20,6 +20,7 @@ from staff.models import Staff
 from .baseline import extract_keystroke_features, extract_mouse_features
 from .engine import compute_access_decision
 from .models import AccessDecision, BehavioralBaseline, DisasterModeEvent, StepUpAssistRequest
+from .serializers import AccessDecisionSerializer
 
 SAMPLE_MOUSE_EVENTS = [
     {"event": "mousemove", "x": 0, "y": 0, "t": 0.0},
@@ -257,6 +258,79 @@ class NurseRuleTests(ScoringTestBase):
         self.assertEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
         self.assertEqual(decision.granted_categories, [])
 
+    def test_nurse_same_ward_is_denied_when_off_duty_and_not_on_call(self):
+        """Added 2026-09-20, per the user: the same-ward full-access path above
+        holds only while she's actually working. Off duty and not on call, it's
+        denied exactly like the equivalent doctor case -- Break the Glass stays
+        available (asserted in BreakGlassBlockedFlagTests)."""
+        staff = self._make_staff("nurseOffDutySameWard", "STF-810", Staff.Role.NURSE, ward="Ward A", on_duty=False)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-810", full_name="P22", ward="Ward A")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED,
+        )
+        self._matching_baseline(staff, session, behavioral)
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "off_duty_same_ward_denied")
+        self.assertEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+        self.assertEqual(decision.granted_categories, [])
+
+    def test_nurse_same_ward_on_call_keeps_full_audited_access(self):
+        """on_call is equivalent to on_duty everywhere else, so it must keep the
+        same-ward path on its original full-access branch."""
+        staff = self._make_staff(
+            "nurseOnCallSameWard", "STF-811", Staff.Role.NURSE, ward="Ward A", on_duty=False, on_call=True
+        )
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-811", full_name="P23", ward="Ward A")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED,
+        )
+        self._matching_baseline(staff, session, behavioral)
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "same_ward")
+        self.assertEqual(decision.decision_type, AccessDecision.DecisionType.AUDITED_DEVIATION)
+        self.assertEqual(decision.granted_categories, list(range(1, 14)))
+
+    def test_nurse_same_ward_off_duty_denial_is_suspended_by_disaster_mode(self):
+        staff = self._make_staff("nurseOffDutyDM", "STF-812", Staff.Role.NURSE, ward="Ward A", on_duty=False)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-812", full_name="P24", ward="Ward A")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED,
+        )
+        self._matching_baseline(staff, session, behavioral)
+        DisasterModeEvent.objects.create(
+            event_type=DisasterModeEvent.EventType.ACTIVATED, staff=staff, reason="Mass casualty drill"
+        )
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "same_ward")
+        self.assertEqual(decision.decision_type, AccessDecision.DecisionType.AUDITED_DEVIATION)
+        self.assertEqual(decision.granted_categories, list(range(1, 14)))
+
+    def test_nurse_assigned_is_untouched_when_off_duty(self):
+        """Only the same-ward path gained a duty condition -- an off-duty nurse who
+        IS assigned to this patient still goes through plain weighted scoring, same
+        as the equivalent doctor case."""
+        staff = self._make_staff("nurseOffDutyAssigned", "STF-813", Staff.Role.NURSE, ward="Ward A", on_duty=False)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-813", full_name="P25", ward="Ward A")
+        PatientAssignment.objects.create(patient=patient, staff=staff, role_in_assignment="nurse")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient, assignment_status=ContextualCapture.PatientAssignmentStatus.ASSIGNED
+        )
+        self._matching_baseline(staff, session, behavioral)
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "assigned")
+        self.assertNotEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+
     def test_gate_overrides_nurse_same_ward_full_access(self):
         """The hard gate takes precedence over every role-specific rule, including
         the nurse same-ward forced-full-access path (CLAUDE.md)."""
@@ -329,10 +403,51 @@ class DoctorRuleTests(ScoringTestBase):
         self.assertEqual(decision.role_rule_path, "")
         self.assertNotEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
 
-    def test_off_duty_but_same_ward_uses_standard_scoring(self):
+    def test_off_duty_and_same_ward_but_unassigned_is_also_denied(self):
+        """Extended 2026-09-20, per the user: an off-duty (not on-call) doctor who
+        isn't assigned is denied on their OWN ward too, not only when there's no
+        connection at all. The difference is what's left afterwards -- Break the
+        Glass is still available here (asserted in BreakGlassBlockedFlagTests),
+        which is what makes it "the only way he can access" this record."""
         staff = self._make_staff("docOffDutySameWard", "STF-902", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
         session = self._make_session(staff)
         patient = Patient.objects.create(hospital_number="HN-902", full_name="P16", ward="Ward A")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED,
+        )
+        self._matching_baseline(staff, session, behavioral)
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "off_duty_same_ward_denied")
+        self.assertEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+        self.assertEqual(decision.granted_categories, [])
+
+    def test_off_duty_same_ward_denial_is_suspended_by_disaster_mode(self):
+        staff = self._make_staff("docOffDutySameWardDM", "STF-906", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-906", full_name="P20", ward="Ward A")
+        behavioral, contextual = self._make_captures(
+            session, patient=patient,
+            assignment_status=ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED,
+        )
+        self._matching_baseline(staff, session, behavioral)
+        DisasterModeEvent.objects.create(
+            event_type=DisasterModeEvent.EventType.ACTIVATED, staff=staff, reason="Mass casualty drill"
+        )
+
+        decision = compute_access_decision(session, patient)
+        self.assertEqual(decision.role_rule_path, "")
+        self.assertNotEqual(decision.decision_type, AccessDecision.DecisionType.ACCESS_DENIED)
+
+    def test_on_call_and_same_ward_but_unassigned_uses_standard_scoring(self):
+        """On call is equivalent to on duty everywhere else, so it must keep this
+        case out of the new denial too."""
+        staff = self._make_staff(
+            "docOnCallSameWard", "STF-907", Staff.Role.DOCTOR, ward="Ward A", on_duty=False, on_call=True
+        )
+        session = self._make_session(staff)
+        patient = Patient.objects.create(hospital_number="HN-907", full_name="P21", ward="Ward A")
         behavioral, contextual = self._make_captures(
             session, patient=patient,
             assignment_status=ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED,
@@ -384,6 +499,90 @@ class DoctorRuleTests(ScoringTestBase):
         # role_rule_path stays "" -- the gate's early return never reaches the
         # doctor-rule block, so it must not be misreported as the cause.
         self.assertEqual(decision.role_rule_path, "")
+
+
+class BreakGlassBlockedFlagTests(ScoringTestBase):
+    """AccessDecisionSerializer.break_glass_blocked (added 2026-09-20): tells the
+    clinical dashboard to hide the Break the Glass button outright in the one
+    state EmergencyOverrideView would refuse anyway. Must mirror that view's own
+    gate exactly -- live duty fields, a fresh assignment lookup, Disaster Mode
+    exemption -- so the button can never be hidden where the override would in
+    fact work, or shown where it wouldn't."""
+
+    def _decision_for(self, staff, patient, assignment_status):
+        session = self._make_session(staff, device_id=f"dev-{staff.staff_id}")
+        behavioral, _contextual = self._make_captures(
+            session, patient=patient, assignment_status=assignment_status
+        )
+        self._matching_baseline(staff, session, behavioral)
+        return compute_access_decision(session, patient)
+
+    def _flag(self, decision):
+        return AccessDecisionSerializer(decision).data["break_glass_blocked"]
+
+    def test_blocked_when_off_duty_not_on_call_and_unconnected(self):
+        staff = self._make_staff("docBtgBlocked", "STF-BG1", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        patient = Patient.objects.create(hospital_number="HN-BG1", full_name="P-BG1", ward="Ward B")
+        decision = self._decision_for(
+            staff, patient, ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
+        )
+        self.assertTrue(self._flag(decision))
+
+    def test_not_blocked_when_on_call(self):
+        staff = self._make_staff(
+            "docBtgOnCall", "STF-BG2", Staff.Role.DOCTOR, ward="Ward A", on_duty=False, on_call=True
+        )
+        patient = Patient.objects.create(hospital_number="HN-BG2", full_name="P-BG2", ward="Ward B")
+        decision = self._decision_for(
+            staff, patient, ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
+        )
+        self.assertFalse(self._flag(decision))
+
+    def test_not_blocked_when_same_ward(self):
+        staff = self._make_staff("docBtgSameWard", "STF-BG3", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        patient = Patient.objects.create(hospital_number="HN-BG3", full_name="P-BG3", ward="Ward A")
+        decision = self._decision_for(
+            staff, patient, ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED
+        )
+        self.assertFalse(self._flag(decision))
+
+    def test_not_blocked_while_disaster_mode_is_active(self):
+        staff = self._make_staff("docBtgDisaster", "STF-BG4", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        patient = Patient.objects.create(hospital_number="HN-BG4", full_name="P-BG4", ward="Ward B")
+        decision = self._decision_for(
+            staff, patient, ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
+        )
+        self.assertTrue(self._flag(decision))
+
+        DisasterModeEvent.objects.create(
+            event_type=DisasterModeEvent.EventType.ACTIVATED, staff=staff, reason="Mass casualty drill"
+        )
+        self.assertFalse(self._flag(decision))
+
+    def test_flag_uses_live_duty_status_not_the_login_snapshot(self):
+        """The decision was computed while off duty, but the staff member has since
+        come on duty -- BTG's own gate reads live fields, so this must too."""
+        staff = self._make_staff("docBtgLive", "STF-BG5", Staff.Role.DOCTOR, ward="Ward A", on_duty=False)
+        patient = Patient.objects.create(hospital_number="HN-BG5", full_name="P-BG5", ward="Ward B")
+        decision = self._decision_for(
+            staff, patient, ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
+        )
+        self.assertTrue(self._flag(decision))
+
+        staff.on_duty = True
+        staff.save(update_fields=["on_duty"])
+        decision.refresh_from_db()
+        self.assertFalse(self._flag(decision))
+
+    def test_never_blocked_for_roles_without_an_assignment_concept(self):
+        """Pharmacist/lab tech/clerk have no ward/assignment concept, so the gate
+        never applies to them -- same as EmergencyOverrideView."""
+        staff = self._make_staff("clerkBtg", "STF-BG6", Staff.Role.CLERK, ward="", on_duty=False)
+        patient = Patient.objects.create(hospital_number="HN-BG6", full_name="P-BG6", ward="Ward B")
+        decision = self._decision_for(
+            staff, patient, ContextualCapture.PatientAssignmentStatus.NOT_APPLICABLE
+        )
+        self.assertFalse(self._flag(decision))
 
 
 class BaselineReinforcementAndAPITests(ScoringTestBase):
@@ -1604,8 +1803,9 @@ class EmergencyOverrideTests(ScoringTestBase):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
 
-    # -- reason_category (2026-08-29): required; "cross_coverage" is the one value
-    # that unlocks BTG through the off-duty+unconnected block on its own. --
+    # -- reason_category (2026-08-29): required and validated, but purely a label.
+    # It stopped being able to unlock the off-duty+unconnected block on 2026-09-20
+    # (see EmergencyOverrideView's docstring) -- no category is a bypass now. --
 
     def test_reason_category_required_and_validated(self):
         _staff, token = self._login("docBtg15", "pw-btg-15", "STF-BTG15", Staff.Role.DOCTOR, ward="Ward A")
@@ -1646,9 +1846,11 @@ class EmergencyOverrideTests(ScoringTestBase):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
 
-    def test_cross_coverage_category_unlocks_btg_despite_off_duty_unconnected(self):
-        """Self-attested: no location/time verification, the category itself is
-        what lets it through (user's explicit design choice, 2026-08-29)."""
+    def test_cross_coverage_category_no_longer_unlocks_btg(self):
+        """Removed 2026-09-20, per the user: "a staff cannot cross cover when he's
+        not on duty or not on call" -- a self-attested checkbox no longer stands in
+        for either flag. The category still submits fine when BTG is available
+        (covered below); it just isn't a door any more."""
         _staff, token = self._login(
             "docBtgCrossCov", "pw-btg-18", "STF-BTG18", Staff.Role.DOCTOR, ward="Ward A", on_duty=False
         )
@@ -1657,6 +1859,22 @@ class EmergencyOverrideTests(ScoringTestBase):
         resp = self.client.post(
             "/api/scoring/emergency-override/",
             {"patient_id": patient.id, "reason_category": "cross_coverage", "reason": "Covering for Dr. X, roster not updated yet"},
+            format="json",
+            **self._auth(token),
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_cross_coverage_category_still_accepted_when_btg_is_available(self):
+        """It's still a legitimate thing to record -- an on-duty clinician covering
+        a colleague's patients -- just not a bypass."""
+        _staff, token = self._login(
+            "docBtgCrossCovOnDuty", "pw-btg-20", "STF-BTG20", Staff.Role.DOCTOR, ward="Ward A", on_duty=True
+        )
+        patient = Patient.objects.create(hospital_number="HN-BTG20", full_name="P", ward="Ward B")
+
+        resp = self.client.post(
+            "/api/scoring/emergency-override/",
+            {"patient_id": patient.id, "reason_category": "cross_coverage", "reason": "Covering for Dr. X while she is in theatre"},
             format="json",
             **self._auth(token),
         )

@@ -91,24 +91,44 @@ function computeOfflineDecision({ staff, patient, assignedPatientIds, sessionFac
   }
 
   let roleRulePath = '';
+  // on_call counts the same as on_duty, as everywhere else in this app. Shared by
+  // both role rules below, mirroring engine.py.
+  const effectivelyOnDuty = staff.on_duty || staff.on_call;
+
   if (staff.role === 'nurse') {
     if (assignmentStatus === 'assigned') {
       roleRulePath = 'assigned';
     } else if (assignmentStatus === 'same_ward_not_assigned') {
-      roleRulePath = 'same_ward';
-      decisionType = 'AUDITED_DEVIATION';
-      grantedCategories = [...ROLE_CEILINGS.nurse].sort((a, b) => a - b);
+      if (effectivelyOnDuty || disasterModeActive) {
+        roleRulePath = 'same_ward';
+        decisionType = 'AUDITED_DEVIATION';
+        grantedCategories = [...ROLE_CEILINGS.nurse].sort((a, b) => a - b);
+      } else {
+        // Off duty and not on call -- denied like the equivalent doctor case,
+        // Break the Glass still available (added 2026-09-20).
+        roleRulePath = 'off_duty_same_ward_denied';
+        decisionType = 'ACCESS_DENIED';
+        grantedCategories = [];
+      }
     } else {
       roleRulePath = 'neither';
       decisionType = 'ACCESS_DENIED';
       grantedCategories = [];
     }
   } else if (staff.role === 'doctor') {
-    const effectivelyOnDuty = staff.on_duty || staff.on_call;
-    if (!effectivelyOnDuty && assignmentStatus === 'not_assigned_not_same_ward' && !disasterModeActive) {
-      roleRulePath = 'off_duty_denied';
-      decisionType = 'ACCESS_DENIED';
-      grantedCategories = [];
+    // Mirrors engine.py's doctor rule: an off-duty (and not on-call) doctor who
+    // isn't assigned is denied in BOTH unassigned cases. Same-ward keeps Break
+    // the Glass available (added 2026-09-20); no-connection-at-all doesn't.
+    if (!effectivelyOnDuty && !disasterModeActive) {
+      if (assignmentStatus === 'not_assigned_not_same_ward') {
+        roleRulePath = 'off_duty_denied';
+        decisionType = 'ACCESS_DENIED';
+        grantedCategories = [];
+      } else if (assignmentStatus === 'same_ward_not_assigned') {
+        roleRulePath = 'off_duty_same_ward_denied';
+        decisionType = 'ACCESS_DENIED';
+        grantedCategories = [];
+      }
     }
   }
 
@@ -116,6 +136,16 @@ function computeOfflineDecision({ staff, patient, assignedPatientIds, sessionFac
   // the server) -- see design decision #4. The sensitivity exclusion above
   // still applies; this only flags that step-up itself was skipped.
   const stepUpDeferredOffline = decisionType === 'REDUCED_ACCESS';
+
+  // Mirrors scoring/serializers.py's get_break_glass_blocked (added
+  // 2026-09-20) so the Break the Glass button stays hidden in the same one
+  // state offline as it is online: off duty, not on call, no assignment and
+  // not the patient's ward. Disaster Mode suspends it, same as the server.
+  const breakGlassBlocked =
+    !staff.on_duty &&
+    !staff.on_call &&
+    !disasterModeActive &&
+    assignmentStatus === 'not_assigned_not_same_ward';
 
   return {
     decision_type: decisionType,
@@ -125,6 +155,7 @@ function computeOfflineDecision({ staff, patient, assignedPatientIds, sessionFac
     role_rule_path: roleRulePath,
     gate_passed: sessionFactors.gate_passed,
     step_up_deferred_offline: stepUpDeferredOffline,
+    break_glass_blocked: breakGlassBlocked,
     factor_breakdown: { weights, factor_scores: factorScores },
     computed_offline: true,
   };

@@ -18,8 +18,8 @@ function getPatientRecords(patientId) {
  * the granted AccessDecision (decision_type EMERGENCY_OVERRIDE, "Break the Glass").
  * Available to any logged-in clinical staff member, still capped at the caller's
  * role ceiling. Blocked (403) for a doctor/nurse who is off duty (and not on call)
- * with no connection (assignment/ward) to the patient — unless reasonCategory is
- * "cross_coverage" (self-attested bypass) or Disaster Mode is active. reason is
+ * with no connection (assignment/ward) to the patient — only Disaster Mode lifts
+ * that. reasonCategory is a label, not a bypass (see the backend view). reason is
  * required (min 10 characters) since every call is permanently logged. */
 function emergencyOverride(patientId, reasonCategory, reason) {
   return request('/scoring/emergency-override/', {

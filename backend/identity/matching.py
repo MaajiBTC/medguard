@@ -34,13 +34,28 @@ exposed the original bug.
 
 import math
 
-# Loosened from 12px/20deg (added 2026-09-14, alongside extraction.py's
-# canonical resize) -- two independently-taken photos of the same finger
-# still won't align as tightly as two scans off the same purpose-built
-# scanner, even after removing the scale mismatch. Coordinates are in
-# extraction.py's fixed CANONICAL_SIZE (400x400) space, so this tolerance
-# is meaningful relative to that, not raw photo pixels.
-DISTANCE_TOLERANCE_PX = 20
+# Coordinates are in extraction.py's fixed CANONICAL_SIZE (400x400) space,
+# so these are meaningful relative to that, not raw photo pixels.
+#
+# History: 12px/20deg originally; loosened to 20px/30deg on 2026-09-14 on
+# the reasoning that two handheld photos won't align as tightly as two
+# scans off one purpose-built scanner. Put BACK to 12px on 2026-09-20 after
+# measuring against two real enrolled prints: at 20px, two different
+# fingers still scored 53% even with the one-to-one fix below (12px drops
+# that to 36%, under the 40% threshold). 20px was simply too generous for a
+# 400x400 frame in which the extractor packs ~70 mostly-noise minutiae into
+# roughly a 200x170 region -- at that density almost any point lands within
+# 20px of some template point, so the tolerance was matching texture rather
+# than ridge features.
+#
+# ANGLE_TOLERANCE_DEG does much less work than it appears to: the
+# extractor's angles come from atan2 over a 3x3 pixel neighbourhood, so a
+# whole print only ever yields about 10 distinct angle values (measured).
+# Removing the angle check entirely only moves a false match from 71% to
+# 90%, i.e. it was rejecting very little. Left in place -- it costs nothing
+# and does help -- but the distance tolerance and the one-to-one constraint
+# are what actually separate two fingers here.
+DISTANCE_TOLERANCE_PX = 12
 ANGLE_TOLERANCE_DEG = 30
 # Bucket size matches the distance tolerance -- a point can only ever match
 # something in its own bucket or an immediately adjacent one, so checking
@@ -81,18 +96,49 @@ def _nearby(grid, type_, x, y):
 
 
 def _count_matches(probe, grid, rotation, dx, dy, anchor):
+    """How many probe minutiae land on a template minutia under this
+    transform -- counting each template minutia AT MOST ONCE.
+
+    That one-to-one constraint is the whole point (fixed 2026-09-20, real
+    bug found against two real enrolled prints). The original took the
+    first template point within tolerance and moved on, with no record of
+    what had already been used -- so a dense cluster of probe minutiae
+    could all claim the SAME template point and each be counted as a
+    separate match. On real photographed prints, where the extractor
+    returns mostly closely-packed noise rather than clean well-separated
+    ridge features, that inflated two genuinely DIFFERENT fingers from 53%
+    to 71% -- comfortably past the 40% match threshold, meaning the system
+    would confidently return the wrong patient. A minutia pairing is by
+    definition one-to-one: two ridge endings cannot both be the same ridge
+    ending.
+
+    Each probe point takes its NEAREST unclaimed candidate rather than the
+    first one the grid happens to yield, so the pairing doesn't depend on
+    bucket iteration order.
+    """
+    claimed = set()
     matched = 0
     for p in probe:
         rx, ry = _rotate_about(p["x"], p["y"], anchor["x"], anchor["y"], rotation)
         rx, ry = rx + dx, ry + dy
         rotated_angle = (p["angle"] + rotation) % 360
+
+        nearest = None
+        nearest_distance = None
         for t in _nearby(grid, p["type"], rx, ry):
-            if math.hypot(rx - t["x"], ry - t["y"]) > DISTANCE_TOLERANCE_PX:
+            if id(t) in claimed:
+                continue
+            distance = math.hypot(rx - t["x"], ry - t["y"])
+            if distance > DISTANCE_TOLERANCE_PX:
                 continue
             if _angle_diff(rotated_angle, t["angle"]) > ANGLE_TOLERANCE_DEG:
                 continue
+            if nearest_distance is None or distance < nearest_distance:
+                nearest, nearest_distance = t, distance
+
+        if nearest is not None:
             matched += 1
-            break
+            claimed.add(id(nearest))
     return matched
 
 

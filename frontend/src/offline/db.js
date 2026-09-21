@@ -22,13 +22,22 @@
 //                organically per-patient-viewed: identification mode can't
 //                know which patient it's looking for in advance, so the
 //                whole roster is downloaded ahead of time instead.
+// - `wardSummaries` -- the minimal emergency summary for every patient on
+//                this clinician's own ward (plus anyone assigned to them),
+//                encrypted, one row under a single key -- see
+//                wardSummaryCache.js. Same "downloaded ahead of time"
+//                reasoning as `fingerprints`, on a different axis: it's
+//                what lets an offline clinician open a ward patient they
+//                never viewed online and still see blood type/allergies.
 
 import { openDB } from 'idb';
 
 const DB_NAME = 'medguard-offline';
-// Bumped 2026-09-17 (fingerprints store added) -- idb only runs upgrade()
-// again on an existing device when this increases.
-const DB_VERSION = 2;
+// Bumped 2026-09-17 (fingerprints store added), again 2026-09-21
+// (wardSummaries store added) -- idb only runs upgrade() again on an
+// existing device when this increases. The contains() guards below make
+// the body idempotent, so a device on v1 or v2 both land correctly on v3.
+const DB_VERSION = 3;
 
 let dbPromise = null;
 
@@ -41,6 +50,7 @@ function getDb() {
         if (!db.objectStoreNames.contains('queue')) db.createObjectStore('queue', { keyPath: 'client_seq' });
         if (!db.objectStoreNames.contains('keys')) db.createObjectStore('keys');
         if (!db.objectStoreNames.contains('fingerprints')) db.createObjectStore('fingerprints');
+        if (!db.objectStoreNames.contains('wardSummaries')) db.createObjectStore('wardSummaries');
       },
     });
   }

@@ -181,14 +181,34 @@ def compute_access_decision(session, patient):
         granted_categories = []
 
     role_rule_path = ""
+    # on_call counts the same as on_duty (added 2026-08-29, user: "is just like on
+    # duty status but virtually") -- someone off duty but reachable isn't treated as
+    # disconnected from the hospital. Both role rules below share this.
+    effectively_on_duty = contextual.on_duty_at_login or contextual.on_call_at_login
+    disaster_mode = is_disaster_mode_active()
+
     if staff.role == Staff.Role.NURSE:
         if assignment_status == ContextualCapture.PatientAssignmentStatus.ASSIGNED:
             role_rule_path = "assigned"
             # standard scoring result stands as computed above
         elif assignment_status == ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED:
-            role_rule_path = "same_ward"
-            decision_type = AccessDecision.DecisionType.AUDITED_DEVIATION
-            granted_categories = sorted(ROLE_CEILINGS[Staff.Role.NURSE])
+            if effectively_on_duty or disaster_mode:
+                # A nurse working her own ward cares for every patient on it, not
+                # only the ones formally assigned to her -- so this stays full
+                # access, always logged as an audited deviation regardless of score
+                # (CLAUDE.md's Nurse rule, case 2).
+                role_rule_path = "same_ward"
+                decision_type = AccessDecision.DecisionType.AUDITED_DEVIATION
+                granted_categories = sorted(ROLE_CEILINGS[Staff.Role.NURSE])
+            else:
+                # ...but only while she's actually working. Off duty and not on
+                # call, that justification is gone, so this is denied exactly like
+                # the equivalent doctor case -- with Break the Glass still available
+                # (added 2026-09-20, user's explicit choice: deny "only when she's
+                # off duty", leaving the on-duty case untouched above).
+                role_rule_path = "off_duty_same_ward_denied"
+                decision_type = AccessDecision.DecisionType.ACCESS_DENIED
+                granted_categories = []
         else:
             # Neither assigned nor same ward -- hard-denied regardless of score
             # (user correction 2026-08-25; see CLAUDE.md's Nurse rule). Break the
@@ -199,25 +219,33 @@ def compute_access_decision(session, patient):
             decision_type = AccessDecision.DecisionType.ACCESS_DENIED
             granted_categories = []
     elif staff.role == Staff.Role.DOCTOR:
-        # on_call counts the same as on_duty here (added 2026-08-29, user: "is just
-        # like on duty status but virtually") -- a doctor who's off duty but reachable
-        # isn't treated as disconnected from the hospital.
-        effectively_on_duty = contextual.on_duty_at_login or contextual.on_call_at_login
-        if (
-            not effectively_on_duty
-            and assignment_status == ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
-            and not is_disaster_mode_active()
-        ):
-            # Off duty (and not on call) AND no connection to this patient at all (not
-            # assigned, not even on their ward) -- hard-denied regardless of score,
-            # same standard the Nurse rule already applies to its own worst case (user
-            # request, 2026-08-29). Suspended hospital-wide during Disaster/Mass
-            # Casualty Mode. Every other doctor combination (on duty/on call
-            # regardless of assignment; off duty but same ward; off duty but assigned)
-            # is untouched and keeps today's standard weighted-scoring result.
-            role_rule_path = "off_duty_denied"
-            decision_type = AccessDecision.DecisionType.ACCESS_DENIED
-            granted_categories = []
+        if not effectively_on_duty and not disaster_mode:
+            # An off-duty (and not on-call) doctor who isn't assigned to this patient
+            # is hard-denied regardless of score, in BOTH unassigned cases. The two
+            # are denied for the same reason but differ in what happens next, which
+            # is why they carry distinct role_rule_path values:
+            #
+            #   same ward, not assigned (added 2026-09-20, user request) -> denied,
+            #     but Break the Glass stays available (EmergencyOverrideView's gate
+            #     only blocks NOT_ASSIGNED_NOT_SAME_WARD), so per the user this is
+            #     "the only way he can access" -- a deliberate, justified, logged
+            #     override rather than silent routine access. The nurse branch above
+            #     reaches the same outcome, by the same reasoning and under the same
+            #     role_rule_path value.
+            #   neither assigned nor same ward (added 2026-08-29) -> denied AND BTG
+            #     is blocked/hidden too; no path at all short of Disaster Mode.
+            #
+            # Still untouched, still plain weighted scoring: any on-duty/on-call
+            # doctor, and an off-duty doctor who IS assigned to this patient.
+            # Suspended hospital-wide during Disaster/Mass Casualty Mode.
+            if assignment_status == ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD:
+                role_rule_path = "off_duty_denied"
+                decision_type = AccessDecision.DecisionType.ACCESS_DENIED
+                granted_categories = []
+            elif assignment_status == ContextualCapture.PatientAssignmentStatus.SAME_WARD_NOT_ASSIGNED:
+                role_rule_path = "off_duty_same_ward_denied"
+                decision_type = AccessDecision.DecisionType.ACCESS_DENIED
+                granted_categories = []
 
     decision = AccessDecision.objects.create(
         session=session,

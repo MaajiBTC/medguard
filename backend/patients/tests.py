@@ -386,6 +386,35 @@ class PatientApiTests(APITestCase):
         self.assertIn("HN-P921", hospital_numbers)
         self.assertNotIn("HN-P922", hospital_numbers)
 
+    def test_summary_cross_tabs_ward_by_status(self):
+        """Added 2026-09-19 for the Clinical dashboard's per-ward status bar
+        chart -- aggregated server-side so it isn't capped at 50 rows."""
+        Patient.objects.create(
+            hospital_number="HN-P926", full_name="A", ward=Ward.SURGICAL, status=PatientStatus.ADMITTED
+        )
+        Patient.objects.create(
+            hospital_number="HN-P927", full_name="B", ward=Ward.SURGICAL, status=PatientStatus.ADMITTED
+        )
+        Patient.objects.create(
+            hospital_number="HN-P928", full_name="C", ward=Ward.SURGICAL, status=PatientStatus.OUTPATIENT
+        )
+        Patient.objects.create(hospital_number="HN-P929", full_name="D", ward=Ward.SURGICAL, status="")
+        Patient.objects.create(
+            hospital_number="HN-P930", full_name="E", ward=Ward.EMERGENCY, status=PatientStatus.ADMITTED
+        )
+        _admin, token = self._login("adminWardStatusApi", "pw-patient-api-23", "STF-P922", Staff.Role.ADMIN)
+
+        resp = self.client.get("/api/patients/summary/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        surgical = resp.data["by_ward_status"]["surgical"]
+        self.assertEqual(surgical["admitted"], 2)
+        self.assertEqual(surgical["outpatient"], 1)
+        self.assertEqual(surgical["unassigned"], 1)
+        self.assertEqual(surgical["discharged"], 0)
+        # Other wards are unaffected by Surgical's counts.
+        self.assertEqual(resp.data["by_ward_status"]["emergency"]["admitted"], 1)
+        self.assertEqual(resp.data["by_ward_status"]["general_male"]["admitted"], 0)
+
     def test_summary_counts_by_status_including_unassigned(self):
         Patient.objects.create(hospital_number="HN-P923", full_name="A", status=PatientStatus.ADMITTED)
         Patient.objects.create(hospital_number="HN-P924", full_name="B", status=PatientStatus.ADMITTED)
@@ -397,3 +426,126 @@ class PatientApiTests(APITestCase):
         self.assertEqual(resp.data["by_status"]["admitted"], 2)
         self.assertEqual(resp.data["by_status"]["discharged"], 0)
         self.assertEqual(resp.data["by_status"]["unassigned"], 1)
+
+
+class WardEmergencySummaryViewTests(APITestCase):
+    """GET /api/patients/ward-emergency-summaries/ -- Offline Mode's ward
+    roster (added 2026-09-21). Scoped server-side to the caller's OWN ward
+    (no query param to tamper with) plus anyone actively assigned to them,
+    and restricted to doctors/nurses since the summary spans record
+    categories a clerk or lab technician may never see."""
+
+    URL = "/api/patients/ward-emergency-summaries/"
+
+    def _login(self, username, password, staff_id, role, ward=""):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(
+            user=user, staff_id=staff_id, full_name=username, role=role, ward=ward, on_duty=True
+        )
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def _hospital_numbers(self, resp):
+        return {row["patient"]["hospital_number"] for row in resp.data["patients"]}
+
+    def test_returns_own_ward_and_excludes_other_wards(self):
+        Patient.objects.create(hospital_number="HN-WARD-A", full_name="On My Ward", ward=Ward.SURGICAL)
+        Patient.objects.create(hospital_number="HN-WARD-B", full_name="Another Ward", ward=Ward.EMERGENCY)
+        _staff, token = self._login(
+            "docWardRoster", "pw-ward-1", "STF-WR1", Staff.Role.DOCTOR, ward=Ward.SURGICAL
+        )
+
+        resp = self.client.get(self.URL, **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._hospital_numbers(resp), {"HN-WARD-A"})
+
+    def test_assigned_patient_on_another_ward_is_included(self):
+        """Assignment grants access regardless of ward, so leaving these out
+        would be a gap in the same cache."""
+        other_ward_patient = Patient.objects.create(
+            hospital_number="HN-WARD-C", full_name="My Patient Elsewhere", ward=Ward.EMERGENCY
+        )
+        staff, token = self._login(
+            "nurseWardRoster", "pw-ward-2", "STF-WR2", Staff.Role.NURSE, ward=Ward.SURGICAL
+        )
+        PatientAssignment.objects.create(
+            patient=other_ward_patient, staff=staff, role_in_assignment="nurse"
+        )
+
+        resp = self.client.get(self.URL, **self._auth(token))
+        self.assertEqual(self._hospital_numbers(resp), {"HN-WARD-C"})
+
+    def test_inactive_assignment_on_another_ward_is_not_included(self):
+        other_ward_patient = Patient.objects.create(
+            hospital_number="HN-WARD-D", full_name="Former Patient", ward=Ward.EMERGENCY
+        )
+        staff, token = self._login(
+            "docWardInactive", "pw-ward-3", "STF-WR3", Staff.Role.DOCTOR, ward=Ward.SURGICAL
+        )
+        PatientAssignment.objects.create(
+            patient=other_ward_patient, staff=staff, role_in_assignment="doctor", active=False
+        )
+
+        resp = self.client.get(self.URL, **self._auth(token))
+        self.assertEqual(self._hospital_numbers(resp), set())
+
+    def test_summary_carries_real_category_content(self):
+        patient = Patient.objects.create(
+            hospital_number="HN-WARD-E", full_name="Summary Target", ward=Ward.SURGICAL
+        )
+        # Category rows are created by PatientCreateView, not on model save,
+        # so a directly-created Patient has none -- make the two this asserts on.
+        PatientCategoryRecord.objects.create(
+            patient=patient, category=3, content={"blood_type": "O+"}
+        )
+        PatientCategoryRecord.objects.create(
+            patient=patient, category=6, content={"drug_allergies": "Penicillin"}
+        )
+        _staff, token = self._login(
+            "docWardSummary", "pw-ward-4", "STF-WR4", Staff.Role.DOCTOR, ward=Ward.SURGICAL
+        )
+
+        resp = self.client.get(self.URL, **self._auth(token))
+        summary = resp.data["patients"][0]["summary"]
+        self.assertEqual(summary["blood_type"], "O+")
+        self.assertEqual(summary["drug_allergies"], "Penicillin")
+        # Every key is always present, empty rather than missing.
+        self.assertEqual(summary["next_of_kin"], "")
+        self.assertIn("current_medications", summary)
+
+    def test_non_clinical_ward_roles_are_forbidden(self):
+        """Clerk/lab tech/pharmacist ceilings don't cover these categories."""
+        Patient.objects.create(hospital_number="HN-WARD-F", full_name="X", ward=Ward.SURGICAL)
+        for i, role in enumerate(
+            [Staff.Role.CLERK, Staff.Role.LAB_TECHNICIAN, Staff.Role.PHARMACIST]
+        ):
+            _staff, token = self._login(
+                f"wardRoleDenied{i}", f"pw-ward-role-{i}", f"STF-WRR{i}", role, ward=Ward.SURGICAL
+            )
+            resp = self.client.get(self.URL, **self._auth(token))
+            self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN, role)
+
+    def test_unauthenticated_is_rejected(self):
+        resp = self.client.get(self.URL)
+        self.assertIn(
+            resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+        )
+
+    def test_staff_with_no_ward_gets_only_assigned_patients(self):
+        Patient.objects.create(hospital_number="HN-WARD-G", full_name="Ward Patient", ward=Ward.SURGICAL)
+        assigned = Patient.objects.create(
+            hospital_number="HN-WARD-H", full_name="Assigned", ward=Ward.EMERGENCY
+        )
+        staff, token = self._login("docNoWard", "pw-ward-5", "STF-WR5", Staff.Role.DOCTOR, ward="")
+        PatientAssignment.objects.create(patient=assigned, staff=staff, role_in_assignment="doctor")
+
+        resp = self.client.get(self.URL, **self._auth(token))
+        self.assertEqual(self._hospital_numbers(resp), {"HN-WARD-H"})

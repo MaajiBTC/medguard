@@ -28,4 +28,13 @@ function verifyLedgerChain() {
   return request('/ledger/verify/');
 }
 
-export { getLedgerEntries, explainLedgerEntry, verifyLedgerChain };
+/** GET /api/ledger/my-activity/?year=&month= — the caller's OWN per-day
+ * record-access counts, for the Clinical dashboard's calendar card. Returns
+ * `{ year, month, days: { 'YYYY-MM-DD': { count, flagged } } }`; `flagged`
+ * means at least one event that day was something other than a clean
+ * STANDARD_ACCESS. Never includes patient identities or other staff. */
+function getMyActivityCalendar(year, month) {
+  return request(`/ledger/my-activity/?year=${year}&month=${month}`);
+}
+
+export { getLedgerEntries, explainLedgerEntry, verifyLedgerChain, getMyActivityCalendar };

@@ -3,7 +3,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from staff.permissions import IsSecurityOfficer
+from staff.permissions import IsClinicalStaff, IsSecurityOfficer
 
 from .gemini import GeminiError, explain_entry
 from .models import LedgerEntry
@@ -59,6 +59,64 @@ class LedgerFeedView(APIView):
 
         entries = entries.order_by("-sequence")[:PAGE_SIZE]
         return Response(LedgerEntrySerializer(entries, many=True).data)
+
+
+class MyActivityCalendarView(APIView):
+    """GET /api/ledger/my-activity/?year=&month= -- per-day counts of the
+    caller's OWN record-access events, for the Clinical dashboard's calendar
+    card (added 2026-09-19, per the user).
+
+    Deliberately narrow, because the rest of this app scopes Ledger reads to
+    a Security Officer: it is filtered to `request.auth.staff.staff_id` and
+    returns only dates, counts, and whether anything that day was flagged --
+    never patient identities, never another staff member's activity, never
+    the entries themselves. A clinician learning which days they themselves
+    touched records discloses nothing they didn't already do, which is what
+    makes this safe to open up; the same reasoning as the other
+    self-service endpoints (MyBaselineView, DeviceListView).
+    """
+
+    permission_classes = [IsClinicalStaff]
+
+    def get(self, request):
+        now = timezone.localtime()
+        try:
+            year = int(request.query_params.get("year", now.year))
+            month = int(request.query_params.get("month", now.month))
+        except ValueError:
+            return Response({"detail": "year and month must be integers."}, status=400)
+        if not 1 <= month <= 12:
+            return Response({"detail": "month must be between 1 and 12."}, status=400)
+
+        entries = LedgerEntry.objects.filter(
+            staff_id=request.auth.staff.staff_id,
+            occurred_at__year=year,
+            occurred_at__month=month,
+        ).values_list("occurred_at", "event_type")
+
+        days = {}
+        total = 0
+        flagged_total = 0
+        for occurred_at, event_type in entries:
+            # Grouped in the configured local timezone, so a day on the
+            # calendar matches the day the clinician actually experienced --
+            # occurred_at itself is stored UTC (see services.record_event).
+            key = timezone.localtime(occurred_at).date().isoformat()
+            day = days.setdefault(key, {"count": 0, "flagged_count": 0, "flagged": False})
+            day["count"] += 1
+            total += 1
+            if event_type != LedgerEntry.EventType.STANDARD_ACCESS:
+                day["flagged"] = True
+                day["flagged_count"] += 1
+                flagged_total += 1
+
+        return Response({
+            "year": year,
+            "month": month,
+            "days": days,
+            "total": total,
+            "flagged_total": flagged_total,
+        })
 
 
 class LedgerEntryExplainView(APIView):

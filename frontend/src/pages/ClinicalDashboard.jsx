@@ -1,5 +1,5 @@
 import { startAuthentication } from '@simplewebauthn/browser';
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 
 import { getCurrentSession } from '../api/auth';
 import { identifyFingerprint } from '../api/identity';
@@ -16,9 +16,11 @@ import {
   requestStepUpAssist,
   verifyStepUpWebAuthn,
 } from '../api/scoring';
+import { getMyActivityCalendar } from '../api/ledger';
 import { useContextualCapture } from '../capture/contextual/useContextualCapture';
 import { extractMinutiae } from '../offline/fingerprintExtraction';
 import { getCachedFingerprintBundle, refreshFingerprintBundle } from '../offline/fingerprintCache';
+import { getCachedWardSummaryFor, refreshWardSummaries } from '../offline/wardSummaryCache';
 import { FINGERPRINT_MATCH_THRESHOLD, similarityScore } from '../offline/fingerprintMatching';
 import { ROLE_CEILINGS, computeOfflineDecision, computePatientAssignmentStatus } from '../offline/scoringEngine';
 import {
@@ -31,7 +33,10 @@ import {
   refreshOfflineCache,
   trySync,
 } from '../offline/syncManager';
+import { PATIENT_STATUS_OPTIONS } from '../patientStatus';
 import { WARDS } from '../wards';
+import { HorizontalBarChart } from './LedgerCharts3D';
+import RoleAvatar from './RoleAvatar';
 import DashboardShell, { AlertIcon, PatientsIcon, SearchIcon } from './DashboardShell';
 
 // Offline Mode (build step 6) -- how often the pending-sync badge refreshes
@@ -43,6 +48,13 @@ import DashboardShell, { AlertIcon, PatientsIcon, SearchIcon } from './Dashboard
 const OFFLINE_SYNC_POLL_MS = 10000;
 
 const ASSIGNMENT_ROLES = new Set(['doctor', 'nurse']);
+
+// Sentinel for the ward chart's "All wards" option. Deliberately not '',
+// which would be falsy and so fall through activeWardCard's own
+// `cardWard || session.ward || ...` default back to the user's own ward.
+// Mapped to '' only when handing off to selectWardCategory(), where an
+// empty ward means "don't filter by ward" (see searchPatients).
+const ALL_WARDS = 'all';
 // Decision types where the session already has everything Break the Glass
 // could possibly add -- STANDARD_ACCESS/AUDITED_DEVIATION already grant full
 // role-permitted access, and EMERGENCY_OVERRIDE means it was already used.
@@ -273,6 +285,197 @@ function ColleagueRequestsPanel({ requests, error, actioningId, codes, setCodes,
   );
 }
 
+const DAY_HEADINGS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/**
+ * Calendar card (added 2026-09-19, per the user), laid out like the
+ * dashboard reference's own calendar -- month name, Sun-Sat headings,
+ * greyed leading/trailing days, a legend. The reference's dots mean
+ * appointment-slot availability, which CLAUDE.md excludes outright and
+ * which MedGuard has no data for; confirmed via `AskUserQuestion` that
+ * these mark the clinician's own record-access activity instead: plum for
+ * a clean day, amber where something that day was flagged (anything other
+ * than STANDARD_ACCESS). Data comes from GET /api/ledger/my-activity/,
+ * scoped server-side to the caller's own staff_id.
+ */
+function ActivityCalendarCard() {
+  const today = new Date();
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth()); // 0-indexed
+  const [days, setDays] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    getMyActivityCalendar(year, month + 1)
+      .then((data) => {
+        if (!cancelled) setDays(data.days || {});
+      })
+      .catch(() => {
+        // Non-critical decoration -- an unreachable ledger just means no
+        // dots, never a broken dashboard.
+        if (!cancelled) setDays({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [year, month]);
+
+  const step = (delta) => {
+    const next = new Date(year, month + delta, 1);
+    setYear(next.getFullYear());
+    setMonth(next.getMonth());
+  };
+
+  // Leading blanks so the 1st lands under its real weekday, then enough
+  // trailing blanks to finish the last row.
+  const firstWeekday = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = [
+    ...Array.from({ length: firstWeekday }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const pad = (n) => String(n).padStart(2, '0');
+
+  return (
+    <div className="calendar-card">
+      <div className="calendar-card-header">
+        <h3>Calendar</h3>
+        <div className="calendar-nav">
+          <button type="button" onClick={() => step(-1)} aria-label="Previous month">‹</button>
+          <button type="button" onClick={() => step(1)} aria-label="Next month">›</button>
+        </div>
+      </div>
+
+      {/* Month and legend share one row to save a line of height (the two
+          card rows have to leave the search bar above the fold). */}
+      <div className="calendar-subhead">
+        <span className="calendar-month">{MONTH_NAMES[month]} {year}</span>
+        <div className="calendar-legend">
+          <span><span className="calendar-dot is-clean" /> Activity</span>
+          <span><span className="calendar-dot is-flagged" /> Flagged</span>
+        </div>
+      </div>
+
+      <div className="calendar-grid">
+        {DAY_HEADINGS.map((d) => (
+          <span key={d} className="calendar-heading">{d}</span>
+        ))}
+        {cells.map((day, i) => {
+          if (day === null) return <span key={`blank-${i}`} className="calendar-cell is-empty" />;
+          const entry = days[`${year}-${pad(month + 1)}-${pad(day)}`];
+          const isToday =
+            day === today.getDate() &&
+            month === today.getMonth() &&
+            year === today.getFullYear();
+          return (
+            <span key={day} className={`calendar-cell${isToday ? ' is-today' : ''}`}>
+              {day}
+              {entry && (
+                <span
+                  className={`calendar-dot ${entry.flagged ? 'is-flagged' : 'is-clean'}`}
+                  title={`${entry.count} access event${entry.count === 1 ? '' : 's'}`}
+                />
+              )}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * KPI stat cards above the ward tiles (added 2026-09-19, per the user, from a
+ * hospital-dashboard reference image they shared). Only the *layout* pattern
+ * came from that reference -- its own cards (revenue, beds available,
+ * scheduled operations, appointments, calendar) are all things CLAUDE.md
+ * excludes outright, so these show access-control facts instead, which is what
+ * this dashboard is actually for. Every value is derived from data this page
+ * already fetches; no new endpoints.
+ */
+function ClinicalStatCards({
+  session,
+  assignedPatients,
+  wardCounts,
+  assistCount,
+  flaggedThisMonth,
+  showAssigned,
+}) {
+  const myWard = session?.ward || '';
+  const assignedInMyWard = myWard ? assignedPatients.filter((p) => p.ward === myWard).length : 0;
+  const totalInMyWard = myWard && wardCounts ? wardCounts.by_ward[myWard] ?? 0 : 0;
+
+  return (
+    <div className="clinical-stat-row">
+      <div className="clinical-stat-card">
+        <span className="clinical-stat-label">Total Patients</span>
+        <span className="clinical-stat-value">{wardCounts ? wardCounts.total : '—'}</span>
+        <span className="clinical-stat-sub">
+          <span>Across all wards</span>
+          {myWard && wardCounts && (
+            <span className="clinical-stat-accent">{totalInMyWard} in your ward</span>
+          )}
+        </span>
+      </div>
+
+      {showAssigned && (
+        <div className="clinical-stat-card">
+          <span className="clinical-stat-label">My Patients</span>
+          <span className="clinical-stat-value">{assignedPatients.length}</span>
+          <span className="clinical-stat-sub">
+            <span>Assigned to you</span>
+            {myWard && <span className="clinical-stat-accent">{assignedInMyWard} in your ward</span>}
+          </span>
+        </div>
+      )}
+
+      <div className="clinical-stat-card is-highlight">
+        <span className="clinical-stat-label">Duty Status</span>
+        <span className="clinical-stat-value is-text">
+          {session ? (session.on_duty ? 'On duty' : 'Off duty') : '—'}
+        </span>
+        <span className="clinical-stat-sub">
+          <span>{myWard ? wardLabel(myWard) : 'No ward assigned'}</span>
+          {session?.on_call && <span className="clinical-stat-accent">On call</span>}
+        </span>
+      </div>
+
+      {/* Stacked pair in the last slot, matching the reference's own
+          "Beds available" + "Scheduled Operations" column: a compact filled
+          card above a compact white one. Same idea the Admin dashboard's
+          .stat-card-group already uses. The reference's lower card is
+          scheduled operations, which CLAUDE.md excludes and MedGuard has no
+          data for -- confirmed via AskUserQuestion that it shows the
+          clinician's own flagged access events this month instead. */}
+      <div className="clinical-stat-pair">
+        <div className="clinical-stat-card is-highlight is-compact">
+          <span className="clinical-stat-label">Colleague Requests</span>
+          <span className="clinical-stat-compact-row">
+            <span className="clinical-stat-value">{assistCount}</span>
+            <span className="clinical-stat-note">
+              {assistCount > 0 ? 'Awaiting your approval' : 'None pending'}
+            </span>
+          </span>
+        </div>
+
+        <div className="clinical-stat-card is-compact">
+          <span className="clinical-stat-label">Flagged Events</span>
+          <span className="clinical-stat-compact-row">
+            <span className="clinical-stat-value">{flaggedThisMonth ?? '—'}</span>
+            <span className="clinical-stat-note">This month</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The real step-4 search -> view flow: search a patient, set them as the session's
  * target (useContextualCapture, already built for step 1), request a decision
@@ -342,10 +545,20 @@ function ClinicalDashboard({ staff, onLogout }) {
 
   const [session, setSession] = useState(null);
   const [assignedPatients, setAssignedPatients] = useState([]);
+  const [flaggedThisMonth, setFlaggedThisMonth] = useState(null);
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  // The default patient list under the search bar (added 2026-09-20, per the
+  // user). Without it a clerk -- or any role with no patient assignments --
+  // landed on a search bar with nothing beneath it and no way to browse.
+  const [browseResults, setBrowseResults] = useState([]);
+  const [browseLoading, setBrowseLoading] = useState(true);
+  // The query that was actually submitted, not what's currently typed --
+  // otherwise the list flips to an empty "Search results" on the first
+  // keystroke, before any search has run.
+  const [searchedQuery, setSearchedQuery] = useState('');
   // MedGuard Identity's fingerprint lookup dropdown (added 2026-09-14,
   // moved beside Search per the user -- was its own always-visible section
   // above "Find a patient").
@@ -356,8 +569,20 @@ function ClinicalDashboard({ staff, onLogout }) {
   const [selectedWard, setSelectedWard] = useState(null);
   const [wardCounts, setWardCounts] = useState(null);
   const [wardCountsError, setWardCountsError] = useState(null);
+  // Which ward the single slicer-driven ward card is showing (2026-09-19).
+  // Left blank until the user actually picks one so the effective value can
+  // fall back to their own ward once the session arrives -- resolved at
+  // render rather than in an effect, which would otherwise clobber a manual
+  // choice if the session resolved late.
+  const [cardWard, setCardWard] = useState('');
 
   const [selectedPatient, setSelectedPatient] = useState(null);
+  // Which list the open row was clicked in ('browse' | 'assigned' | null), so
+  // the record opens under THAT row. An assigned patient appears in both
+  // lists, so without this the panel would render twice on the page. null =
+  // opened some other way (a fingerprint match), which falls back to the foot
+  // of the page since there may be no matching row on screen at all.
+  const [detailSource, setDetailSource] = useState(null);
   const [decision, setDecision] = useState(null);
   const [records, setRecords] = useState(null);
   const [viewError, setViewError] = useState(null);
@@ -430,6 +655,19 @@ function ClinicalDashboard({ staff, onLogout }) {
     getPatientSummary()
       .then(setWardCounts)
       .catch((err) => setWardCountsError(errorMessage(err)));
+
+    // Current month specifically, so the stat card stays fixed on "this
+    // month" while the calendar card below is free to browse other months
+    // with its own fetch.
+    const now = new Date();
+    getMyActivityCalendar(now.getFullYear(), now.getMonth() + 1)
+      .then((data) => setFlaggedThisMonth(data.flagged_total ?? 0))
+      .catch(() => {});
+
+    searchPatients('')
+      .then(setBrowseResults)
+      .catch(() => setBrowseResults([]))
+      .finally(() => setBrowseLoading(false));
   }, [staff]);
 
   // Offline Mode -- keeps the header's pending-sync badge current and
@@ -455,12 +693,16 @@ function ClinicalDashboard({ staff, onLogout }) {
     // sync-retry timer above -- a full roster re-download every
     // OFFLINE_SYNC_POLL_MS would be far heavier than the small ledger sync
     // that timer exists for.
-    if (isOnline()) refreshFingerprintBundle().catch(() => {});
+    if (isOnline()) {
+      refreshFingerprintBundle().catch(() => {});
+      refreshWardSummaries().catch(() => {});
+    }
 
     const handleOnline = () => {
       setOnline(true);
       attemptSync();
       refreshFingerprintBundle().catch(() => {});
+      refreshWardSummaries().catch(() => {});
     };
     const handleOffline = () => setOnline(false);
 
@@ -480,9 +722,16 @@ function ClinicalDashboard({ staff, onLogout }) {
   const handleSearch = async (event) => {
     event.preventDefault();
     closePatientDetail();
+    const trimmed = query.trim();
+    setSearchedQuery(trimmed);
+    // Submitting an empty box is how you get back to the full list.
+    if (!trimmed && selectedWard === null) {
+      setResults([]);
+      return;
+    }
     setSearching(true);
     try {
-      setResults(await searchPatients(query, selectedWard || undefined));
+      setResults(await searchPatients(trimmed, selectedWard || undefined));
     } catch {
       setResults([]);
     } finally {
@@ -497,6 +746,7 @@ function ClinicalDashboard({ staff, onLogout }) {
   // list even after going back. Called by every navigation action below.
   const closePatientDetail = () => {
     setSelectedPatient(null);
+    setDetailSource(null);
     setDecision(null);
     setRecords(null);
     setViewError(null);
@@ -514,6 +764,7 @@ function ClinicalDashboard({ staff, onLogout }) {
     closePatientDetail();
     setSelectedWard(wardValue);
     setQuery('');
+    setSearchedQuery('');
     try {
       setResults(await searchPatients('', wardValue));
     } catch {
@@ -525,10 +776,108 @@ function ClinicalDashboard({ staff, onLogout }) {
     closePatientDetail();
     setSelectedWard(null);
     setQuery('');
+    setSearchedQuery('');
     setResults([]);
   };
 
-  const showingWards = selectedWard === null && !query.trim();
+  // Search narrows the patient list and nothing else (2026-09-20, per the
+  // user): it used to also gate the cards row, so typing a query blanked the
+  // ward chart, calendar and every other card, which read as searching the
+  // whole dashboard rather than searching patients.
+  const isSearching = Boolean(searchedQuery);
+  const inWardDrilldown = selectedWard !== null;
+  const showBrowseList = !isSearching && !inWardDrilldown;
+  const patientRows = showBrowseList ? browseResults : results;
+  const patientListHeading = isSearching
+    ? 'Search results'
+    : inWardDrilldown
+      ? 'Patients in this ward'
+      : 'All patients';
+
+  // Offline Mode's ward roster (added 2026-09-21, per the user) -- the
+  // fallback when a clinician opens a patient on their own ward that this
+  // device never cached a full record for. Shows the same minimal emergency
+  // summary the fingerprint path already renders (blood type, allergies,
+  // current medication, current diagnoses, next of kin), never the full
+  // 13-category record.
+  //
+  // The duty/assignment rules still apply here exactly as they do online:
+  // an off-duty, not-on-call clinician who isn't assigned to this patient is
+  // denied, so the 2026-09-20 rule doesn't quietly gain a hole whenever the
+  // network is down. Assignment status comes from scoringEngine.js's own
+  // computePatientAssignmentStatus so there's no second copy of that logic.
+  const openWardSummaryOffline = async (patient, cachedSession) => {
+    const notCached = {
+      detail: "This patient hasn't been made available offline yet — view them once while connected first.",
+    };
+    const staff = cachedSession.staff;
+
+    // Doctors and nurses only -- the summary spans record categories a
+    // clerk or lab technician may never see (see CLAUDE.md's role table);
+    // the backend refuses to hand them a roster at all, so this should
+    // never have one to find, but the check is cheap and explicit.
+    if (!staff || !ASSIGNMENT_ROLES.has(staff.role)) {
+      setViewError(notCached);
+      return;
+    }
+
+    const entry = await getCachedWardSummaryFor(patient.id);
+    if (!entry) {
+      setViewError(notCached);
+      return;
+    }
+
+    const assignmentStatus = computePatientAssignmentStatus({
+      staffRole: staff.role,
+      staffWard: staff.ward,
+      patientWard: entry.patient.ward,
+      patientId: patient.id,
+      assignedPatientIds: new Set(cachedSession.assignedPatientIds || []),
+    });
+    const effectivelyOnDuty = staff.on_duty || staff.on_call;
+    const allowed =
+      assignmentStatus === 'assigned' ||
+      effectivelyOnDuty ||
+      cachedSession.disasterModeActive;
+
+    if (allowed) {
+      setEmergencySummaryOnly(entry.summary);
+    } else {
+      // No `score` field at all -- nothing was scored. The denial renderer
+      // handles a scoreless decision (see its comment) rather than printing
+      // a number that was never computed.
+      setDecision({
+        decision_type: 'ACCESS_DENIED',
+        granted_categories: [],
+        role_rule_path: 'off_duty_same_ward_denied',
+        computed_offline: true,
+      });
+      setViewError({
+        detail:
+          'You are off duty, not on call, and not assigned to this patient — '
+          + 'their emergency summary is not available offline. Break the Glass once reconnected.',
+      });
+    }
+
+    // Recorded either way, like every other offline access (per the user).
+    // REDUCED_ACCESS is the honest label of the five pinned event types --
+    // genuinely less than the role ceiling was released -- and score stays
+    // null because nothing was scored: this is a rule outcome, not a band.
+    await queueOfflineEvent({
+      eventType: allowed ? 'REDUCED_ACCESS' : 'ACCESS_DENIED',
+      patientHospitalNumber: patient.hospital_number,
+      details: {
+        score: null,
+        score_band: null,
+        granted_categories: [],
+        role_rule_path: allowed ? '' : 'off_duty_same_ward_denied',
+        ward_emergency_summary: true,
+        assignment_status: assignmentStatus,
+        computed_offline: true,
+      },
+    });
+    setOfflinePendingCount(await queueLength());
+  };
 
   // Offline Mode -- serves a decision + records from the last-synced cache
   // when there's genuinely no network to reach, rather than just failing.
@@ -541,26 +890,38 @@ function ClinicalDashboard({ staff, onLogout }) {
       getCachedSession(),
     ]);
 
-    if (!cachedSession || !cachedSession.sessionFactors) {
+    if (!cachedSession) {
       setViewError({
         detail: 'No offline data available yet for this account — connect and view a patient once first.',
       });
       return;
     }
     if (!cachedPatient) {
-      // A fingerprint match against the on-device roster can find a
-      // patient this device has never opened before (the exact
-      // unconscious/unidentified-stranger case this feature exists for) --
-      // there's no full cached record to fall back to, but the roster
-      // bundle already carries a minimal emergency summary, so show that
-      // instead of a dead-end error.
+      // No full record cached for this patient. Two fallbacks carry a
+      // minimal emergency summary instead of dead-ending, in order:
+      //
+      // 1. A fingerprint match against the on-device roster, which can find
+      //    a patient this device has never opened before (the exact
+      //    unconscious/unidentified-stranger case that feature exists for).
+      //    Its summary arrives via options.emergencySummary.
+      // 2. The ward roster (added 2026-09-21) -- a patient on this
+      //    clinician's own ward they simply hadn't opened yet this shift.
+      //
+      // Note this sits BEFORE the sessionFactors guard below: those factors
+      // exist only to compute a weighted score, which a minimal summary
+      // doesn't need. Requiring them here would have blocked a device that
+      // has a roster but hasn't completed an online decide() yet.
       if (options.emergencySummary) {
         setEmergencySummaryOnly(options.emergencySummary);
-      } else {
-        setViewError({
-          detail: "This patient hasn't been made available offline yet — view them once while connected first.",
-        });
+        return;
       }
+      await openWardSummaryOffline(patient, cachedSession);
+      return;
+    }
+    if (!cachedSession.sessionFactors) {
+      setViewError({
+        detail: 'No offline data available yet for this account — connect and view a patient once first.',
+      });
       return;
     }
 
@@ -738,13 +1099,12 @@ function ClinicalDashboard({ staff, onLogout }) {
       (cachedStaff.role === 'doctor' || cachedStaff.role === 'nurse') &&
       !effectivelyOnDuty &&
       assignmentStatus === 'not_assigned_not_same_ward' &&
-      !disasterModeActive &&
-      overrideCategory !== 'cross_coverage';
+      !disasterModeActive;
 
     if (blocked) {
       setOverrideError({
         detail:
-          'Break the Glass is unavailable offline for an off-duty session with no connection to this patient — select "Cross-coverage" if that applies, or try again once reconnected.',
+          'Break the Glass is unavailable: you are off duty, not on call, and have no connection (assignment or ward) to this patient.',
       });
       return;
     }
@@ -814,7 +1174,15 @@ function ClinicalDashboard({ staff, onLogout }) {
   // role-permitted access, and EMERGENCY_OVERRIDE means BTG was already used
   // for this session/patient. Only REDUCED_ACCESS and ACCESS_DENIED (or no
   // decision yet) leave something for it to actually rescue.
-  const hideBreakGlass = decision && FULL_ACCESS_DECISION_TYPES.has(decision.decision_type);
+  // Also hidden outright (2026-09-20, per the user) where the override would
+  // be refused anyway: off duty, not on call, and no connection to this
+  // patient at all. `break_glass_blocked` comes from the decide response so
+  // the UI and EmergencyOverrideView's own gate can't drift apart. Note this
+  // also takes the cross-coverage self-attestation off the screen -- that
+  // path now exists only at the API level.
+  const hideBreakGlass =
+    decision &&
+    (FULL_ACCESS_DECISION_TYPES.has(decision.decision_type) || decision.break_glass_blocked);
 
   // Offline Mode -- shown in the header while disconnected or while queued
   // events from an earlier disconnection still haven't synced.
@@ -831,148 +1199,70 @@ function ClinicalDashboard({ staff, onLogout }) {
   ];
   const pageTitle = activePage === 'requests' ? 'Colleague Requests' : 'Patients';
 
-  return (
-    <DashboardShell
-      navItems={clinicalNavItems}
-      activeItem={activePage}
-      onNavChange={setActivePage}
-      staff={staff}
-      onLogout={onLogout}
-      title={pageTitle}
-      offlineStatus={offlineStatus}
-    >
-      {activePage === 'requests' && (
-        <ColleagueRequestsPanel
-          requests={assistRequests}
-          error={assistError}
-          actioningId={assistActioningId}
-          codes={assistCodes}
-          setCodes={setAssistCodes}
-          rowErrors={assistRowErrors}
-          onApprove={handleApproveAssist}
-          onDecline={handleDeclineAssist}
-        />
-      )}
+  // Defaults to the clinician's own ward (the one they're most likely to
+  // want) and falls back to the first ward for staff with none set.
+  const activeWardCard =
+    cardWard || (WARDS.some((w) => w.value === session?.ward) ? session.ward : WARDS[0].value);
 
-      {activePage === 'patients' && (
-      <>
-      {session && (
-        <p className="meta-line">
-          {session.on_duty ? 'On duty' : 'Off duty'}
-          {session.ward ? ` · ${session.ward}` : ''}
-        </p>
-      )}
+  // Clicking View on the row that's already open closes it again (added
+  // 2026-09-20, per the user). Now that the panel renders directly beneath
+  // its own row, the same button is the natural way to collapse it.
+  const togglePatient = (patient, source) => {
+    if (selectedPatient && selectedPatient.id === patient.id) {
+      closePatientDetail();
+      return;
+    }
+    setDetailSource(source);
+    openPatient(patient);
+  };
 
-      <section>
-        <h2>Find a patient</h2>
+  // Search + fingerprint lookup, extracted so it can sit *below* the ward
+  // tiles in the default view (per the user, 2026-09-19) but back above the
+  // list once a ward is picked or a search is running -- there are no tiles
+  // to lead with in that state. Same conditional placement AdminDashboard's
+  // StaffPanel/PatientPanel already use for their own searchRow.
+  const searchBlock = (
+    <>
+      <div className="search-row">
+        <form className="search-bar" onSubmit={handleSearch} role="search">
+          <SearchIcon />
+          <input
+            type="text"
+            placeholder={selectedWard ? 'Search within this ward' : 'Hospital number or name'}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </form>
+        <button type="button" className="btn-primary" onClick={handleSearch} disabled={searching}>
+          {searching ? 'Searching…' : 'Search'}
+        </button>
+        <button
+          type="button"
+          className="btn-secondary btn-outline-bold"
+          onClick={() => setFingerprintOpen((open) => !open)}
+        >
+          Search by fingerprint
+        </button>
+      </div>
 
-        {selectedWard !== null && (
-          <button type="button" className="back-link" onClick={backToWards}>
-            ← Back to wards
-          </button>
-        )}
+      <FingerprintLookup
+        open={fingerprintOpen}
+        online={online}
+        // No source: an emergency match can resolve to a patient who isn't in
+        // either list, so the panel falls back to the foot of the page.
+        onView={(patient, options) => {
+          setDetailSource(null);
+          openPatient(patient, options);
+        }}
+        onClose={() => setFingerprintOpen(false)}
+      />
+    </>
+  );
 
-        <div className="search-row">
-          <form className="search-bar" onSubmit={handleSearch} role="search">
-            <SearchIcon />
-            <input
-              type="text"
-              placeholder={selectedWard ? 'Search within this ward' : 'Hospital number or name'}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </form>
-          <button type="button" className="btn-primary" onClick={handleSearch} disabled={searching}>
-            {searching ? 'Searching…' : 'Search'}
-          </button>
-          <button
-            type="button"
-            className="btn-secondary btn-outline-bold"
-            onClick={() => setFingerprintOpen((open) => !open)}
-          >
-            Search by fingerprint
-          </button>
-        </div>
-
-        <FingerprintLookup
-          open={fingerprintOpen}
-          online={online}
-          onView={openPatient}
-          onClose={() => setFingerprintOpen(false)}
-        />
-
-        {wardCountsError && <p role="alert" className="dev-error">{wardCountsError}</p>}
-
-        {showingWards ? (
-          <>
-            <div className="category-grid">
-              {WARDS.map((w) => (
-                <button
-                  key={w.value}
-                  type="button"
-                  className="category-tile"
-                  onClick={() => selectWardCategory(w.value)}
-                >
-                  <span className="category-tile-label">{w.label}</span>
-                  <span className="category-tile-count">
-                    {wardCounts ? wardCounts.by_ward[w.value] ?? 0 : '—'}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            {assignedPatients.length > 0 && (
-              <div className="assigned-to-you">
-                <h3>Assigned to you</h3>
-                {assignedPatients.map((p) => (
-                  <div className="card-row" key={`${p.patient_id}-${p.role_in_assignment}`}>
-                    <div className="card-row-main">
-                      <div className="name-line">{p.full_name}</div>
-                      <div className="meta-line">
-                        {p.hospital_number} · {p.role_in_assignment}
-                      </div>
-                    </div>
-                    <div className="card-row-actions">
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        onClick={() =>
-                          openPatient({
-                            id: p.patient_id,
-                            hospital_number: p.hospital_number,
-                            full_name: p.full_name,
-                          })
-                        }
-                      >
-                        View
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          results.map((p) => (
-            <div className="card-row" key={p.id}>
-              <div className="card-row-main">
-                <div className="name-line">{p.full_name}</div>
-                <div className="meta-line">
-                  {p.hospital_number}
-                  {p.ward ? ` · ${wardLabel(p.ward)}` : ' · Unassigned'}
-                </div>
-              </div>
-              <div className="card-row-actions">
-                <button type="button" className="btn-secondary" onClick={() => openPatient(p)}>
-                  View
-                </button>
-              </div>
-            </div>
-          ))
-        )}
-      </section>
-
-      {selectedPatient && (
+  // Rendered inline under whichever row was clicked (moved 2026-09-20, per
+  // the user) instead of at the foot of the page -- on a long ward list the
+  // record used to open far below the row you picked, off-screen.
+  const patientDetailPanel = selectedPatient && (
         <section className="panel-card">
           <h2>
             {selectedPatient.full_name} ({selectedPatient.hospital_number})
@@ -1015,7 +1305,12 @@ function ClinicalDashboard({ staff, onLogout }) {
 
           {decision && decision.decision_type === 'ACCESS_DENIED' && (
             <p role="alert" className="access-denied">
-              Access denied. Score: {decision.score.toFixed(0)}%.
+              {/* A rule-based denial carries no score at all (the offline
+                  ward-summary path, 2026-09-21) -- the weighted score is
+                  never computed when a role rule decides the outcome, so
+                  "Score: null%" would be both a crash and a lie. */}
+              Access denied
+              {typeof decision.score === 'number' ? `. Score: ${decision.score.toFixed(0)}%.` : '.'}
             </p>
           )}
 
@@ -1135,7 +1430,7 @@ function ClinicalDashboard({ staff, onLogout }) {
                         Select a reason category…
                       </option>
                       <option value="clinical_emergency">Clinical emergency / direct patient care</option>
-                      <option value="cross_coverage">Cross-coverage (covering an unrostered shift)</option>
+                      <option value="cross_coverage">Cross-coverage (covering for a colleague)</option>
                       <option value="other">Other</option>
                     </select>
                   </label>
@@ -1204,7 +1499,245 @@ function ClinicalDashboard({ staff, onLogout }) {
             </div>
           )}
         </section>
+  );
+
+  // Will a visible row actually host the panel? Must mirror the two inline
+  // render conditions below exactly, or the record renders nowhere. The row
+  // can be missing even with a source set -- e.g. the assigned list hides
+  // itself while drilling into a ward.
+  const assignedListShown = assignedPatients.length > 0 && !inWardDrilldown;
+  const detailHasInlineHome =
+    Boolean(selectedPatient) &&
+    ((detailSource === 'browse' && patientRows.some((p) => p.id === selectedPatient.id)) ||
+      (detailSource === 'assigned' &&
+        assignedListShown &&
+        assignedPatients.some((p) => p.patient_id === selectedPatient.id)));
+
+  return (
+    <DashboardShell
+      navItems={clinicalNavItems}
+      activeItem={activePage}
+      onNavChange={setActivePage}
+      staff={staff}
+      onLogout={onLogout}
+      title={pageTitle}
+      offlineStatus={offlineStatus}
+    >
+      {activePage === 'requests' && (
+        <ColleagueRequestsPanel
+          requests={assistRequests}
+          error={assistError}
+          actioningId={assistActioningId}
+          codes={assistCodes}
+          setCodes={setAssistCodes}
+          rowErrors={assistRowErrors}
+          onApprove={handleApproveAssist}
+          onDecline={handleDeclineAssist}
+        />
       )}
+
+      {activePage === 'patients' && (
+      <>
+      {/* Replaces the bare on-duty/ward <p> that used to sit here (moved out
+          of the header 2026-08-30): the Duty Status card below shows strictly
+          more -- on-call state and a proper ward label, not the raw value. */}
+      <ClinicalStatCards
+        session={session}
+        assignedPatients={assignedPatients}
+        wardCounts={wardCounts}
+        assistCount={assistRequests.length}
+        flaggedThisMonth={flaggedThisMonth}
+        showAssigned={ASSIGNMENT_ROLES.has(staff.role)}
+      />
+
+      {/* No visible heading here (removed 2026-09-19, per the user) -- the
+          ward tiles now follow the stat cards directly. aria-label keeps the
+          section named for screen readers, which the dropped <h2> had been
+          doing. */}
+      <section aria-label="Find a patient">
+        {selectedWard !== null && (
+          <button type="button" className="back-link" onClick={backToWards}>
+            ← Back to wards
+          </button>
+        )}
+
+        {wardCountsError && <p role="alert" className="dev-error">{wardCountsError}</p>}
+
+        {!inWardDrilldown && (
+          <>
+            <div className="ward-cards-row">
+            {/* One ward card driven by a slicer (2026-09-19, per the user),
+                replacing the four fixed tiles: pick a ward, see that ward's
+                patients broken down by status. Not a <button> wrapping the
+                <select>: interactive content can't nest inside a button, so
+                the card is a plain div with its own explicit View action. */}
+            <div className="ward-chart-card">
+              <h3 className="ward-chart-title">Patient Ward</h3>
+              <div className="ward-chart-header">
+                <select
+                  className="slicer-input"
+                  value={activeWardCard}
+                  onChange={(e) => setCardWard(e.target.value)}
+                  aria-label="Choose a ward"
+                >
+                  <option value={ALL_WARDS}>All wards</option>
+                  {WARDS.map((w) => (
+                    <option key={w.value} value={w.value}>{w.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 'unassigned' is filtered out here (per the user) but stays
+                  in the shared list, which the Admin dashboard still needs
+                  for its own status chart and slicer. */}
+              <HorizontalBarChart
+                rows={PATIENT_STATUS_OPTIONS.filter((s) => s.value !== 'unassigned').map((s) => ({
+                  key: s.value,
+                  label: s.label,
+                  count:
+                    activeWardCard === ALL_WARDS
+                      ? wardCounts?.by_status?.[s.value] ?? 0
+                      : wardCounts?.by_ward_status?.[activeWardCard]?.[s.value] ?? 0,
+                  color: s.color,
+                }))}
+              />
+
+              <button
+                type="button"
+                className="btn-secondary ward-chart-view"
+                onClick={() =>
+                  selectWardCategory(activeWardCard === ALL_WARDS ? '' : activeWardCard)
+                }
+              >
+                View patients
+              </button>
+            </div>
+
+            {/* Two-column list beside the ward chart (2026-09-19, per the
+                user), modelled on the "Well Experienced Doctors /
+                Specializations" card in the dashboard reference they
+                shared: paired column headings, one row per entry divided by
+                hairlines, right-hand value in an accent color. Doctor/nurse
+                only -- assignment isn't a concept for the other roles, so
+                this would always be empty for them. */}
+            {ASSIGNMENT_ROLES.has(staff.role) && (
+              <div className="patient-list-card">
+                <div className="patient-list-header">
+                  <span>My Patients</span>
+                  <span>Ward</span>
+                </div>
+                {assignedPatients.length === 0 ? (
+                  <p className="meta-line">No patients assigned to you.</p>
+                ) : (
+                  assignedPatients.map((p) => (
+                    <div
+                      className="patient-list-row"
+                      key={`${p.patient_id}-${p.role_in_assignment}`}
+                    >
+                      <span className="patient-list-person">
+                        <span className="patient-list-avatar">
+                          <RoleAvatar role="patient" />
+                        </span>
+                        <span className="patient-list-name">{p.full_name}</span>
+                      </span>
+                      <span className="patient-list-ward">
+                        {p.ward ? wardLabel(p.ward) : 'Unassigned'}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            <ActivityCalendarCard />
+            </div>
+          </>
+        )}
+
+        {searchBlock}
+
+        {/* One patient list, whose contents swap: every patient by default,
+            the search results while a query is active, or a single ward's
+            patients after drilling in. Everything above it stays put. */}
+        <div className="assigned-to-you">
+          <h3>{patientListHeading}</h3>
+          {showBrowseList && browseLoading && <p className="meta-line">Loading patients…</p>}
+          {patientRows.length === 0 && !(showBrowseList && browseLoading) && (
+            <p className="meta-line">
+              {isSearching ? 'No patients match that search.' : 'No patients on file.'}
+            </p>
+          )}
+          {patientRows.map((p) => (
+            <Fragment key={p.id}>
+              <div className="card-row">
+                <div className="card-row-main">
+                  <div className="name-line">{p.full_name}</div>
+                  <div className="meta-line">
+                    {p.hospital_number}
+                    {p.ward ? ` · ${wardLabel(p.ward)}` : ' · Unassigned'}
+                  </div>
+                </div>
+                <div className="card-row-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => togglePatient(p, 'browse')}
+                  >
+                    {selectedPatient?.id === p.id ? 'Close' : 'View'}
+                  </button>
+                </div>
+              </div>
+              {detailSource === 'browse' && selectedPatient?.id === p.id && patientDetailPanel}
+            </Fragment>
+          ))}
+        </div>
+
+        {assignedPatients.length > 0 && !inWardDrilldown && (
+          <div className="assigned-to-you">
+            <h3>Assigned to you</h3>
+            {assignedPatients.map((p) => (
+              <Fragment key={`${p.patient_id}-${p.role_in_assignment}`}>
+                <div className="card-row">
+                  <div className="card-row-main">
+                    <div className="name-line">{p.full_name}</div>
+                    <div className="meta-line">
+                      {p.hospital_number} · {p.role_in_assignment}
+                    </div>
+                  </div>
+                  <div className="card-row-actions">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() =>
+                        togglePatient(
+                          {
+                            id: p.patient_id,
+                            hospital_number: p.hospital_number,
+                            full_name: p.full_name,
+                          },
+                          'assigned',
+                        )
+                      }
+                    >
+                      {selectedPatient?.id === p.patient_id ? 'Close' : 'View'}
+                    </button>
+                  </div>
+                </div>
+                {detailSource === 'assigned' &&
+                  selectedPatient?.id === p.patient_id &&
+                  patientDetailPanel}
+              </Fragment>
+            ))}
+          </div>
+        )}
+
+        {/* Fallback home for the panel when no visible row can host it --
+            an emergency fingerprint match can resolve to a patient who
+            isn't in either list, which is precisely the point of that
+            lookup. Without this the record would render nowhere. */}
+        {!detailHasInlineHome && patientDetailPanel}
+      </section>
+
       </>
       )}
     </DashboardShell>

@@ -63,8 +63,11 @@ class AccessDecision(models.Model):
     score_band = models.CharField(max_length=32, choices=ScoreBand.choices, null=True, blank=True)
     decision_type = models.CharField(max_length=32, choices=DecisionType.choices)
     granted_categories = models.JSONField(default=list, blank=True)
-    # Role-specific rule path (e.g. nurse's "assigned"/"same_ward"/"neither", doctor's
-    # "off_duty_denied") -- empty string when no role-specific rule applied.
+    # Role-specific rule path: nurse's "assigned"/"same_ward"/"neither", doctor's
+    # "off_duty_denied" (off duty, unassigned, not their ward -- Break the Glass
+    # blocked too) or "off_duty_same_ward_denied" (off duty, unassigned, but their
+    # own ward -- Break the Glass still available). Empty string when no
+    # role-specific rule applied and the plain weighted score decided it.
     role_rule_path = models.CharField(max_length=32, blank=True, default="")
     factor_breakdown = models.JSONField(default=dict, blank=True)
 

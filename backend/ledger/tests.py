@@ -414,3 +414,80 @@ class LedgerVerifyViewTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertTrue(resp.data["valid"])
         self.assertEqual(resp.data["entries_checked"], 0)
+
+
+class MyActivityCalendarViewTests(APITestCase):
+    """/api/ledger/my-activity/ -- self-service per-day counts for the
+    Clinical dashboard's calendar card (added 2026-09-19). Scoped to the
+    caller's own staff_id, and returns no patient identities at all."""
+
+    databases = {"default", "ledger"}
+
+    def _login(self, username, password, staff_id, role):
+        user = User.objects.create_user(username=username, password=password)
+        staff = Staff.objects.create(user=user, staff_id=staff_id, full_name=username, role=role)
+        resp = self.client.post(
+            "/api/access/login/",
+            {"username": username, "password": password, "device_id": f"device-{staff_id}", "device_type": "desktop"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return staff, resp.data["token"]
+
+    def _auth(self, token):
+        return {"HTTP_AUTHORIZATION": f"Bearer {token}"}
+
+    def test_returns_own_counts_and_flags_non_standard_days(self):
+        doctor, token = self._login("docCal1", "pw-cal-1", "STF-CAL900", Staff.Role.DOCTOR)
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=doctor)
+        record_event(event_type=LedgerEntry.EventType.ACCESS_DENIED, staff=doctor)
+
+        resp = self.client.get("/api/ledger/my-activity/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        today = timezone.localtime().date().isoformat()
+        self.assertEqual(resp.data["days"][today]["count"], 2)
+        self.assertTrue(resp.data["days"][today]["flagged"])
+        # Only the ACCESS_DENIED counts as flagged, not the clean access.
+        self.assertEqual(resp.data["days"][today]["flagged_count"], 1)
+        self.assertEqual(resp.data["total"], 2)
+        self.assertEqual(resp.data["flagged_total"], 1)
+
+    def test_clean_day_is_not_flagged(self):
+        doctor, token = self._login("docCal2", "pw-cal-2", "STF-CAL901", Staff.Role.DOCTOR)
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=doctor)
+
+        resp = self.client.get("/api/ledger/my-activity/", **self._auth(token))
+        today = timezone.localtime().date().isoformat()
+        self.assertEqual(resp.data["days"][today]["count"], 1)
+        self.assertFalse(resp.data["days"][today]["flagged"])
+        self.assertEqual(resp.data["flagged_total"], 0)
+
+    def test_never_includes_another_staff_members_activity(self):
+        _doctor, token = self._login("docCal3", "pw-cal-3", "STF-CAL902", Staff.Role.DOCTOR)
+        other = self._login("docCal4", "pw-cal-4", "STF-CAL903", Staff.Role.DOCTOR)[0]
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=other)
+
+        resp = self.client.get("/api/ledger/my-activity/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["days"], {})
+
+    def test_other_month_excluded(self):
+        doctor, token = self._login("docCal5", "pw-cal-5", "STF-CAL904", Staff.Role.DOCTOR)
+        record_event(event_type=LedgerEntry.EventType.STANDARD_ACCESS, staff=doctor)
+
+        now = timezone.localtime()
+        other_year, other_month = (now.year - 1, now.month)
+        resp = self.client.get(
+            f"/api/ledger/my-activity/?year={other_year}&month={other_month}", **self._auth(token)
+        )
+        self.assertEqual(resp.data["days"], {})
+
+    def test_rejects_bad_month(self):
+        _doctor, token = self._login("docCal6", "pw-cal-6", "STF-CAL905", Staff.Role.DOCTOR)
+        resp = self.client.get("/api/ledger/my-activity/?month=13", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_non_clinical_staff_forbidden(self):
+        _officer, token = self._login("secCal1", "pw-cal-7", "STF-CAL906", Staff.Role.SECURITY_OFFICER)
+        resp = self.client.get("/api/ledger/my-activity/", **self._auth(token))
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)

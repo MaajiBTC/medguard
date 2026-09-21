@@ -168,10 +168,18 @@ class EmergencyOverrideView(APIView):
     looking at this patient. Every other combination (on duty/on call regardless of
     assignment; off duty but same ward; off duty but assigned) still has BTG
     available, including a nurse's existing "neither assigned nor same-ward but on
-    duty" rescue path. The block is also lifted entirely by selecting the
-    "cross_coverage" reason_category (self-attested, no location/time verification --
-    see EmergencyOverrideRequestSerializer) or while Disaster/Mass Casualty Mode is
-    active (see disaster_mode.is_disaster_mode_active()).
+    duty" rescue path. The only thing that lifts the block is Disaster/Mass Casualty
+    Mode (see disaster_mode.is_disaster_mode_active()) -- hospital-wide, admin-set,
+    and audited in its own table.
+
+    Selecting the "cross_coverage" reason_category used to lift it too (self-attested,
+    2026-08-29). Removed 2026-09-20, per the user: "a staff cannot cross cover when
+    he's not on duty or not on call" -- someone genuinely covering a shift is on duty
+    or on call, and if the roster hasn't caught up, an admin setting either flag is
+    the honest fix, not a checkbox the requester ticks about themselves. The category
+    itself stays (see EmergencyOverrideRequestSerializer): an on-duty clinician
+    covering a colleague's patients still has a real reason to record, it just no
+    longer opens a door.
 
     Deliberately does NOT check contextual.target_patient_id the way DecideView does
     -- the whole point of an emergency path is that it must still work even if the
@@ -206,17 +214,13 @@ class EmergencyOverrideView(APIView):
             not effectively_on_duty
             and assignment_status == ContextualCapture.PatientAssignmentStatus.NOT_ASSIGNED_NOT_SAME_WARD
         )
-        if (
-            blocked
-            and reason_category != EmergencyOverrideRequestSerializer.CROSS_COVERAGE
-            and not is_disaster_mode_active()
-        ):
+        if blocked and not is_disaster_mode_active():
             return Response(
                 {
                     "detail": (
-                        "Break the Glass is not available: you are off duty and have "
-                        "no connection (assignment or ward) to this patient. Select "
-                        "\"Cross-coverage\" if you are covering an unrostered shift."
+                        "Break the Glass is not available: you are off duty, not on "
+                        "call, and have no connection (assignment or ward) to this "
+                        "patient."
                     )
                 },
                 status=status.HTTP_403_FORBIDDEN,
